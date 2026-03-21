@@ -1,0 +1,4 @@
+@echo off
+cd /d F:\Dropbox\Apps\CollectCore\backend
+call .venv\Scripts\activate
+uvicorn main:app --reload --port 8000

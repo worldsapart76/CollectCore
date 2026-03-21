@@ -1,0 +1,16 @@
+# Python virtualenv + cache
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node dependencies
+frontend/node_modules/
+
+# Local app data (do NOT commit)
+images/
+data/
+exports/
+
+# OS junk
+.DS_Store
+Thumbs.db
