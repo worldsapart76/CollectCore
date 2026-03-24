@@ -1,3 +1,3 @@
 @echo off
-cd /d F:\Dropbox\Apps\CollectCorefrontend
-npm run dev
+cd /d F:\Dropbox\Apps\CollectCore\frontend
+npm run dev -- --port 5181

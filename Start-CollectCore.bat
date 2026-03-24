@@ -1,6 +1,5 @@
 @echo off
-echo Starting Photocard Tracker...
-
-start "Backend" cmd /k "cd /d F:\Dropbox\Apps\CollectCore\backend && .venv\Scripts\activate && uvicorn main:app --reload --port 8000"
-
-start "Frontend" cmd /k "cd /d F:\Dropbox\Apps\CollectCore\frontend && npm run dev"
+start "CollectCore Backend" powershell -NoExit -Command "Set-Location -Path 'F:\Dropbox\Apps\CollectCore\backend'; & '.\.venv\Scripts\python.exe' -m uvicorn main:app --reload --port 8001"
+start "CollectCore Frontend" powershell -NoExit -Command "Set-Location -Path 'F:\Dropbox\Apps\CollectCore\frontend'; npm run dev -- --port 5181"
+timeout /t 6 /nobreak >nul
+start "" "http://localhost:5181"

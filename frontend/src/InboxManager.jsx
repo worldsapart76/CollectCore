@@ -1,670 +1,345 @@
-import { useEffect, useState } from "react";
-import { getMembersForGroup } from "./utils/groupUtils";
+import { useEffect, useMemo, useState } from "react";
 import {
-  fetchInbox,
-  fetchSubcategoryOptions,
-  fetchSourceOptions,
-  ingestFront,
-  fetchCardCandidates,
-  attachBack,
+  fetchPhotocardGroups,
+  fetchPhotocardMembers,
+  fetchPhotocardSourceOrigins,
+  fetchTopLevelCategories,
+  createPhotocard,
+  listPhotocards,
+  createPhotocardSourceOrigin,
 } from "./api";
 
-const API = "http://127.0.0.1:8000";
-
 export default function InboxManager() {
-  const [files, setFiles] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const COLLECTION_TYPE_ID = 1;
 
-  const [mode, setMode] = useState("front");
+  const [groups, setGroups] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [sourceOrigins, setSourceOrigins] = useState([]);
+  const [photocards, setPhotocards] = useState([]);
 
-  const [groupCode, setGroupCode] = useState("skz");
-  const [member, setMember] = useState("");
-  const [topCategory, setTopCategory] = useState("");
-  const [subcategory, setSubcategory] = useState("");
-  const [subcategoryOptions, setSubcategoryOptions] = useState([]);
-
+  const [groupId, setGroupId] = useState("");
+  const [topLevelCategoryId, setTopLevelCategoryId] = useState("");
+  const [ownershipStatusId, setOwnershipStatusId] = useState("1");
+  const [sourceOriginId, setSourceOriginId] = useState("");
   const [version, setVersion] = useState("");
-  const [versionOptions, setVersionOptions] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
 
-  const [ownershipStatus, setOwnershipStatus] = useState("Owned");
-  const [price, setPrice] = useState("");
+  const [showAddSourceOrigin, setShowAddSourceOrigin] = useState(false);
+  const [newSourceOriginName, setNewSourceOriginName] = useState("");
+  const [creatingSourceOrigin, setCreatingSourceOrigin] = useState(false);
+  const [sourceOriginError, setSourceOriginError] = useState("");
 
-  const [includeCardsWithBack, setIncludeCardsWithBack] = useState(false);
-  const [candidates, setCandidates] = useState([]);
-  const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+  const [loadingFormData, setLoadingFormData] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const [message, setMessage] = useState("");
-  const [warningData, setWarningData] = useState(null);
-  const [loadingCandidates, setLoadingCandidates] = useState(false);
-
-  const memberOptions = getMembersForGroup(groupCode);
-
-  function clearTransientState() {
-    setCandidates([]);
-    setSelectedCandidateId(null);
-    setMessage("");
-    setWarningData(null);
-  }
-
-  async function loadInbox() {
-    const data = await fetchInbox();
-    const newFiles = data.files || [];
-    setFiles(newFiles);
-
-    if (newFiles.length === 0) {
-      setCurrentIndex(0);
-    } else if (currentIndex > newFiles.length - 1) {
-      setCurrentIndex(newFiles.length - 1);
-    }
-  }
-
-async function loadSubcategories(category) {
-  if (!category || !groupCode) {
-    setSubcategoryOptions([]);
-    return;
-  }
-
-  const data = await fetchSubcategoryOptions(groupCode, category);
-  setSubcategoryOptions(data);
-}
-
-  async function loadVersionOptions(category, subcat) {
-    if (!category || !subcat) {
-      setVersionOptions([]);
-      return;
-    }
-
+  async function loadPhotocards() {
     try {
-      const data = await fetchSourceOptions(category, subcat);
-      setVersionOptions(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error(error);
-      setVersionOptions([]);
+      const data = await listPhotocards();
+      setPhotocards(data);
+    } catch (err) {
+      setError(err.message || "Failed to load photocards");
     }
-  }
-
-  async function loadCandidates() {
-    if (mode !== "back") {
-      setCandidates([]);
-      return;
-    }
-
-    if (!member || !topCategory || !subcategory) {
-      setCandidates([]);
-      return;
-    }
-
-    setLoadingCandidates(true);
-    try {
-      const data = await fetchCardCandidates({
-        groupCode,
-        member,
-        topLevelCategory: topCategory,
-        subCategory: subcategory,
-        includeCardsWithBack,
-      });
-      setCandidates(data);
-    } finally {
-      setLoadingCandidates(false);
-    }
-  }
-
-  async function saveFront() {
-    const current = files[currentIndex];
-    if (!current) return;
-
-    if (!member || !topCategory || !subcategory) {
-      setMessage("Please select group, member, top category, and subcategory first.");
-      return;
-    }
-
-    setMessage("");
-
-    await ingestFront({
-      filename: current.filename,
-      groupCode,
-      member,
-      topLevelCategory: topCategory,
-      subCategory: subcategory,
-      version,
-      ownershipStatus,
-      price: price === "" ? "" : Number(price),
-    });
-
-    await loadInbox();
-    clearTransientState();
-  }
-
-  async function saveBack(forceReplace = false) {
-    const current = files[currentIndex];
-    if (!current) return;
-
-    if (!selectedCandidateId) {
-      setMessage("Please select a matching front card first.");
-      return;
-    }
-
-    setMessage("");
-
-    const result = await attachBack({
-      cardId: selectedCandidateId,
-      filename: current.filename,
-      forceReplace,
-    });
-
-    if (result.needs_confirmation) {
-      setWarningData(result);
-      setMessage(result.message);
-      return;
-    }
-
-    setWarningData(null);
-    await loadInbox();
-    clearTransientState();
-  }
-
-  function goPrevious() {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
-      clearTransientState();
-    }
-  }
-
-  function goNext() {
-    if (currentIndex < files.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      clearTransientState();
-    }
-  }
-
-  function handleGroupChange(nextGroupCode) {
-    setGroupCode(nextGroupCode);
-    setMember("");
-    setTopCategory("");
-    setSubcategory("");
-    setSubcategoryOptions([]);
-    setVersion("");
-    setVersionOptions([]);
-    clearTransientState();
   }
 
   useEffect(() => {
-    loadInbox();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    async function loadInitialData() {
+      setLoadingFormData(true);
+      setError("");
+
+      try {
+        const [groupData, categoryData] = await Promise.all([
+          fetchPhotocardGroups(),
+          fetchTopLevelCategories(COLLECTION_TYPE_ID),
+        ]);
+
+        setGroups(groupData);
+        setCategories(categoryData);
+
+        if (groupData.length > 0) {
+          setGroupId(String(groupData[0].group_id));
+        }
+
+        if (categoryData.length > 0) {
+          setTopLevelCategoryId(String(categoryData[0].top_level_category_id));
+        }
+
+        await loadPhotocards();
+      } catch (err) {
+        setError(err.message || "Failed to load form data");
+      } finally {
+        setLoadingFormData(false);
+      }
+    }
+
+    loadInitialData();
   }, []);
 
   useEffect(() => {
-    loadSubcategories(topCategory);
-  }, [topCategory, groupCode]);
+    async function loadMembers() {
+      if (!groupId) {
+        setMembers([]);
+        setSelectedMemberIds([]);
+        return;
+      }
+
+      try {
+        const data = await fetchPhotocardMembers(groupId);
+        setMembers(data);
+        setSelectedMemberIds([]);
+      } catch (err) {
+        setError(err.message || "Failed to load members");
+      }
+    }
+
+    loadMembers();
+  }, [groupId]);
 
   useEffect(() => {
-    loadVersionOptions(topCategory, subcategory);
-  }, [topCategory, subcategory]);
+    async function loadSourceOrigins() {
+      if (!groupId || !topLevelCategoryId) {
+        setSourceOrigins([]);
+        setSourceOriginId("");
+        return;
+      }
+
+      try {
+        const data = await fetchPhotocardSourceOrigins(
+          groupId,
+          topLevelCategoryId
+        );
+        setSourceOrigins(data);
+
+        if (data.length > 0) {
+          setSourceOriginId(String(data[0].source_origin_id));
+        } else {
+          setSourceOriginId("");
+        }
+      } catch (err) {
+        setError(err.message || "Failed to load source origins");
+      }
+    }
+
+    loadSourceOrigins();
+  }, [groupId, topLevelCategoryId]);
 
   useEffect(() => {
-    loadCandidates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, groupCode, member, topCategory, subcategory, includeCardsWithBack]);
+    setShowAddSourceOrigin(false);
+    setNewSourceOriginName("");
+    setSourceOriginError("");
+  }, [groupId, topLevelCategoryId]);
 
-  const current = files[currentIndex];
+  const selectedGroupName = useMemo(() => {
+    return (
+      groups.find((g) => String(g.group_id) === String(groupId))
+        ?.group_name || ""
+    );
+  }, [groups, groupId]);
 
-  const sectionTitleStyle = {
-    marginTop: 0,
-    marginBottom: 4,
-    fontSize: 15,
-    fontWeight: 700,
-  };
+  function toggleMember(memberId) {
+    const id = String(memberId);
+    setSelectedMemberIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    );
+  }
 
-  const buttonStyle = {
-    padding: "2px 8px",
-    fontSize: 13,
-  };
+  function selectAllMembers() {
+    setSelectedMemberIds(members.map((m) => String(m.member_id)));
+  }
+
+  function clearMembers() {
+    setSelectedMemberIds([]);
+  }
+
+  async function handleCreateSourceOrigin() {
+    setSourceOriginError("");
+
+    const trimmed = newSourceOriginName.trim();
+
+    if (!groupId || !topLevelCategoryId) {
+      setSourceOriginError("Select group and category first.");
+      return;
+    }
+
+    if (!trimmed) {
+      setSourceOriginError("Enter a name.");
+      return;
+    }
+
+    try {
+      setCreatingSourceOrigin(true);
+
+      const created = await createPhotocardSourceOrigin({
+        groupId: Number(groupId),
+        categoryId: Number(topLevelCategoryId),
+        sourceOriginName: trimmed,
+      });
+
+      const refreshed = await fetchPhotocardSourceOrigins(
+        groupId,
+        topLevelCategoryId
+      );
+      setSourceOrigins(refreshed);
+
+      setSourceOriginId(String(created.source_origin_id));
+      setNewSourceOriginName("");
+      setShowAddSourceOrigin(false);
+    } catch (err) {
+      setSourceOriginError(
+        err.message || "Failed to create source origin"
+      );
+    } finally {
+      setCreatingSourceOrigin(false);
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+
+    if (!groupId) {
+      setError("Please select a group.");
+      return;
+    }
+
+    if (!topLevelCategoryId) {
+      setError("Please select a category.");
+      return;
+    }
+
+    if (selectedMemberIds.length === 0) {
+      setError("Please select at least one member.");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const result = await createPhotocard({
+        collectionTypeId: COLLECTION_TYPE_ID,
+        topLevelCategoryId: Number(topLevelCategoryId),
+        ownershipStatusId: Number(ownershipStatusId),
+        notes: notes.trim() || null,
+        groupId: Number(groupId),
+        sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
+        version: version.trim() || null,
+        memberIds: selectedMemberIds.map(Number),
+      });
+
+      setSuccessMessage(`Created photocard item ${result.item_id}`);
+      setVersion("");
+      setNotes("");
+      setSelectedMemberIds([]);
+
+      await loadPhotocards();
+    } catch (err) {
+      setError(err.message || "Failed to create photocard");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loadingFormData) {
+    return <div style={{ padding: 16 }}>Loading CollectCore...</div>;
+  }
 
   return (
-    <div style={{ padding: 10, fontSize: 13 }}>
-      {!current && <p style={{ marginTop: 0 }}>No images in inbox.</p>}
+    <div style={{ padding: 16, maxWidth: 1200, margin: "0 auto" }}>
+      <h1 style={{ marginTop: 0 }}>CollectCore Photocard Tester</h1>
+      <p style={{ marginTop: 0 }}>
+        Current group: <strong>{selectedGroupName || "None selected"}</strong>
+      </p>
 
-      {current && (
-        <>
-          <div style={{ marginBottom: 6, fontSize: 13 }}>
-            <strong>
-              Image {currentIndex + 1} of {files.length}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 14,
-            }}
-          >
-            <div style={{ flex: "0 0 300px" }}>
-              <img
-                src={`${API}${current.url}`}
-                alt={current.filename}
-                style={{
-                  width: "100%",
-                  maxHeight: "75vh",
-                  objectFit: "contain",
-                  border: "1px solid #ccc",
-                }}
-              />
-
-              <div style={{ marginTop: 8 }}>
-                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                  <button
-                    onClick={goPrevious}
-                    disabled={currentIndex === 0}
-                    style={buttonStyle}
-                  >
-                    Previous
-                  </button>
-
-                  <button
-                    onClick={goNext}
-                    disabled={currentIndex === files.length - 1}
-                    style={buttonStyle}
-                  >
-                    Next
-                  </button>
-                </div>
-
-                <div>
-                  <div style={{ fontWeight: "bold", marginBottom: 4, fontSize: 14 }}>Mode</div>
-
-                  <button
-                    onClick={() => {
-                      setMode("front");
-                      clearTransientState();
-                    }}
-                    style={{
-                      ...buttonStyle,
-                      marginRight: 6,
-                      background: mode === "front" ? "#88f" : "#eee",
-                    }}
-                  >
-                    Front
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setMode("back");
-                      clearTransientState();
-                    }}
-                    style={{
-                      ...buttonStyle,
-                      background: mode === "back" ? "#88f" : "#eee",
-                    }}
-                  >
-                    Back
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <h3 style={sectionTitleStyle}>Group</h3>
-
-              <div style={{ marginBottom: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => handleGroupChange("skz")}
-                  style={{
-                    ...buttonStyle,
-                    background: groupCode === "skz" ? "#88f" : "#eee",
-                  }}
-                >
-                  Stray Kids
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleGroupChange("atz")}
-                  style={{
-                    ...buttonStyle,
-                    background: groupCode === "atz" ? "#88f" : "#eee",
-                  }}
-                >
-                  ATEEZ
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleGroupChange("txt")}
-                  style={{
-                    ...buttonStyle,
-                    background: groupCode === "txt" ? "#88f" : "#eee",
-                  }}
-                >
-                  TXT
-                </button>
-              </div>
-
-              <h3 style={sectionTitleStyle}>Member</h3>
-
-              <div style={{ marginBottom: 10 }}>
-                {memberOptions.map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      setMember(m);
-                      clearTransientState();
-                    }}
-                    style={{
-                      ...buttonStyle,
-                      margin: 2,
-                      background: member === m ? "#88f" : "#eee",
-                    }}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 24,
-                  flexWrap: "wrap",
-                  alignItems: "flex-start",
-                  marginBottom: 10,
-                }}
-              >
-                <div>
-                  <h3 style={sectionTitleStyle}>Top Category</h3>
-
-                  <div>
-                    <button
-                      onClick={() => {
-                        setTopCategory("Album");
-                        setSubcategory("");
-                        setVersion("");
-                        setVersionOptions([]);
-                        clearTransientState();
-                      }}
-                      style={{
-                        ...buttonStyle,
-                        marginRight: 6,
-                        background: topCategory === "Album" ? "#88f" : "#eee",
-                      }}
-                    >
-                      Album
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setTopCategory("Non-Album");
-                        setSubcategory("");
-                        setVersion("");
-                        setVersionOptions([]);
-                        clearTransientState();
-                      }}
-                      style={{
-                        ...buttonStyle,
-                        background: topCategory === "Non-Album" ? "#88f" : "#eee",
-                      }}
-                    >
-                      Non-Album
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <h3 style={sectionTitleStyle}>Ownership Status</h3>
-
-                  <div>
-                    <button
-                      onClick={() => setOwnershipStatus("Owned")}
-                      style={{
-                        ...buttonStyle,
-                        marginRight: 6,
-                        background: ownershipStatus === "Owned" ? "#88f" : "#eee",
-                      }}
-                    >
-                      Owned
-                    </button>
-
-                    <button
-                      onClick={() => setOwnershipStatus("Want")}
-                      style={{
-                        ...buttonStyle,
-                        marginRight: 6,
-                        background: ownershipStatus === "Want" ? "#88f" : "#eee",
-                      }}
-                    >
-                      Want
-                    </button>
-
-                    <button
-                      onClick={() => setOwnershipStatus("For Trade")}
-                      style={{
-                        ...buttonStyle,
-                        background: ownershipStatus === "For Trade" ? "#88f" : "#eee",
-                      }}
-                    >
-                      For Trade
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {topCategory && (
-                <>
-                  <h3 style={sectionTitleStyle}>Sub Category</h3>
-
-                  <div style={{ marginBottom: 6 }}>
-                    {subcategoryOptions.map((opt) => (
-                      <button
-                        key={opt}
-                        onClick={() => {
-                          setSubcategory(opt);
-                          setVersion("");
-                          clearTransientState();
-                        }}
-                        style={{
-                          ...buttonStyle,
-                          margin: 2,
-                          background: subcategory === opt ? "#88f" : "#eee",
-                        }}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div style={{ marginBottom: 10 }}>
-                    <input
-                      placeholder="Or type new value"
-                      value={subcategory}
-                      onChange={(e) => {
-                        setSubcategory(e.target.value);
-                        setVersion("");
-                        clearTransientState();
-                      }}
-                      style={{ padding: 4, width: 250, fontSize: 13 }}
-                    />
-                  </div>
-
-                  <h3 style={sectionTitleStyle}>Version</h3>
-
-                  <div style={{ marginBottom: 10 }}>
-                    <input
-                      type="text"
-                      list="inbox-version-options"
-                      value={version}
-                      onChange={(e) => setVersion(e.target.value)}
-                      placeholder="Optional"
-                      style={{ padding: 4, width: 250, fontSize: 13 }}
-                    />
-                    <datalist id="inbox-version-options">
-                      {versionOptions.map((option) => (
-                        <option key={option} value={option} />
-                      ))}
-                    </datalist>
-                  </div>
-                </>
-              )}
-
-              <h3 style={sectionTitleStyle}>Price</h3>
-
-              <div style={{ marginBottom: 10 }}>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="Optional"
-                  style={{ padding: 4, width: 120, fontSize: 13 }}
-                />
-              </div>
-
-              {mode === "back" && (
-                <>
-                  <h3 style={sectionTitleStyle}>Matching Front Cards</h3>
-
-                  <label style={{ display: "block", marginBottom: 6 }}>
-                    <input
-                      type="checkbox"
-                      checked={includeCardsWithBack}
-                      onChange={(e) => {
-                        setIncludeCardsWithBack(e.target.checked);
-                        setSelectedCandidateId(null);
-                        setWarningData(null);
-                      }}
-                    />{" "}
-                    Show all cards, including ones that already have a back
-                  </label>
-
-                  {!member || !topCategory || !subcategory ? (
-                    <p style={{ color: "#666", marginTop: 0 }}>
-                      Select member, top category, and subcategory to load candidate front cards.
-                    </p>
-                  ) : loadingCandidates ? (
-                    <p style={{ marginTop: 0 }}>Loading matching cards...</p>
-                  ) : candidates.length === 0 ? (
-                    <p style={{ marginTop: 0 }}>No matching front cards found.</p>
-                  ) : (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-                        gap: 8,
-                        marginBottom: 10,
-                        maxHeight: "38vh",
-                        overflowY: "auto",
-                        paddingRight: 4,
-                      }}
-                    >
-                      {candidates.map((card) => (
-                        <button
-                          key={card.id}
-                          onClick={() => {
-                            setSelectedCandidateId(card.id);
-                            setWarningData(null);
-                            setMessage("");
-                          }}
-                          style={{
-                            border:
-                              selectedCandidateId === card.id
-                                ? "3px solid #4a67ff"
-                                : "1px solid #ccc",
-                            borderRadius: 8,
-                            padding: 4,
-                            background: "#fff",
-                            cursor: "pointer",
-                            textAlign: "left",
-                          }}
-                        >
-                          <img
-                            src={`${API}${card.front_url}`}
-                            alt={`Card ${card.id}`}
-                            style={{
-                              width: "100%",
-                              aspectRatio: "55 / 85",
-                              objectFit: "cover",
-                              borderRadius: 4,
-                              marginBottom: 4,
-                            }}
-                          />
-
-                          <div style={{ fontSize: 11, lineHeight: 1.25 }}>
-                            <div>
-                              <strong>ID:</strong> {card.id}
-                            </div>
-                            <div>{card.member || "—"}</div>
-                            <div>{card.sub_category || "—"}</div>
-                            <div style={{ color: card.has_back ? "#b00" : "#090" }}>
-                              {card.has_back ? "Already has back" : "No back yet"}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {message && (
-                <div
-                  style={{
-                    marginBottom: 8,
-                    padding: 8,
-                    border: "1px solid #ccc",
-                    background: "#f8f8f8",
-                    fontSize: 13,
-                  }}
-                >
-                  {message}
-                </div>
-              )}
-
-              {warningData && (
-                <div
-                  style={{
-                    marginBottom: 8,
-                    padding: 8,
-                    border: "1px solid #d99",
-                    background: "#fff3f3",
-                    fontSize: 13,
-                  }}
-                >
-                  <div style={{ marginBottom: 8 }}>
-                    This card already has a back image.
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={() => {
-                        setWarningData(null);
-                        setMessage("");
-                      }}
-                      style={buttonStyle}
-                    >
-                      Cancel
-                    </button>
-
-                    <button onClick={() => saveBack(true)} style={buttonStyle}>
-                      Replace Anyway
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {mode === "front" ? (
-                <button onClick={saveFront} style={{ padding: "4px 10px", fontSize: 13 }}>
-                  Save Front and Next
-                </button>
-              ) : (
-                <button onClick={() => saveBack(false)} style={{ padding: "4px 10px", fontSize: 13 }}>
-                  Attach Back and Next
-                </button>
-              )}
-            </div>
-          </div>
-        </>
+      {error && (
+        <div style={{ marginBottom: 12, padding: 10, border: "1px solid #c62828", background: "#ffebee" }}>
+          {error}
+        </div>
       )}
+
+      {successMessage && (
+        <div style={{ marginBottom: 12, padding: 10, border: "1px solid #2e7d32", background: "#e8f5e9" }}>
+          {successMessage}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 20 }}>
+        <form onSubmit={handleSubmit} style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
+          <h2>Create Photocard</h2>
+
+          {/* Group */}
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+            {groups.map((g) => (
+              <option key={g.group_id} value={g.group_id}>
+                {g.group_name}
+              </option>
+            ))}
+          </select>
+
+          {/* Category */}
+          <select value={topLevelCategoryId} onChange={(e) => setTopLevelCategoryId(e.target.value)}>
+            {categories.map((c) => (
+              <option key={c.top_level_category_id} value={c.top_level_category_id}>
+                {c.category_name}
+              </option>
+            ))}
+          </select>
+
+          {/* Source Origin */}
+          <div style={{ marginTop: 10 }}>
+            <select
+              value={sourceOriginId}
+              onChange={(e) => setSourceOriginId(e.target.value)}
+            >
+              <option value="">-- None --</option>
+              {sourceOrigins.map((o) => (
+                <option key={o.source_origin_id} value={o.source_origin_id}>
+                  {o.source_origin_name}
+                </option>
+              ))}
+            </select>
+
+            <button type="button" onClick={() => setShowAddSourceOrigin((p) => !p)}>
+              + Add
+            </button>
+
+            {showAddSourceOrigin && (
+              <div style={{ marginTop: 6 }}>
+                <input
+                  value={newSourceOriginName}
+                  onChange={(e) => setNewSourceOriginName(e.target.value)}
+                  placeholder="New source origin"
+                />
+                <button type="button" onClick={handleCreateSourceOrigin}>
+                  Save
+                </button>
+                <button type="button" onClick={() => setShowAddSourceOrigin(false)}>
+                  Cancel
+                </button>
+
+                {sourceOriginError && (
+                  <div style={{ color: "red" }}>{sourceOriginError}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : "Create"}
+          </button>
+        </form>
+
+        <div>
+          {photocards.map((card) => (
+            <div key={card.item_id}>
+              {card.group} - {card.source_origin}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
