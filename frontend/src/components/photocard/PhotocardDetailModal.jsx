@@ -1,0 +1,646 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  fetchPhotocardMembers,
+  fetchPhotocardSourceOrigins,
+  fetchOwnershipStatuses,
+  fetchTopLevelCategories,
+  createPhotocardSourceOrigin,
+  updatePhotocard,
+  deletePhotocard,
+  replaceFrontImage,
+  replaceBackImage,
+} from "../../api";
+
+const API_BASE = "http://127.0.0.1:8001";
+
+/**
+ * PhotocardDetailModal — view and edit a single photocard.
+ *
+ * Props:
+ *   card           — photocard object (from list)
+ *   groups         — all groups array
+ *   categories     — all categories array
+ *   onClose        — callback()
+ *   onSaved        — callback(updatedCard) — called after successful save
+ *   onDeleted      — callback(item_id) — called after successful delete
+ */
+export default function PhotocardDetailModal({
+  card,
+  groups,
+  categories,
+  onClose,
+  onSaved,
+  onDeleted,
+}) {
+  const [ownershipStatuses, setOwnershipStatuses] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [sourceOrigins, setSourceOrigins] = useState([]);
+
+  const [topLevelCategoryId, setTopLevelCategoryId] = useState(
+    String(card.top_level_category_id)
+  );
+  const [ownershipStatusId, setOwnershipStatusId] = useState(
+    String(card.ownership_status_id)
+  );
+  const [sourceOriginId, setSourceOriginId] = useState(
+    card.source_origin_id ? String(card.source_origin_id) : ""
+  );
+  const [version, setVersion] = useState(card.version || "");
+  const [notes, setNotes] = useState(card.notes || "");
+  const [selectedMemberIds, setSelectedMemberIds] = useState(
+    [] // loaded after members fetch
+  );
+
+  const [showAddSourceOrigin, setShowAddSourceOrigin] = useState(false);
+  const [newSourceOriginName, setNewSourceOriginName] = useState("");
+  const [sourceOriginError, setSourceOriginError] = useState("");
+
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState("");
+
+  // Image state (tracks current paths, updated after replace)
+  const [frontImagePath, setFrontImagePath] = useState(card.front_image_path || null);
+  const [backImagePath, setBackImagePath] = useState(card.back_image_path || null);
+  const [replacingFront, setReplacingFront] = useState(false);
+  const [replacingBack, setReplacingBack] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const frontFileRef = useRef(null);
+  const backFileRef = useRef(null);
+
+  // Load ownership statuses + members + source origins
+  useEffect(() => {
+    async function load() {
+      try {
+        const [statusData, memberData, soData] = await Promise.all([
+          fetchOwnershipStatuses(),
+          fetchPhotocardMembers(card.group_id),
+          fetchPhotocardSourceOrigins(card.group_id, card.top_level_category_id),
+        ]);
+        setOwnershipStatuses(statusData);
+        setMembers(memberData);
+        setSourceOrigins(soData);
+
+        // Set selected members using current card data (member names → ids)
+        const memberNameSet = new Set(card.members || []);
+        const matched = memberData
+          .filter((m) => memberNameSet.has(m.member_name))
+          .map((m) => String(m.member_id));
+        setSelectedMemberIds(matched);
+      } catch (err) {
+        setError(err.message || "Failed to load form data");
+      }
+    }
+    load();
+  }, [card.item_id]);
+
+  // Reload source origins when category changes
+  useEffect(() => {
+    async function reloadSourceOrigins() {
+      if (!topLevelCategoryId) return;
+      try {
+        const soData = await fetchPhotocardSourceOrigins(
+          card.group_id,
+          topLevelCategoryId
+        );
+        setSourceOrigins(soData);
+        // Reset source origin if the current one isn't in the new list
+        if (soData.length > 0) {
+          const ids = soData.map((o) => String(o.source_origin_id));
+          if (sourceOriginId && !ids.includes(sourceOriginId)) {
+            setSourceOriginId("");
+          }
+        } else {
+          setSourceOriginId("");
+        }
+      } catch {
+        // silently ignore
+      }
+    }
+    reloadSourceOrigins();
+  }, [topLevelCategoryId]);
+
+  function toggleMember(memberId) {
+    const id = String(memberId);
+    setSelectedMemberIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    );
+  }
+
+  async function handleCreateSourceOrigin() {
+    setSourceOriginError("");
+    const trimmed = newSourceOriginName.trim();
+    if (!trimmed) {
+      setSourceOriginError("Enter a name.");
+      return;
+    }
+    try {
+      const created = await createPhotocardSourceOrigin({
+        groupId: card.group_id,
+        categoryId: Number(topLevelCategoryId),
+        sourceOriginName: trimmed,
+      });
+      const refreshed = await fetchPhotocardSourceOrigins(
+        card.group_id,
+        topLevelCategoryId
+      );
+      setSourceOrigins(refreshed);
+      setSourceOriginId(String(created.source_origin_id));
+      setNewSourceOriginName("");
+      setShowAddSourceOrigin(false);
+    } catch (err) {
+      setSourceOriginError(err.message || "Failed to create source origin");
+    }
+  }
+
+  async function handleReplaceImage(side, file) {
+    setImageError("");
+    if (side === "front") {
+      setReplacingFront(true);
+      try {
+        const result = await replaceFrontImage(card.item_id, file);
+        setFrontImagePath(`images/library/${result.filename}`);
+      } catch (err) {
+        setImageError(err.message || "Failed to replace front image");
+      } finally {
+        setReplacingFront(false);
+      }
+    } else {
+      setReplacingBack(true);
+      try {
+        const result = await replaceBackImage(card.item_id, file);
+        setBackImagePath(`images/library/${result.filename}`);
+      } catch (err) {
+        setImageError(err.message || "Failed to replace back image");
+      } finally {
+        setReplacingBack(false);
+      }
+    }
+  }
+
+  async function handleSave() {
+    setError("");
+    if (selectedMemberIds.length === 0) {
+      setError("Select at least one member.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updatePhotocard(card.item_id, {
+        topLevelCategoryId: Number(topLevelCategoryId),
+        ownershipStatusId: Number(ownershipStatusId),
+        notes: notes.trim() || null,
+        sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
+        version: version.trim() || null,
+        memberIds: selectedMemberIds.map(Number),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err.message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deletePhotocard(card.item_id);
+      onDeleted(card.item_id);
+    } catch (err) {
+      setError(err.message || "Failed to delete");
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
+
+  // Find the group name
+  const groupName =
+    groups.find((g) => g.group_id === card.group_id)?.group_name || "—";
+
+  return (
+    <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={styles.modal}>
+        <div style={styles.modalHeader}>
+          <span style={styles.modalTitle}>
+            #{card.item_id} — {groupName}
+          </span>
+          <button style={styles.closeBtn} onClick={onClose}>✕</button>
+        </div>
+
+        {(error || imageError) && (
+          <div style={styles.errorBox}>{error || imageError}</div>
+        )}
+
+        <div style={styles.modalBody}>
+          {/* Left: images */}
+          <div style={styles.imagePanel}>
+            <ImageSlot
+              label="Front"
+              path={frontImagePath}
+              replacing={replacingFront}
+              fileRef={frontFileRef}
+              onFileChange={(file) => handleReplaceImage("front", file)}
+            />
+            <ImageSlot
+              label="Back"
+              path={backImagePath}
+              replacing={replacingBack}
+              fileRef={backFileRef}
+              onFileChange={(file) => handleReplaceImage("back", file)}
+            />
+          </div>
+
+          {/* Right: form */}
+          <div style={styles.form}>
+            {/* Group — read only */}
+            <FormRow label="Group">
+              <span style={styles.readOnly}>{groupName}</span>
+            </FormRow>
+
+            {/* Category */}
+            <FormRow label="Category">
+              <select
+                value={topLevelCategoryId}
+                onChange={(e) => setTopLevelCategoryId(e.target.value)}
+                style={styles.select}
+              >
+                {categories.map((c) => (
+                  <option key={c.top_level_category_id} value={c.top_level_category_id}>
+                    {c.category_name}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+
+            {/* Ownership */}
+            <FormRow label="Ownership">
+              <select
+                value={ownershipStatusId}
+                onChange={(e) => setOwnershipStatusId(e.target.value)}
+                style={styles.select}
+              >
+                {ownershipStatuses.map((s) => (
+                  <option key={s.ownership_status_id} value={s.ownership_status_id}>
+                    {s.status_name}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+
+            {/* Source Origin */}
+            <FormRow label="Source Origin">
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <select
+                  value={sourceOriginId}
+                  onChange={(e) => setSourceOriginId(e.target.value)}
+                  style={{ ...styles.select, flex: 1 }}
+                >
+                  <option value="">— None —</option>
+                  {sourceOrigins.map((o) => (
+                    <option key={o.source_origin_id} value={o.source_origin_id}>
+                      {o.source_origin_name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  style={styles.addBtn}
+                  onClick={() => setShowAddSourceOrigin((p) => !p)}
+                >
+                  + Add
+                </button>
+              </div>
+              {showAddSourceOrigin && (
+                <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    value={newSourceOriginName}
+                    onChange={(e) => setNewSourceOriginName(e.target.value)}
+                    placeholder="New source origin"
+                    style={{ ...styles.input, flex: 1 }}
+                  />
+                  <button type="button" style={styles.addBtn} onClick={handleCreateSourceOrigin}>
+                    Save
+                  </button>
+                  <button type="button" style={styles.cancelBtn} onClick={() => setShowAddSourceOrigin(false)}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {sourceOriginError && <div style={styles.fieldError}>{sourceOriginError}</div>}
+            </FormRow>
+
+            {/* Version */}
+            <FormRow label="Version">
+              <input
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                placeholder="e.g. Soundwave POB"
+                style={styles.input}
+              />
+            </FormRow>
+
+            {/* Members */}
+            <FormRow label="Members">
+              <div style={styles.memberGrid}>
+                {members.map((m) => (
+                  <label key={m.member_id} style={styles.memberChip}>
+                    <input
+                      type="checkbox"
+                      checked={selectedMemberIds.includes(String(m.member_id))}
+                      onChange={() => toggleMember(m.member_id)}
+                      style={{ marginRight: 4 }}
+                    />
+                    {m.member_name}
+                  </label>
+                ))}
+              </div>
+            </FormRow>
+
+            {/* Notes */}
+            <FormRow label="Notes">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                style={styles.textarea}
+              />
+            </FormRow>
+          </div>
+        </div>
+
+        <div style={styles.actions}>
+          <div style={styles.actionsLeft}>
+            {!confirmDelete ? (
+              <button style={styles.deleteBtn} onClick={handleDelete}>
+                Delete
+              </button>
+            ) : (
+              <span style={styles.confirmPrompt}>
+                Are you sure?{" "}
+                <button style={styles.deleteBtn} onClick={handleDelete} disabled={deleting}>
+                  {deleting ? "Deleting..." : "Yes, delete"}
+                </button>{" "}
+                <button style={styles.cancelBtn} onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </button>
+              </span>
+            )}
+          </div>
+          <div style={styles.actionsRight}>
+            <button style={styles.cancelBtn} onClick={onClose}>
+              Cancel
+            </button>
+            <button style={styles.saveBtn} onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: "bold", color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        {label}
+      </div>
+      <div style={{
+        width: 130, height: 180,
+        border: "1px solid #ddd", borderRadius: 4,
+        background: "#f0f0f0",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        overflow: "hidden", position: "relative",
+      }}>
+        {path ? (
+          <img
+            src={`${API_BASE}/images/library/${path.replace(/^.*[\\/]/, "")}?v=${Date.now()}`}
+            alt={label}
+            style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          />
+        ) : (
+          <span style={{ fontSize: 11, color: "#aaa" }}>No {label.toLowerCase()}</span>
+        )}
+        {replacing && (
+          <div style={{
+            position: "absolute", inset: 0, background: "rgba(255,255,255,0.7)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#555",
+          }}>
+            Uploading...
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onFileChange(file);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        style={{ marginTop: 4, fontSize: 11, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#f5f5f5", width: 130 }}
+        onClick={() => fileRef.current?.click()}
+        disabled={replacing}
+      >
+        {path ? "Replace" : "Upload"} {label}
+      </button>
+    </div>
+  );
+}
+
+function FormRow({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "block", fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 4 }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const styles = {
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  },
+  modal: {
+    background: "#fff",
+    borderRadius: 6,
+    width: 700,
+    maxHeight: "90vh",
+    display: "flex",
+    flexDirection: "column",
+    boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+  },
+  modalBody: {
+    display: "flex",
+    flex: 1,
+    overflow: "hidden",
+  },
+  imagePanel: {
+    flexShrink: 0,
+    padding: "16px 12px 16px 16px",
+    borderRight: "1px solid #e0e0e0",
+    overflowY: "auto",
+    background: "#fafafa",
+    width: 158,
+  },
+  modalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    borderBottom: "1px solid #e0e0e0",
+  },
+  modalTitle: {
+    fontWeight: "bold",
+    fontSize: 15,
+  },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    fontSize: 16,
+    cursor: "pointer",
+    color: "#666",
+    padding: "0 4px",
+  },
+  errorBox: {
+    margin: "8px 16px 0",
+    padding: "8px 10px",
+    background: "#ffebee",
+    border: "1px solid #c62828",
+    borderRadius: 3,
+    fontSize: 13,
+    color: "#c62828",
+  },
+  form: {
+    padding: "16px",
+    overflowY: "auto",
+    flex: 1,
+    minWidth: 0,
+  },
+  readOnly: {
+    fontSize: 13,
+    color: "#333",
+  },
+  select: {
+    width: "100%",
+    padding: "5px 6px",
+    fontSize: 13,
+    border: "1px solid #ccc",
+    borderRadius: 3,
+  },
+  input: {
+    width: "100%",
+    padding: "5px 6px",
+    fontSize: 13,
+    border: "1px solid #ccc",
+    borderRadius: 3,
+    boxSizing: "border-box",
+  },
+  textarea: {
+    width: "100%",
+    padding: "5px 6px",
+    fontSize: 13,
+    border: "1px solid #ccc",
+    borderRadius: 3,
+    resize: "vertical",
+    boxSizing: "border-box",
+  },
+  memberGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  memberChip: {
+    display: "flex",
+    alignItems: "center",
+    fontSize: 13,
+    cursor: "pointer",
+    padding: "3px 6px",
+    border: "1px solid #ddd",
+    borderRadius: 3,
+    background: "#f9f9f9",
+  },
+  addBtn: {
+    padding: "4px 8px",
+    fontSize: 12,
+    cursor: "pointer",
+    border: "1px solid #ccc",
+    borderRadius: 3,
+    background: "#f5f5f5",
+    whiteSpace: "nowrap",
+  },
+  cancelBtn: {
+    padding: "5px 12px",
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid #ccc",
+    borderRadius: 3,
+    background: "#fff",
+  },
+  saveBtn: {
+    padding: "5px 16px",
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid #1565c0",
+    borderRadius: 3,
+    background: "#1565c0",
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  deleteBtn: {
+    padding: "5px 12px",
+    fontSize: 13,
+    cursor: "pointer",
+    border: "1px solid #c62828",
+    borderRadius: 3,
+    background: "#fff",
+    color: "#c62828",
+  },
+  fieldError: {
+    color: "#c62828",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  confirmPrompt: {
+    fontSize: 13,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  actions: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    borderTop: "1px solid #e0e0e0",
+  },
+  actionsLeft: {
+    display: "flex",
+    alignItems: "center",
+  },
+  actionsRight: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+  },
+};

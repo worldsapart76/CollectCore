@@ -1,0 +1,1249 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  bulkDeleteBooks,
+  bulkUpdateBooks,
+  deleteBook,
+  fetchBookAgeLevels,
+  fetchBookFormatDetails,
+  fetchBookGenres,
+  fetchBookReadStatuses,
+  fetchOwnershipStatuses,
+  getBook,
+  listBooks,
+  updateBook,
+} from "../api";
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const labelStyle = { display: "block", fontSize: 12, fontWeight: "bold", marginBottom: 3, color: "#444" };
+const inputStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc", width: "100%", boxSizing: "border-box" };
+const selectStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc", width: "100%" };
+const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
+const btnSecondary = { fontSize: 13, padding: "5px 12px", background: "#f5f5f5", color: "#333", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" };
+const btnSm = { fontSize: 11, padding: "2px 7px", background: "#f5f5f5", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" };
+const btnDanger = { fontSize: 13, padding: "5px 12px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
+const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid #c62828", background: "#ffebee", fontSize: 13, borderRadius: 3 };
+const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "#e8f5e9", fontSize: 13, borderRadius: 3 };
+
+const FORMAT_COLORS = {
+  Physical: { background: "#f5f5f5", color: "#555", border: "1px solid #ccc" },
+  Digital:  { background: "#e3f2fd", color: "#1565c0", border: "1px solid #90caf9" },
+  Audio:    { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7" },
+};
+
+const GRID_SIZES = {
+  s: { w: 80, h: 120 },
+  m: { w: 120, h: 180 },
+  l: { w: 160, h: 240 },
+};
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#4caf50", W: "#ff9800", T: "#2196f3", B: "#9c27b0",
+};
+
+const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+
+// ─── Filter state helpers ─────────────────────────────────────────────────────
+
+function emptySection() { return { mode: "or", include: [], exclude: [] }; }
+
+function cycleItem(section, id) {
+  const sid = String(id);
+  if (section.include.includes(sid)) {
+    return { ...section, include: section.include.filter((x) => x !== sid), exclude: [...section.exclude, sid] };
+  }
+  if (section.exclude.includes(sid)) {
+    return { ...section, exclude: section.exclude.filter((x) => x !== sid) };
+  }
+  return { ...section, include: [...section.include, sid] };
+}
+
+function getItemState(section, id) {
+  const sid = String(id);
+  if (section.include.includes(sid)) return "include";
+  if (section.exclude.includes(sid)) return "exclude";
+  return "none";
+}
+
+function sectionActive(s) { return s.include.length > 0 || s.exclude.length > 0; }
+
+// Match bookValues (array of strings) against a filter section
+function applySection(section, bookValues) {
+  const { mode, include, exclude } = section;
+  if (include.length === 0 && exclude.length === 0) return true;
+  if (exclude.length > 0 && bookValues.some((v) => exclude.includes(String(v)))) return false;
+  if (include.length === 0) return true;
+  if (mode === "or") return bookValues.some((v) => include.includes(String(v)));
+  return include.every((v) => bookValues.map(String).includes(v)); // AND
+}
+
+// ─── Filter UI components ─────────────────────────────────────────────────────
+
+function AndOrToggle({ mode, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {["or", "and"].map((m) => (
+        <button key={m} type="button" onClick={() => onChange(m)} style={{
+          fontSize: 9, padding: "1px 4px", cursor: "pointer", borderRadius: 2,
+          background: mode === m ? "#1976d2" : "#fff",
+          color: mode === m ? "#fff" : "#999",
+          border: `1px solid ${mode === m ? "#1976d2" : "#ccc"}`,
+          fontWeight: "bold", textTransform: "uppercase",
+        }}>
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TriStateItem({ label, state, onClick }) {
+  const isInclude = state === "include";
+  const isExclude = state === "exclude";
+  return (
+    <div onClick={onClick} style={{
+      display: "flex", alignItems: "center", gap: 5, fontSize: 12,
+      cursor: "pointer", userSelect: "none", padding: "1px 3px", borderRadius: 3,
+      background: isInclude ? "#e8f5e9" : isExclude ? "#ffebee" : "transparent",
+    }}>
+      <div style={{
+        width: 14, height: 14, borderRadius: "50%", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: isInclude ? "#4caf50" : isExclude ? "#ef5350" : "#ddd",
+        color: "#fff", fontSize: 10, fontWeight: "bold", lineHeight: 1,
+      }}>
+        {isInclude ? "+" : isExclude ? "−" : ""}
+      </div>
+      <span style={{ color: isInclude ? "#2e7d32" : isExclude ? "#c62828" : "#333" }}>{label}</span>
+    </div>
+  );
+}
+
+function SectionHeader({ title, section, onChange }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+      <div style={{ fontSize: 11, fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {title}
+      </div>
+      {sectionActive(section) && (
+        <AndOrToggle mode={section.mode} onChange={(m) => onChange({ ...section, mode: m })} />
+      )}
+    </div>
+  );
+}
+
+function TriStateFilterSection({ title, items, section, onChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? items : items.slice(0, 5);
+  const hasMore = items.length > 5;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {shown.map((item) => (
+          <TriStateItem
+            key={item.id}
+            label={item.label}
+            state={getItemState(section, item.id)}
+            onClick={() => onChange(cycleItem(section, item.id))}
+          />
+        ))}
+      </div>
+      {hasMore && (
+        <button type="button" onClick={() => setExpanded((p) => !p)} style={{ ...btnSm, marginTop: 4 }}>
+          {expanded ? "Show less" : `+${items.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SearchableTriStateSection({ title, items, section, onChange }) {
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const selectedItems = items.filter((i) => getItemState(section, i.id) !== "none");
+
+  const unselectedFiltered = useMemo(() => {
+    const unselected = items.filter((i) => getItemState(section, i.id) === "none");
+    if (!search.trim()) return unselected;
+    const q = search.toLowerCase();
+    return unselected.filter((i) => i.label.toLowerCase().includes(q));
+  }, [items, section, search]);
+
+  const shown = expanded ? unselectedFiltered : unselectedFiltered.slice(0, 5);
+  const hasMore = unselectedFiltered.length > 5;
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+
+      {selectedItems.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
+          {selectedItems.map((item) => {
+            const state = getItemState(section, item.id);
+            const isInc = state === "include";
+            return (
+              <span key={item.id} onClick={() => onChange(cycleItem(section, item.id))} style={{
+                fontSize: 11, padding: "2px 6px", borderRadius: 10, cursor: "pointer", userSelect: "none",
+                background: isInc ? "#e8f5e9" : "#ffebee",
+                border: `1px solid ${isInc ? "#a5d6a7" : "#ef9a9a"}`,
+                color: isInc ? "#2e7d32" : "#c62828",
+                display: "flex", alignItems: "center", gap: 3,
+              }}>
+                <span style={{ fontWeight: "bold" }}>{isInc ? "+" : "−"}</span>
+                {item.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={`Search ${title.toLowerCase()}...`}
+        style={{ ...inputStyle, fontSize: 11, marginBottom: 3 }}
+      />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {shown.map((item) => (
+          <TriStateItem
+            key={item.id}
+            label={item.label}
+            state="none"
+            onClick={() => onChange(cycleItem(section, item.id))}
+          />
+        ))}
+      </div>
+      {hasMore && (
+        <button type="button" onClick={() => setExpanded((p) => !p)} style={{ ...btnSm, marginTop: 4 }}>
+          {expanded ? "Show less" : `+${unselectedFiltered.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function GroupedTriStateSection({ title, groups, section, onChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const allItems = groups.flatMap((g) => g.items.map((i) => ({ ...i, groupLabel: g.groupLabel })));
+  const hasMore = allItems.length > 5;
+  const shownItems = expanded ? allItems : allItems.slice(0, 5);
+
+  const shownGroups = {};
+  for (const item of shownItems) {
+    if (!shownGroups[item.groupLabel]) shownGroups[item.groupLabel] = [];
+    shownGroups[item.groupLabel].push(item);
+  }
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+      {Object.entries(shownGroups).map(([groupLabel, items]) => (
+        <div key={groupLabel}>
+          <div style={{ fontSize: 10, fontWeight: "bold", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 3, marginBottom: 2 }}>
+            {groupLabel}
+          </div>
+          <div style={{ paddingLeft: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+            {items.map((item) => (
+              <TriStateItem
+                key={item.id}
+                label={item.label}
+                state={getItemState(section, item.id)}
+                onClick={() => onChange(cycleItem(section, item.id))}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      {hasMore && (
+        <button type="button" onClick={() => setExpanded((p) => !p)} style={{ ...btnSm, marginTop: 4 }}>
+          {expanded ? "Show less" : `+${allItems.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Book filters sidebar ─────────────────────────────────────────────────────
+
+function BookFilters({ books, ownershipStatuses, readStatuses, ageLevels, filters, onSectionChange, onClearAll }) {
+  const formatGroups = useMemo(() => {
+    const byTopLevel = {};
+    for (const b of books) for (const f of (b.formats || [])) {
+      if (!byTopLevel[f.top_level_format]) byTopLevel[f.top_level_format] = new Set();
+      byTopLevel[f.top_level_format].add(f.format_name);
+    }
+    return ["Physical", "Digital", "Audio"].filter((tl) => byTopLevel[tl]).map((tl) => ({
+      groupLabel: tl,
+      items: [...byTopLevel[tl]].sort().map((name) => ({ id: name, label: name })),
+    }));
+  }, [books]);
+
+  const allAuthors = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const b of books) for (const a of (b.authors || [])) if (!seen.has(a)) { seen.add(a); result.push(a); }
+    return result.sort().map((a) => ({ id: a, label: a }));
+  }, [books]);
+
+  const allGenres = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const b of books) for (const g of (b.genres || [])) if (!seen.has(g)) { seen.add(g); result.push(g); }
+    return result.sort().map((g) => ({ id: g, label: g }));
+  }, [books]);
+
+  const allSubGenres = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const b of books) for (const sg of (b.subgenres || [])) if (!seen.has(sg)) { seen.add(sg); result.push(sg); }
+    return result.sort().map((sg) => ({ id: sg, label: sg }));
+  }, [books]);
+
+  const allSeries = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const b of books) if (b.series_name && !seen.has(b.series_name)) { seen.add(b.series_name); result.push(b.series_name); }
+    return result.sort().map((s) => ({ id: s, label: s }));
+  }, [books]);
+
+  const allTags = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const b of books) for (const t of (b.tags || [])) if (!seen.has(t)) { seen.add(t); result.push(t); }
+    return result.sort().map((t) => ({ id: t, label: t }));
+  }, [books]);
+
+  const hasFilters = filters.search.trim() ||
+    ["category", "ownership", "readStatus", "ageLevel", "genre", "subGenre", "format", "author", "series", "tag"]
+      .some((k) => sectionActive(filters[k]));
+
+  return (
+    <div style={{ width: 180, flexShrink: 0, borderRight: "1px solid #ddd", overflowY: "auto", padding: "12px 10px", background: "#fafafa" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: "bold", color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>Filters</div>
+        {hasFilters && <button type="button" onClick={onClearAll} style={{ ...btnSm, fontSize: 10 }}>Clear</button>}
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <input value={filters.search} onChange={(e) => onSectionChange("search", e.target.value)}
+          placeholder="Search title, author..." style={{ ...inputStyle, fontSize: 12 }} />
+      </div>
+
+      <TriStateFilterSection
+        title="Category"
+        items={[{ id: "3", label: "Fiction" }, { id: "4", label: "Non-Fiction" }]}
+        section={filters.category} onChange={(s) => onSectionChange("category", s)} />
+
+      {allAuthors.length > 0 && (
+        <SearchableTriStateSection title="Author" items={allAuthors}
+          section={filters.author} onChange={(s) => onSectionChange("author", s)} />
+      )}
+      {allGenres.length > 0 && (
+        <TriStateFilterSection title="Genre" items={allGenres}
+          section={filters.genre} onChange={(s) => onSectionChange("genre", s)} />
+      )}
+      {allSubGenres.length > 0 && (
+        <TriStateFilterSection title="Subgenre" items={allSubGenres}
+          section={filters.subGenre} onChange={(s) => onSectionChange("subGenre", s)} />
+      )}
+      {formatGroups.length > 0 && (
+        <GroupedTriStateSection title="Format" groups={formatGroups}
+          section={filters.format} onChange={(s) => onSectionChange("format", s)} />
+      )}
+      {ageLevels.length > 0 && (
+        <TriStateFilterSection title="Age Level"
+          items={ageLevels.map((a) => ({ id: String(a.age_level_id), label: a.age_level_name }))}
+          section={filters.ageLevel} onChange={(s) => onSectionChange("ageLevel", s)} />
+      )}
+      <TriStateFilterSection title="Read Status"
+        items={readStatuses.map((s) => ({ id: String(s.read_status_id), label: s.status_name }))}
+        section={filters.readStatus} onChange={(s) => onSectionChange("readStatus", s)} />
+      <TriStateFilterSection title="Ownership"
+        items={ownershipStatuses.map((s) => ({ id: String(s.ownership_status_id), label: s.status_name }))}
+        section={filters.ownership} onChange={(s) => onSectionChange("ownership", s)} />
+      {allSeries.length > 0 && (
+        <TriStateFilterSection title="Series" items={allSeries}
+          section={filters.series} onChange={(s) => onSectionChange("series", s)} />
+      )}
+      {allTags.length > 0 && (
+        <SearchableTriStateSection title="Tags" items={allTags}
+          section={filters.tag} onChange={(s) => onSectionChange("tag", s)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Genre picker ─────────────────────────────────────────────────────────────
+
+function GenrePicker({ genres, selected, onChange }) {
+  const [topId, setTopId] = useState("");
+  const [subId, setSubId] = useState("");
+  const topGenre = genres.find((g) => String(g.top_level_genre_id) === topId);
+  const subGenres = topGenre?.sub_genres || [];
+
+  function doAdd(tId, sId) {
+    if (!tId) return;
+    const tg = genres.find((g) => String(g.top_level_genre_id) === tId);
+    const sg = (tg?.sub_genres || []).find((s) => String(s.sub_genre_id) === sId);
+    const entry = {
+      top_level_genre_id: Number(tId),
+      genre_name: tg?.genre_name || "",
+      sub_genre_id: sg ? Number(sId) : null,
+      sub_genre_name: sg?.sub_genre_name || null,
+    };
+    const key = `${entry.top_level_genre_id}-${entry.sub_genre_id}`;
+    if (!selected.some((s) => `${s.top_level_genre_id}-${s.sub_genre_id}` === key)) {
+      onChange([...selected, entry]);
+    }
+    setTopId("");
+    setSubId("");
+  }
+
+  function handleTopChange(val) {
+    setTopId(val);
+    setSubId("");
+    if (!val) return;
+    const tg = genres.find((g) => String(g.top_level_genre_id) === val);
+    if (!tg?.sub_genres?.length) doAdd(val, "");
+  }
+
+  function handleSubChange(val) {
+    setSubId(val);
+    if (val && topId) doAdd(topId, val);
+  }
+
+  const showAddButton = topId && subGenres.length > 0 && !subId;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+        <select value={topId} onChange={(e) => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", flex: 1 }}>
+          <option value="">-- Genre --</option>
+          {genres.map((g) => <option key={g.top_level_genre_id} value={g.top_level_genre_id}>{g.genre_name}</option>)}
+        </select>
+        {subGenres.length > 0 && (
+          <select value={subId} onChange={(e) => handleSubChange(e.target.value)} style={{ ...selectStyle, width: "auto", flex: 1 }}>
+            <option value="">-- Subgenre (optional) --</option>
+            {subGenres.map((s) => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
+          </select>
+        )}
+        {showAddButton && (
+          <button type="button" onClick={() => doAdd(topId, "")} style={btnSm} title="Add genre without subgenre">Add</button>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {selected.map((s, i) => (
+            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "#e3f2fd", border: "1px solid #90caf9", borderRadius: 10, display: "flex", alignItems: "center", gap: 4 }}>
+              {s.genre_name}{s.sub_genre_name ? ` / ${s.sub_genre_name}` : ""}
+              <button type="button" onClick={() => onChange(selected.filter((_, j) => j !== i))} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0, lineHeight: 1 }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Author list ──────────────────────────────────────────────────────────────
+
+function AuthorList({ names, onChange }) {
+  function update(idx, val) { const next = [...names]; next[idx] = val; onChange(next); }
+  function add() { onChange([...names, ""]); }
+  function remove(idx) { onChange(names.filter((_, i) => i !== idx)); }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {names.map((n, i) => (
+        <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input value={n} onChange={(e) => update(i, e.target.value)} placeholder={i === 0 ? "Primary author" : "Additional author"} style={{ ...inputStyle, flex: 1 }} />
+          {names.length > 1 && <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕</button>}
+        </div>
+      ))}
+      <button type="button" onClick={add} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Author</button>
+    </div>
+  );
+}
+
+// ─── Display components ───────────────────────────────────────────────────────
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const bg = OWNERSHIP_BADGE_COLORS[initial] || "#607d8b";
+  return (
+    <div style={{
+      position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 3,
+      background: bg, color: "#fff", fontSize: 11, fontWeight: "bold", zIndex: 1,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      {initial}
+    </div>
+  );
+}
+
+function StarRatingDisplay({ rating }) {
+  if (!rating) return <span style={{ color: "#ccc", fontSize: 12 }}>—</span>;
+  return <span style={{ fontSize: 12, color: "#f9a825", fontWeight: "bold" }}>{rating}</span>;
+}
+
+function FormatBadges({ formats }) {
+  if (!formats || formats.length === 0) return <span style={{ color: "#ccc", fontSize: 11 }}>—</span>;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+      {formats.map((f, i) => {
+        const colors = FORMAT_COLORS[f.top_level_format] || FORMAT_COLORS.Physical;
+        return <span key={i} style={{ fontSize: 10, padding: "1px 5px", borderRadius: 3, ...colors }}>{f.format_name}</span>;
+      })}
+    </div>
+  );
+}
+
+// ─── Grid view item ───────────────────────────────────────────────────────────
+
+function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+  const { w, h } = GRID_SIZES[gridSize];
+  return (
+    <div onClick={onClick} style={{
+      position: "relative", cursor: "pointer", width: w, flexShrink: 0,
+      outline: isSelected ? "2px solid #1976d2" : "2px solid transparent",
+      borderRadius: 3, boxSizing: "border-box",
+    }}>
+      <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(book.item_id); }}>
+        <input type="checkbox" checked={isSelected} onChange={() => {}} style={{ margin: 0, cursor: "pointer" }} />
+      </div>
+      <OwnershipBadge statusName={book.ownership_status} />
+      {book.cover_image_url ? (
+        <img src={book.cover_image_url} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+      ) : (
+        <div style={{ width: w, height: h, background: "#ddd", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: 10, color: "#999" }}>No Cover</span>
+        </div>
+      )}
+      {showCaptions && (
+        <div style={{ padding: "3px 2px 0", maxWidth: w }}>
+          <div style={{ fontSize: 11, fontWeight: "bold", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title}</div>
+          <div style={{ fontSize: 10, color: "#777", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Table row ────────────────────────────────────────────────────────────────
+
+function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) {
+  const genreText = book.genres?.length ? book.genres.join(", ") : null;
+  const subgenreText = book.subgenres?.length ? book.subgenres.join(", ") : null;
+  return (
+    <tr onClick={onClick} style={{ cursor: "pointer", background: isSelected ? "#e8f0fe" : undefined }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#e3f2fd"; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}>
+      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }}
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(book.item_id); }}>
+        <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(book.item_id)} style={{ margin: 0, cursor: "pointer" }} />
+      </td>
+      {showThumbnails && (
+        <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
+          {book.cover_image_url
+            ? <img src={book.cover_image_url} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid #ddd", display: "block" }} />
+            : <div style={{ width: 42, height: 60, background: "#eee", borderRadius: 2 }} />}
+        </td>
+      )}
+      <td style={{ padding: "3px 8px" }}>
+        <div style={{ fontWeight: "bold", fontSize: 13 }}>{book.title}</div>
+        {book.series_name && (
+          <div style={{ fontSize: 11, color: "#888" }}>{book.series_name}{book.series_number ? ` #${book.series_number}` : ""}</div>
+        )}
+      </td>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "#555" }}>{(book.authors || []).join(", ")}</td>
+      <td style={{ padding: "3px 8px" }}><FormatBadges formats={book.formats} /></td>
+      <td style={{ padding: "3px 8px" }}>
+        {genreText
+          ? <div style={{ fontSize: 12, color: "#555" }}>{genreText}{subgenreText && <span style={{ color: "#888" }}>{" — "}{subgenreText}</span>}</div>
+          : <span style={{ color: "#ccc", fontSize: 11 }}>—</span>}
+      </td>
+      <td style={{ padding: "3px 8px", fontSize: 11, color: "#888", whiteSpace: "nowrap" }}>
+        {book.age_level || <span style={{ color: "#ccc" }}>—</span>}
+      </td>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "#555" }}>{book.reading_status || "—"}</td>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "#555" }}>{book.ownership_status}</td>
+      <td style={{ padding: "3px 8px" }}><StarRatingDisplay rating={book.star_rating} /></td>
+    </tr>
+  );
+}
+
+// ─── Book detail modal ────────────────────────────────────────────────────────
+
+function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses, ownershipStatuses, onClose, onSaved, onDeleted }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saveSuccess, setSaveSuccess] = useState("");
+
+  const [title, setTitle] = useState("");
+  const [authorNames, setAuthorNames] = useState([""]);
+  const [categoryId, setCategoryId] = useState("");
+  const [ownershipId, setOwnershipId] = useState("");
+  const [readStatusId, setReadStatusId] = useState("");
+  const [ageLevelId, setAgeLevelId] = useState("");
+  const [formatDetailId, setFormatDetailId] = useState("");
+  const [starRating, setStarRating] = useState("");
+  const [seriesName, setSeriesName] = useState("");
+  const [seriesNumber, setSeriesNumber] = useState("");
+  const [tagNames, setTagNames] = useState("");
+  const [genreList, setGenreList] = useState([]);
+  const [isbn13, setIsbn13] = useState("");
+  const [isbn10, setIsbn10] = useState("");
+  const [publisher, setPublisher] = useState("");
+  const [publishedDate, setPublishedDate] = useState("");
+  const [pageCount, setPageCount] = useState("");
+  const [language, setLanguage] = useState("en");
+  const [coverUrl, setCoverUrl] = useState("");
+  const [description, setDescription] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    getBook(book.item_id)
+      .then((d) => {
+        setDetail(d);
+        setTitle(d.title || "");
+        setAuthorNames(d.authors?.length ? d.authors.map((a) => a.author_name) : [""]);
+        setCategoryId(String(d.top_level_category_id || ""));
+        setOwnershipId(String(d.ownership_status_id || ""));
+        setReadStatusId(d.reading_status_id ? String(d.reading_status_id) : "");
+        setAgeLevelId(d.age_level_id ? String(d.age_level_id) : "");
+        setStarRating(d.star_rating ? String(d.star_rating) : "");
+        setSeriesName(d.series?.[0]?.series_name || "");
+        setSeriesNumber(d.series?.[0]?.series_number ? String(d.series[0].series_number) : "");
+        setTagNames(d.tags?.map((t) => t.tag_name).join(", ") || "");
+        setGenreList(d.genres || []);
+        const copy = d.copies?.[0];
+        setFormatDetailId(copy?.format_detail_id ? String(copy.format_detail_id) : "");
+        setIsbn13(copy?.isbn_13 || "");
+        setIsbn10(copy?.isbn_10 || "");
+        setPublisher(copy?.publisher || "");
+        setPublishedDate(copy?.published_date || "");
+        setPageCount(copy?.page_count ? String(copy.page_count) : "");
+        setLanguage(copy?.language || "en");
+        setCoverUrl(copy?.cover_image_url || "");
+        setDescription(d.description || "");
+        setNotes(d.notes || "");
+      })
+      .catch((err) => setError(err.message || "Failed to load book detail"))
+      .finally(() => setLoading(false));
+  }, [book.item_id]);
+
+  async function handleSave() {
+    setSaveError("");
+    setSaveSuccess("");
+    if (!title.trim()) { setSaveError("Title is required."); return; }
+    if (!authorNames[0]?.trim()) { setSaveError("At least one author is required."); return; }
+
+    const payload = {
+      top_level_category_id: Number(categoryId),
+      ownership_status_id: Number(ownershipId),
+      reading_status_id: readStatusId ? Number(readStatusId) : null,
+      notes: notes.trim() || null,
+      title: title.trim(),
+      description: description.trim() || null,
+      age_level_id: ageLevelId ? Number(ageLevelId) : null,
+      star_rating: starRating ? Number(starRating) : null,
+      author_names: authorNames.map((n) => n.trim()).filter(Boolean),
+      series_name: seriesName.trim() || null,
+      series_number: seriesNumber ? parseFloat(seriesNumber) : null,
+      genres: genreList.map((g) => ({ top_level_genre_id: g.top_level_genre_id, sub_genre_id: g.sub_genre_id || null })),
+      tag_names: tagNames.split(",").map((t) => t.trim()).filter(Boolean),
+      format_detail_id: formatDetailId ? Number(formatDetailId) : null,
+      isbn_13: isbn13.trim() || null,
+      isbn_10: isbn10.trim() || null,
+      publisher: publisher.trim() || null,
+      published_date: publishedDate.trim() || null,
+      page_count: pageCount ? parseInt(pageCount, 10) : null,
+      language: language.trim() || "en",
+      cover_image_url: coverUrl.trim() || null,
+      api_source: detail?.copies?.[0]?.api_source || null,
+      external_work_id: detail?.copies?.[0]?.external_work_id || null,
+      api_categories_raw: detail?.api_categories_raw || null,
+    };
+
+    setSaving(true);
+    try {
+      await updateBook(book.item_id, payload);
+      setSaveSuccess("Saved.");
+      onSaved();
+    } catch (err) {
+      setSaveError(err.message || "Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteBook(book.item_id);
+      onDeleted(book.item_id);
+    } catch (err) {
+      setSaveError(err.message || "Delete failed.");
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{loading ? "Loading..." : title || "Book Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {loading && <div style={{ color: "#999" }}>Loading...</div>}
+          {error && <div style={alertError}>{error}</div>}
+          {saveError && <div style={alertError}>{saveError}</div>}
+          {saveSuccess && <div style={alertSuccess}>{saveSuccess}</div>}
+
+          {!loading && !error && (
+            <>
+              {coverUrl && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={coverUrl} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{authorNames.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Title *</label>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Author(s) *</label>
+                <AuthorList names={authorNames} onChange={setAuthorNames} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px", marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Category</label>
+                  <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={selectStyle}>
+                    {[{ id: "3", label: "Fiction" }, { id: "4", label: "Non-Fiction" }].map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ownership</label>
+                  <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Read Status</label>
+                  <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Format</label>
+                  <select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Age Level</label>
+                  <select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Star Rating</label>
+                  <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Genres</label>
+                <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "10px 16px", marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Series</label>
+                  <input value={seriesName} onChange={(e) => setSeriesName(e.target.value)} style={inputStyle} placeholder="Series name" />
+                </div>
+                <div style={{ width: 90 }}>
+                  <label style={labelStyle}>Book #</label>
+                  <input value={seriesNumber} onChange={(e) => setSeriesNumber(e.target.value)} style={inputStyle} type="number" step="0.1" />
+                </div>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Tags <span style={{ fontWeight: "normal", color: "#888" }}>(comma-separated)</span></label>
+                <input value={tagNames} onChange={(e) => setTagNames(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px", marginBottom: 10 }}>
+                <div><label style={labelStyle}>ISBN-13</label><input value={isbn13} onChange={(e) => setIsbn13(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>ISBN-10</label><input value={isbn10} onChange={(e) => setIsbn10(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Language</label><input value={language} onChange={(e) => setLanguage(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Publisher</label><input value={publisher} onChange={(e) => setPublisher(e.target.value)} style={inputStyle} /></div>
+                <div><label style={labelStyle}>Published Date</label><input value={publishedDate} onChange={(e) => setPublishedDate(e.target.value)} style={inputStyle} placeholder="YYYY-MM-DD" /></div>
+                <div><label style={labelStyle}>Page Count</label><input value={pageCount} onChange={(e) => setPageCount(e.target.value)} style={inputStyle} type="number" /></div>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Cover Image URL</label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                  {coverUrl && <img src={coverUrl} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                </div>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical", fontFamily: "inherit" }} />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Notes</label>
+                <input value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {!loading && !error && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              {!confirmDelete
+                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this book?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Bulk edit panel ──────────────────────────────────────────────────────────
+
+function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, onClose, onSaved, onDeleted }) {
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipStatusId, setOwnershipStatusId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updateReadStatus, setUpdateReadStatus] = useState(false);
+  const [readStatusId, setReadStatusId] = useState(String(readStatuses[0]?.read_status_id || ""));
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState("");
+
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
+
+  async function handleSave() {
+    if (!updateOwnership && !updateReadStatus) { setError("Select at least one field to update."); return; }
+    const fields = {};
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipStatusId);
+    if (updateReadStatus) fields.reading_status_id = Number(readStatusId);
+    setSaving(true); setError("");
+    try { await bulkUpdateBooks(selectedBooks.map((b) => b.item_id), fields); onSaved(); }
+    catch (err) { setError(err.message || "Failed to update"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try { await bulkDeleteBooks(selectedBooks.map((b) => b.item_id)); onDeleted(); }
+    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 380, display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0" }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedBooks.length} books</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828" }}>{error}</div>}
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={updateOwnership} onChange={() => setUpdateOwnership((p) => !p)} style={{ marginRight: 8 }} />
+              <span style={{ fontWeight: "bold", fontSize: 13 }}>Ownership</span>
+            </label>
+            {updateOwnership && <div style={{ marginTop: 6, paddingLeft: 24 }}><select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={fieldStyle}>{ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}</select></div>}
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={updateReadStatus} onChange={() => setUpdateReadStatus((p) => !p)} style={{ marginRight: 8 }} />
+              <span style={{ fontWeight: "bold", fontSize: 13 }}>Read Status</span>
+            </label>
+            {updateReadStatus && <div style={{ marginTop: 6, paddingLeft: 24 }}><select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={fieldStyle}>{readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}</select></div>}
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0" }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedBooks.length} books</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedBooks.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedBooks.length}`}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+const DEFAULT_FILTERS = {
+  search: "",
+  category: emptySection(),
+  ownership: emptySection(),
+  readStatus: emptySection(),
+  ageLevel: emptySection(),
+  genre: emptySection(),
+  subGenre: emptySection(),
+  format: emptySection(),
+  author: emptySection(),
+  series: emptySection(),
+  tag: emptySection(),
+};
+
+const SORT_OPTIONS = [
+  { value: "title", label: "Title A–Z" },
+  { value: "title_desc", label: "Title Z–A" },
+  { value: "author", label: "Author" },
+  { value: "rating_desc", label: "Rating ↓" },
+  { value: "rating_asc", label: "Rating ↑" },
+  { value: "id_asc", label: "ID ↑" },
+  { value: "id_desc", label: "ID ↓" },
+];
+
+function ToggleButton({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      ...btnSm,
+      background: active ? "#e3f2fd" : "#f5f5f5",
+      color: active ? "#1976d2" : "#333",
+      border: active ? "1px solid #90caf9" : "1px solid #ccc",
+    }}>
+      {children}
+    </button>
+  );
+}
+
+function SegmentedButtons({ options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden" }}>
+      {options.map((opt, i) => (
+        <button key={opt.value} type="button" onClick={() => onChange(opt.value)} style={{
+          fontSize: 11, padding: "2px 8px", cursor: "pointer",
+          background: value === opt.value ? "#1976d2" : "#fff",
+          color: value === opt.value ? "#fff" : "#333",
+          border: "none",
+          borderRight: i < options.length - 1 ? "1px solid #ccc" : "none",
+        }}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function BooksLibraryPage() {
+  const [books, setBooks] = useState([]);
+  const [ownershipStatuses, setOwnershipStatuses] = useState([]);
+  const [readStatuses, setReadStatuses] = useState([]);
+  const [ageLevels, setAgeLevels] = useState([]);
+  const [formatDetails, setFormatDetails] = useState([]);
+  const [genres, setGenres] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [sortMode, setSortMode] = useState("title");
+  const [detailBook, setDetailBook] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const [viewMode, setViewMode] = useState("table");
+  const [showThumbnails, setShowThumbnails] = useState(false);
+  const [gridSize, setGridSize] = useState("m");
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  useEffect(() => {
+    async function loadAll() {
+      setLoading(true); setError("");
+      try {
+        const [bookData, os, rs, al, fd, g] = await Promise.all([
+          listBooks(), fetchOwnershipStatuses(), fetchBookReadStatuses(),
+          fetchBookAgeLevels(), fetchBookFormatDetails(), fetchBookGenres(),
+        ]);
+        setBooks(bookData); setOwnershipStatuses(os); setReadStatuses(rs);
+        setAgeLevels(al); setFormatDetails(fd); setGenres(g);
+      } catch (err) {
+        setError(err.message || "Failed to load books");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAll();
+  }, []);
+
+  async function reloadBooks() {
+    try { setBooks(await listBooks()); }
+    catch (err) { setError(err.message || "Failed to refresh"); }
+  }
+
+  function handleSectionChange(key, value) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleClearAll() { setFilters(DEFAULT_FILTERS); }
+
+  function toggleSelect(itemId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
+      return next;
+    });
+  }
+
+  function selectAll() { setSelectedIds(new Set(sortedBooks.map((b) => b.item_id))); }
+  function clearSelection() { setSelectedIds(new Set()); }
+
+  const filteredBooks = useMemo(() => {
+    let result = books;
+
+    if (filters.search.trim()) {
+      const q = filters.search.toLowerCase();
+      result = result.filter((b) =>
+        b.title?.toLowerCase().includes(q) ||
+        b.authors?.some((a) => a.toLowerCase().includes(q)) ||
+        b.series_name?.toLowerCase().includes(q)
+      );
+    }
+
+    if (sectionActive(filters.category)) {
+      result = result.filter((b) => applySection(filters.category, [b.top_level_category_id]));
+    }
+    if (sectionActive(filters.ownership)) {
+      result = result.filter((b) => applySection(filters.ownership, [b.ownership_status_id]));
+    }
+    if (sectionActive(filters.readStatus)) {
+      result = result.filter((b) => applySection(filters.readStatus, [b.reading_status_id]));
+    }
+    if (sectionActive(filters.ageLevel)) {
+      result = result.filter((b) => applySection(filters.ageLevel, [b.age_level_id]));
+    }
+    if (sectionActive(filters.genre)) {
+      result = result.filter((b) => applySection(filters.genre, b.genres || []));
+    }
+    if (sectionActive(filters.subGenre)) {
+      result = result.filter((b) => applySection(filters.subGenre, b.subgenres || []));
+    }
+    if (sectionActive(filters.format)) {
+      result = result.filter((b) => applySection(filters.format, (b.formats || []).map((f) => f.format_name)));
+    }
+    if (sectionActive(filters.author)) {
+      result = result.filter((b) => applySection(filters.author, b.authors || []));
+    }
+    if (sectionActive(filters.series)) {
+      result = result.filter((b) => applySection(filters.series, b.series_name ? [b.series_name] : []));
+    }
+    if (sectionActive(filters.tag)) {
+      result = result.filter((b) => applySection(filters.tag, b.tags || []));
+    }
+
+    return result;
+  }, [books, filters]);
+
+  const sortedBooks = useMemo(() => {
+    const result = [...filteredBooks];
+    switch (sortMode) {
+      case "title_desc":
+        return result.sort((a, b) => (b.title_sort || b.title).localeCompare(a.title_sort || a.title));
+      case "author":
+        return result.sort((a, b) => (a.authors?.[0] || "").localeCompare(b.authors?.[0] || ""));
+      case "rating_desc":
+        return result.sort((a, b) => {
+          if (!a.star_rating && !b.star_rating) return 0;
+          if (!a.star_rating) return 1;
+          if (!b.star_rating) return -1;
+          return b.star_rating - a.star_rating;
+        });
+      case "rating_asc":
+        return result.sort((a, b) => {
+          if (!a.star_rating && !b.star_rating) return 0;
+          if (!a.star_rating) return 1;
+          if (!b.star_rating) return -1;
+          return a.star_rating - b.star_rating;
+        });
+      case "id_asc":
+        return result.sort((a, b) => a.item_id - b.item_id);
+      case "id_desc":
+        return result.sort((a, b) => b.item_id - a.item_id);
+      default:
+        return result.sort((a, b) => (a.title_sort || a.title).localeCompare(b.title_sort || b.title));
+    }
+  }, [filteredBooks, sortMode]);
+
+  const selectedBooks = useMemo(
+    () => sortedBooks.filter((b) => selectedIds.has(b.item_id)),
+    [sortedBooks, selectedIds]
+  );
+
+  const allVisibleSelected = sortedBooks.length > 0 && sortedBooks.every((b) => selectedIds.has(b.item_id));
+
+  if (loading) return <div style={{ padding: 24 }}>Loading books...</div>;
+  if (error) return <div style={{ padding: 24, color: "#c62828" }}>Error: {error}</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", fontFamily: "sans-serif", fontSize: 13 }}>
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid #ddd", background: "#f5f5f5", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 11, color: "#666", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "0.04em" }}>Sort</span>
+            <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} style={{ fontSize: 13, padding: "3px 5px", border: "1px solid #ccc", borderRadius: 3 }}>
+              {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <span style={{ fontSize: 12, color: "#888" }}>{sortedBooks.length} book{sortedBooks.length !== 1 ? "s" : ""}</span>
+          {selectedIds.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "#1976d2", fontWeight: "bold" }}>{selectedIds.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <SegmentedButtons
+            options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
+            value={viewMode} onChange={setViewMode} />
+          {viewMode === "table" && (
+            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails((p) => !p)}>Thumbnails</ToggleButton>
+          )}
+          {viewMode === "grid" && (
+            <>
+              <SegmentedButtons
+                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                value={gridSize} onChange={setGridSize} />
+              <ToggleButton active={showCaptions} onClick={() => setShowCaptions((p) => !p)}>Captions</ToggleButton>
+            </>
+          )}
+          <a href="/books/add" style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", marginLeft: 4 }}>+ Add Book</a>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        <BookFilters
+          books={books}
+          ownershipStatuses={ownershipStatuses}
+          readStatuses={readStatuses}
+          ageLevels={ageLevels}
+          filters={filters}
+          onSectionChange={handleSectionChange}
+          onClearAll={handleClearAll}
+        />
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
+          {sortedBooks.length === 0 ? (
+            <div style={{ padding: 24, color: "#999" }}>No books match the current filters.</div>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+              {sortedBooks.map((b) => (
+                <BookGridItem key={b.item_id} book={b}
+                  isSelected={selectedIds.has(b.item_id)}
+                  onToggleSelect={toggleSelect}
+                  onClick={() => setDetailBook(b)}
+                  gridSize={gridSize} showCaptions={showCaptions} />
+              ))}
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f5f5f5", borderBottom: "1px solid #ddd" }}>
+                  <th style={{ padding: "5px 6px", width: 28, textAlign: "center" }}>
+                    <input type="checkbox" checked={allVisibleSelected}
+                      onChange={() => allVisibleSelected ? clearSelection() : selectAll()}
+                      style={{ margin: 0, cursor: "pointer" }} />
+                  </th>
+                  {showThumbnails && <th style={{ padding: "5px 6px", width: 50 }}></th>}
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Title</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Author</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Format</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Genre</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Age</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Read Status</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Ownership</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Rating</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedBooks.map((b) => (
+                  <BookRow key={b.item_id} book={b}
+                    isSelected={selectedIds.has(b.item_id)}
+                    onToggleSelect={toggleSelect}
+                    onClick={() => setDetailBook(b)}
+                    showThumbnails={showThumbnails} />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {detailBook && (
+        <BookDetailModal
+          book={detailBook} genres={genres} formatDetails={formatDetails}
+          ageLevels={ageLevels} readStatuses={readStatuses} ownershipStatuses={ownershipStatuses}
+          onClose={() => setDetailBook(null)}
+          onSaved={async () => { setDetailBook(null); await reloadBooks(); }}
+          onDeleted={(itemId) => { setDetailBook(null); setBooks((prev) => prev.filter((b) => b.item_id !== itemId)); }}
+        />
+      )}
+
+      {bulkEditOpen && (
+        <BookBulkEdit
+          selectedBooks={selectedBooks} ownershipStatuses={ownershipStatuses} readStatuses={readStatuses}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); await reloadBooks(); }}
+          onDeleted={() => { setBulkEditOpen(false); setBooks((prev) => prev.filter((b) => !selectedIds.has(b.item_id))); clearSelection(); }}
+        />
+      )}
+    </div>
+  );
+}

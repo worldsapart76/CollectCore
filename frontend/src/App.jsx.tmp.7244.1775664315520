@@ -5,8 +5,6 @@ import InboxPage from "./pages/InboxPage";
 import PhotocardLibraryPage from "./pages/PhotocardLibraryPage";
 import AdminPage from "./pages/AdminPage";
 import ExportPage from "./pages/ExportPage";
-import BooksIngestPage from "./pages/BooksIngestPage";
-import BooksLibraryPage from "./pages/BooksLibraryPage";
 
 export default function App() {
   return (
@@ -17,8 +15,6 @@ export default function App() {
         <Route path="/library" element={<PhotocardLibraryPage />} />
         <Route path="/export" element={<ExportPage />} />
         <Route path="/admin" element={<AdminPage />} />
-        <Route path="/books/add" element={<BooksIngestPage />} />
-        <Route path="/books/library" element={<BooksLibraryPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

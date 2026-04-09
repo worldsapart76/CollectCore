@@ -1,298 +1,430 @@
 import { useEffect, useMemo, useState } from "react";
-import PageContainer from "../components/layout/PageContainer";
-import LibraryFilterSidebar from "../components/library/LibraryFilterSidebar";
-import { getCards } from "../services/libraryApi";
-import { filterCards } from "../utils/filterUtils";
-import { sortCards } from "../utils/sortUtils";
-import { getMembersForGroup } from "../utils/groupUtils";
+import {
+  listPhotocards,
+  fetchPhotocardGroups,
+  fetchTopLevelCategories,
+  fetchOwnershipStatuses,
+  exportPhotocards,
+} from "../api";
+import PhotocardFilters from "../components/photocard/PhotocardFilters";
 
-const emptyFilters = {
-  search: "",
-  members: [],
-  groupCodes: ["skz"],
-  topLevelCategories: [],
-  subCategories: [],
-  version: "",
-  ownershipStatus: ["For Trade"],
-  backStatus: [],
+const COLLECTION_TYPE_ID = 1;
+
+const DEFAULT_FILTERS = {
+  notesSearch: "",
+  groupIds: [],
+  memberIds: [],
+  categoryIds: [],
+  sourceOriginIds: [],
+  ownershipStatusIds: [],
+  backStatus: "all",
 };
+
+const SORT_OPTIONS = [
+  { value: "id_asc", label: "ID ↑" },
+  { value: "id_desc", label: "ID ↓" },
+  { value: "member", label: "Member" },
+  { value: "category", label: "Category" },
+  { value: "group", label: "Group" },
+];
 
 export default function ExportPage() {
   const [cards, setCards] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [ownershipStatuses, setOwnershipStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filters, setFilters] = useState(emptyFilters);
-  const [sortMode, setSortMode] = useState("id-asc");
-
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [sortMode, setSortMode] = useState("id_asc");
   const [includeCaptions, setIncludeCaptions] = useState(true);
   const [includeBacks, setIncludeBacks] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   useEffect(() => {
-    async function loadCards() {
+    async function loadAll() {
+      setLoading(true);
+      setError("");
       try {
-        setLoading(true);
-        setError("");
-        const data = await getCards();
-        setCards(Array.isArray(data) ? data : []);
+        const [cardData, groupData, categoryData, statusData] = await Promise.all([
+          listPhotocards(),
+          fetchPhotocardGroups(),
+          fetchTopLevelCategories(COLLECTION_TYPE_ID),
+          fetchOwnershipStatuses(),
+        ]);
+        setCards(cardData);
+        setGroups(groupData);
+        setCategories(categoryData);
+        setOwnershipStatuses(statusData);
       } catch (err) {
-        console.error(err);
-        setError("Failed to load cards for export.");
+        setError(err.message || "Failed to load data");
       } finally {
         setLoading(false);
       }
     }
-
-    loadCards();
+    loadAll();
   }, []);
 
-  const availableOptions = useMemo(() => {
-    const uniqueGroupCodes = [...new Set(cards.map((c) => c.group_code).filter(Boolean))].sort();
-
-    const activeGroupCodes =
-      filters.groupCodes.length > 0 ? filters.groupCodes : uniqueGroupCodes;
-
-    const activeTopLevelCategories =
-      filters.topLevelCategories.length > 0
-        ? filters.topLevelCategories
-        : [...new Set(cards.map((c) => c.top_level_category).filter(Boolean))].sort();
-
-    const cardsForMemberOptions = cards.filter((c) => activeGroupCodes.includes(c.group_code));
-
-    const availableMemberSet = new Set(
-      cardsForMemberOptions.map((c) => c.member).filter(Boolean)
-    );
-
-    const orderedMembers = [];
-    const seenMembers = new Set();
-
-    activeGroupCodes.forEach((groupCode) => {
-      const groupMembers = getMembersForGroup(groupCode) || [];
-      groupMembers.forEach((member) => {
-        if (availableMemberSet.has(member) && !seenMembers.has(member)) {
-          orderedMembers.push(member);
-          seenMembers.add(member);
+  const filterMembers = useMemo(() => {
+    const memberMap = new Map();
+    for (const card of cards) {
+      if (card.members) {
+        for (const name of card.members) {
+          if (!memberMap.has(name)) {
+            memberMap.set(name, { member_id: name, member_name: name });
+          }
         }
-      });
-    });
+      }
+    }
+    return [...memberMap.values()].sort((a, b) =>
+      a.member_name.localeCompare(b.member_name)
+    );
+  }, [cards]);
 
-    const remainingMembers = [...availableMemberSet]
-      .filter((member) => !seenMembers.has(member))
-      .sort((a, b) => a.localeCompare(b));
-
-    const uniqueTopLevelCategories = [
-      ...new Set(
-        cards
-          .filter((c) => activeGroupCodes.includes(c.group_code))
-          .map((c) => c.top_level_category)
-          .filter(Boolean)
-      ),
-    ].sort();
-
-    const uniqueSubCategories = [
-      ...new Set(
-        cards
-          .filter((c) => activeGroupCodes.includes(c.group_code))
-          .filter(
-            (c) =>
-              activeTopLevelCategories.length === 0 ||
-              activeTopLevelCategories.includes(c.top_level_category)
-          )
-          .map((c) => c.sub_category)
-          .filter(Boolean)
-      ),
-    ].sort();
-
-    const uniqueVersions = [
-      ...new Set(
-        cards
-          .filter((c) => activeGroupCodes.includes(c.group_code))
-          .filter(
-            (c) =>
-              activeTopLevelCategories.length === 0 ||
-              activeTopLevelCategories.includes(c.top_level_category)
-          )
-          .map((c) => c.source)
-          .filter(Boolean)
-      ),
-    ].sort((a, b) => a.localeCompare(b));
-
-    return {
-      members: [...orderedMembers, ...remainingMembers],
-      groupCodes: uniqueGroupCodes,
-      topLevelCategories: uniqueTopLevelCategories,
-      subCategories: uniqueSubCategories,
-      versions: uniqueVersions,
-    };
-  }, [cards, filters.groupCodes, filters.topLevelCategories]);
+  const filterSourceOrigins = useMemo(() => {
+    const soMap = new Map();
+    for (const card of cards) {
+      if (card.source_origin_id && card.source_origin) {
+        if (!soMap.has(card.source_origin_id)) {
+          soMap.set(card.source_origin_id, {
+            source_origin_id: card.source_origin_id,
+            source_origin_name: card.source_origin,
+          });
+        }
+      }
+    }
+    return [...soMap.values()].sort((a, b) =>
+      a.source_origin_name.localeCompare(b.source_origin_name)
+    );
+  }, [cards]);
 
   const filteredCards = useMemo(() => {
-    return filterCards(cards, filters);
+    let result = cards;
+
+    if (filters.groupIds?.length > 0) {
+      result = result.filter((c) => filters.groupIds.includes(String(c.group_id)));
+    }
+    if (filters.memberIds?.length > 0) {
+      result = result.filter((c) =>
+        c.members?.some((name) => filters.memberIds.includes(name))
+      );
+    }
+    if (filters.categoryIds?.length > 0) {
+      result = result.filter((c) =>
+        filters.categoryIds.includes(String(c.top_level_category_id))
+      );
+    }
+    if (filters.sourceOriginIds?.length > 0) {
+      result = result.filter((c) =>
+        filters.sourceOriginIds.includes(String(c.source_origin_id))
+      );
+    }
+    if (filters.ownershipStatusIds?.length > 0) {
+      result = result.filter((c) =>
+        filters.ownershipStatusIds.includes(String(c.ownership_status_id))
+      );
+    }
+    if (filters.backStatus === "has_back") {
+      result = result.filter((c) => c.back_image_path);
+    } else if (filters.backStatus === "missing_back") {
+      result = result.filter((c) => !c.back_image_path);
+    }
+    if (filters.notesSearch?.trim()) {
+      const q = filters.notesSearch.toLowerCase();
+      result = result.filter(
+        (c) =>
+          c.notes?.toLowerCase().includes(q) ||
+          c.members?.some((m) => m.toLowerCase().includes(q)) ||
+          c.source_origin?.toLowerCase().includes(q) ||
+          c.version?.toLowerCase().includes(q) ||
+          c.category?.toLowerCase().includes(q) ||
+          c.group_name?.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
   }, [cards, filters]);
 
   const sortedCards = useMemo(() => {
-    return sortCards(filteredCards, sortMode);
+    const result = [...filteredCards];
+    switch (sortMode) {
+      case "id_desc":
+        return result.sort((a, b) => b.item_id - a.item_id);
+      case "member":
+        return result.sort((a, b) =>
+          (a.members?.[0] || "").localeCompare(b.members?.[0] || "")
+        );
+      case "category":
+        return result.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
+      case "group":
+        return result.sort((a, b) => (a.group_name || "").localeCompare(b.group_name || ""));
+      case "id_asc":
+      default:
+        return result.sort((a, b) => a.item_id - b.item_id);
+    }
   }, [filteredCards, sortMode]);
 
-  function toggleInArray(key, value) {
-    setFilters((prev) => {
-      const arr = prev[key];
-      const next = arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
-      return { ...prev, [key]: next };
-    });
+  function handleFilterChange(key, value) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
   }
 
-  function clearAllFilters() {
-    setFilters(emptyFilters);
+  function handleClearAll() {
+    setFilters(DEFAULT_FILTERS);
   }
 
   async function handleExport() {
-    if (sortedCards.length === 0) {
-      setError("No cards match current export filters.");
-      return;
-    }
+    if (sortedCards.length === 0) return;
 
     setIsExporting(true);
-    setError("");
+    setExportError("");
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/export/pdf", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          card_ids: sortedCards.map((card) => card.id),
-          include_captions: includeCaptions,
-          include_backs: includeBacks,
-        }),
+      const blob = await exportPhotocards({
+        itemIds: sortedCards.map((c) => c.item_id),
+        includeCaptions,
+        includeBacks,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Export failed.");
-      }
-
-      const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-
       const a = document.createElement("a");
       a.href = url;
       a.download = "photocard_export.pdf";
       document.body.appendChild(a);
       a.click();
       a.remove();
-
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      setError("Failed to export PDF.");
+      setExportError(err.message || "Export failed.");
     } finally {
       setIsExporting(false);
     }
   }
 
+  const ownershipSections = useMemo(() => {
+    return [
+      ...new Set(sortedCards.map((c) => c.ownership_status).filter(Boolean)),
+    ].sort();
+  }, [sortedCards]);
+
+  if (loading) return <div style={{ padding: 24 }}>Loading...</div>;
+  if (error) return <div style={{ padding: 24, color: "#c62828" }}>Error: {error}</div>;
+
   return (
-    <PageContainer className="library-page">
-      <div className="library-layout">
-        <LibraryFilterSidebar
-          filters={filters}
-          availableOptions={availableOptions}
-          onSearchChange={(value) => setFilters((prev) => ({ ...prev, search: value }))}
-          onToggleMember={(value) => toggleInArray("members", value)}
-          onToggleGroupCode={(value) => toggleInArray("groupCodes", value)}
-          onToggleTopLevelCategory={(value) => toggleInArray("topLevelCategories", value)}
-          onToggleSubCategory={(value) => toggleInArray("subCategories", value)}
-          onVersionChange={(value) => setFilters((prev) => ({ ...prev, version: value }))}
-          onToggleOwnershipStatus={(value) => toggleInArray("ownershipStatus", value)}
-          onToggleBackStatus={(value) => toggleInArray("backStatus", value)}
-          onClearAll={clearAllFilters}
-        />
-
-        <div className="library-content">
-          <div
-            style={{
-              display: "flex",
-              gap: 16,
-              flexWrap: "wrap",
-              alignItems: "flex-end",
-              marginBottom: 16,
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Sort</div>
-              <select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
-                <option value="id-asc">ID ↑</option>
-                <option value="id-desc">ID ↓</option>
-                <option value="member">Member</option>
-                <option value="category">Category</option>
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-              </select>
-            </div>
-
-            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={includeCaptions}
-                onChange={(e) => setIncludeCaptions(e.target.checked)}
-              />
-              Include captions
-            </label>
-
-            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={includeBacks}
-                onChange={(e) => setIncludeBacks(e.target.checked)}
-              />
-              Include backs
-            </label>
-
-            <button type="button" onClick={handleExport} disabled={isExporting || loading}>
-              {isExporting ? "Exporting..." : "Export PDF"}
-            </button>
-          </div>
-
-          <div style={{ marginBottom: 12 }}>
-            <h2 style={{ margin: "0 0 6px 0" }}>Export PDF</h2>
-            <p style={{ margin: 0 }}>
-              Export the cards that match the current filters and sort order.
-            </p>
-          </div>
-
-          {loading ? <div className="state-message">Loading cards...</div> : null}
-          {error ? <div className="state-message error">{error}</div> : null}
-
-          {!loading ? (
-            <div
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 8,
-                padding: 12,
-                background: "#fafafa",
-                maxWidth: 520,
-              }}
+    <div style={styles.page}>
+      {/* Controls bar */}
+      <div style={styles.controlsBar}>
+        <div style={styles.controlsLeft}>
+          <div style={styles.controlGroup}>
+            <span style={styles.controlLabel}>Sort</span>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value)}
+              style={styles.controlSelect}
             >
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>Export Summary</div>
-              <div style={{ marginBottom: 4 }}>Matching cards: {sortedCards.length}</div>
-              <div style={{ marginBottom: 4 }}>
-                Ownership sections in result:{" "}
-                {[
-                  ...new Set(
-                    sortedCards.map((card) => card.ownership_status).filter(Boolean)
-                  ),
-                ].join(", ") || "None"}
-              </div>
-              <div style={{ marginBottom: 4 }}>
-                Backs included: {includeBacks ? "Yes" : "No"}
-              </div>
-              <div>Captions included: {includeCaptions ? "Yes" : "No"}</div>
-            </div>
-          ) : null}
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <label style={styles.checkLabel}>
+            <input
+              type="checkbox"
+              checked={includeCaptions}
+              onChange={(e) => setIncludeCaptions(e.target.checked)}
+              style={{ marginRight: 5 }}
+            />
+            Include captions
+          </label>
+
+          <label style={styles.checkLabel}>
+            <input
+              type="checkbox"
+              checked={includeBacks}
+              onChange={(e) => setIncludeBacks(e.target.checked)}
+              style={{ marginRight: 5 }}
+            />
+            Include backs
+          </label>
+        </div>
+
+        <div style={styles.controlsRight}>
+          <button
+            style={{
+              ...styles.exportBtn,
+              ...(sortedCards.length === 0 || isExporting ? styles.exportBtnDisabled : {}),
+            }}
+            onClick={handleExport}
+            disabled={sortedCards.length === 0 || isExporting}
+          >
+            {isExporting ? "Exporting..." : "Export PDF"}
+          </button>
         </div>
       </div>
-    </PageContainer>
+
+      {/* Body */}
+      <div style={styles.body}>
+        <PhotocardFilters
+          groups={groups}
+          members={filterMembers}
+          categories={categories}
+          sourceOrigins={filterSourceOrigins}
+          ownershipStatuses={ownershipStatuses}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          onClearAll={handleClearAll}
+        />
+
+        <div style={styles.content}>
+          {exportError && (
+            <div style={styles.errorBanner}>{exportError}</div>
+          )}
+
+          <div style={styles.summaryCard}>
+            <div style={styles.summaryTitle}>Export Summary</div>
+            <div style={styles.summaryRow}>
+              <span style={styles.summaryLabel}>Matching cards</span>
+              <span style={styles.summaryValue}>{sortedCards.length}</span>
+            </div>
+            <div style={styles.summaryRow}>
+              <span style={styles.summaryLabel}>Ownership</span>
+              <span style={styles.summaryValue}>
+                {ownershipSections.length > 0 ? ownershipSections.join(", ") : "—"}
+              </span>
+            </div>
+            <div style={styles.summaryRow}>
+              <span style={styles.summaryLabel}>Captions</span>
+              <span style={styles.summaryValue}>{includeCaptions ? "Yes" : "No"}</span>
+            </div>
+            <div style={styles.summaryRow}>
+              <span style={styles.summaryLabel}>Backs</span>
+              <span style={styles.summaryValue}>{includeBacks ? "Yes" : "No"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
+
+const styles = {
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100vh",
+    overflow: "hidden",
+    fontFamily: "sans-serif",
+    fontSize: 13,
+  },
+  controlsBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "6px 12px",
+    borderBottom: "1px solid #ddd",
+    background: "#f5f5f5",
+    flexShrink: 0,
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  controlsLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    flexWrap: "wrap",
+  },
+  controlsRight: {
+    display: "flex",
+    alignItems: "center",
+  },
+  controlGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+  },
+  controlLabel: {
+    fontSize: 11,
+    color: "#666",
+    fontWeight: "bold",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  controlSelect: {
+    fontSize: 13,
+    padding: "3px 5px",
+    border: "1px solid #ccc",
+    borderRadius: 3,
+  },
+  checkLabel: {
+    display: "flex",
+    alignItems: "center",
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  exportBtn: {
+    padding: "5px 16px",
+    fontSize: 13,
+    fontWeight: "bold",
+    cursor: "pointer",
+    background: "#1565c0",
+    color: "#fff",
+    border: "1px solid #1565c0",
+    borderRadius: 3,
+  },
+  exportBtnDisabled: {
+    background: "#90a4ae",
+    borderColor: "#90a4ae",
+    cursor: "default",
+  },
+  body: {
+    display: "flex",
+    flex: 1,
+    overflow: "hidden",
+    padding: 12,
+    gap: 12,
+  },
+  content: {
+    flex: 1,
+    overflowY: "auto",
+  },
+  errorBanner: {
+    background: "#ffebee",
+    color: "#c62828",
+    border: "1px solid #ef9a9a",
+    borderRadius: 4,
+    padding: "8px 12px",
+    marginBottom: 12,
+    fontSize: 13,
+  },
+  summaryCard: {
+    border: "1px solid #ddd",
+    borderRadius: 6,
+    padding: "12px 16px",
+    background: "#fafafa",
+    maxWidth: 400,
+  },
+  summaryTitle: {
+    fontWeight: "bold",
+    fontSize: 14,
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottom: "1px solid #eee",
+  },
+  summaryRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "4px 0",
+    fontSize: 13,
+  },
+  summaryLabel: {
+    color: "#666",
+  },
+  summaryValue: {
+    fontWeight: "bold",
+    maxWidth: 260,
+    textAlign: "right",
+  },
+};

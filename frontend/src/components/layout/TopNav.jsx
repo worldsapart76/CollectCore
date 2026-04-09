@@ -66,6 +66,13 @@ export default function TopNav() {
           <NavLink to="/export" className={navClass}>
             Export
           </NavLink>
+          <span style={{ color: "#555", fontSize: 12, padding: "0 2px" }}>|</span>
+          <NavLink to="/books/add" className={navClass}>
+            Add Book
+          </NavLink>
+          <NavLink to="/books/library" className={navClass}>
+            Books
+          </NavLink>
         </nav>
       </div>
 

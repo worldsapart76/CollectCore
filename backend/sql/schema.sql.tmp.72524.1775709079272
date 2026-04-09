@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS tbl_book_details (
     title_sort          TEXT,
     description         TEXT,
     age_level_id        INTEGER,
-    star_rating         REAL CHECK (star_rating BETWEEN 0.5 AND 5.0),
+    star_rating         INTEGER CHECK (star_rating BETWEEN 1 AND 5),
     review              TEXT,
     api_categories_raw  TEXT,
     FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE,

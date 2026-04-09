@@ -1,0 +1,286 @@
+# CollectCore — Project Briefing for Claude Code
+
+## Project Overview
+
+CollectCore is a multi-collection tracker application rebuilt from a
+completed, fully functional photocard tracker. The goal is a generalized
+system that supports multiple collection types (photocards, books, and
+future types such as movies, music, and graphic novels) while preserving
+the core UI patterns and workflows from the original app.
+
+The original photocard tracker was built with ChatGPT and is complete.
+CollectCore is an active rebuild/generalization — not a from-scratch app.
+
+---
+
+## Stack
+
+- **Backend:** Python + FastAPI + SQLite
+- **Frontend:** React + Vite
+- **Environment:** WSL2 + Ubuntu (local-first, no cloud deployment yet)
+
+---
+
+## Core Architecture
+
+CollectCore uses a shared item table + collection-specific detail tables:
+
+- `tbl_items` — shared record for all collection types
+- `tbl_photocard_details` — photocard-specific fields
+- `tbl_book_details` — book-specific fields (not yet implemented)
+- `xref_photocard_members` — many-to-many member relationships
+- Shared lookup tables for collection types, categories, and ownership
+- Collection-specific lookup tables for groups, members, source origins
+
+`collection_type_id` differentiates modules throughout the system.
+
+---
+
+## Active Modules
+
+### Photocards
+- Backend: implemented (see active endpoints in docs/collectcore_summary.md)
+- Frontend: partially built (InboxManager tester, basic list)
+- Migration from original app: not yet executed
+
+### Books
+- Backend: not yet implemented
+- Frontend: not yet implemented
+- Design partially specified — see docs below
+- ⚠️ Prerequisites must be resolved before development begins —
+  see Books Module Prerequisites section below
+
+---
+
+## UI Design Principles
+
+The UI should remain consistent with the original photocard tracker across
+all collection modules. Key principles from the original app:
+
+- Compact and dense layout — minimal whitespace
+- Button-driven interaction preferred over free typing
+- Guided controls to prevent invalid input
+- High efficiency for repeated actions (batch ingest, bulk edit)
+- Two-panel layout: left sidebar filters, main content area
+
+Do NOT redesign the UI structure without explicit instruction. Refer to
+`docs/photocard_tracker_ui_spec.md` for full behavioral reference.
+
+---
+
+## Image Ingest Workflow — CRITICAL
+
+The image ingest workflow is a core feature of CollectCore, not optional
+or deferred. It is fully implemented in the original photocard tracker
+and must be rebuilt in CollectCore.
+
+### Mental model
+> Front images create records. Back images attach to records.
+
+This is a two-phase, front-first, human-confirmed attachment pipeline.
+
+### Key behaviors to preserve
+- Inbox staging area (`images/inbox/`) before permanent storage
+- Deterministic filename structure: `{group_code}_{id:06d}_{side}.{ext}`
+  - Example: `skz_000123_f.jpg`, `skz_000123_b.jpg`
+- Candidate matching for back attachment (metadata-based, human-confirmed)
+- Missing backs are a valid normal state (`back_image_path = NULL`)
+- Image replacement preserves record identity
+- Cache busting via file modification timestamp (`?v=mtime`)
+
+### Items to re-evaluate in CollectCore rebuild
+- Strict front/back model (may need multi-asset support)
+- Path-based storage (cloud storage is a future consideration)
+- Filesystem-based versioning
+
+### Image schema status
+Image fields are not yet finalized in the CollectCore schema. Do not
+treat image handling as out of scope. Any schema work that touches
+`tbl_items` or `tbl_photocard_details` should account for image fields.
+Raise the image field question explicitly before finalizing those tables.
+
+Full ingest workflow spec: `docs/photocard_tracker_ingest_workflow.md`
+
+---
+
+## Known Shortcuts from Original App (Carry-Forward Decisions)
+
+The following are intentional simplifications from the original app.
+Do not "fix" these unless explicitly instructed:
+
+- `source` field not renamed to `version` in original DB (CollectCore
+  has resolved this with the source_origin / version split: version in
+  CollectCore was source in the original DB; source_origin in CollectCore
+  replaces the concept of subcategory in the original DB)
+- Local file storage (no asset management system yet)
+- Option tables derived from card data, not authoritative lookups
+- No virtualization or performance layer
+- Inline styling (no design system)
+- Export logic is still photocard-specific
+
+---
+
+## Key Schema Decisions
+
+- `subcategory` has been removed — do not reintroduce it
+- `source_origin` and `version` are now distinct concepts
+  - source_origin = release/event origin (e.g., `5-STAR`)
+  - version = specific variation (e.g., `Soundwave POB`)
+- `source_origin_id` is explicitly nullable — all queries must use LEFT JOIN
+- `member` is no longer a scalar field — stored in `xref_photocard_members`
+- Categories and ownership resolve through shared lookup tables
+- Source origins are scoped by `group_id` + `top_level_category_id`
+- `format` field belongs on `tbl_items` (shared across all collection
+  types, not module-specific) — placement decided, not yet implemented
+- Tags scope (global vs. module-specific) is an unresolved
+  cross-collection architecture decision — do not implement tags
+  for any module until this is decided
+
+---
+
+## Books Module — Prerequisites Before Development
+
+The following items MUST be discussed and decided before any Books
+module schema, backend, or frontend work begins. Claude Code should
+raise these explicitly at the start of any session where Books
+development is requested, and should not proceed until each item
+is resolved or explicitly deferred by the user.
+
+### 1. Tags architecture (global vs. module-specific)
+Unresolved cross-collection decision. Affects tbl_book_details schema
+and all future modules. Do not implement tags for any module until
+decided. See deferred item 15.
+
+### 2. Format field implementation
+Top-level values (Physical, Digital, Audio) are decided and belong on
+tbl_items. Sub-format detail (Kindle, Audible, Kobo, etc.) and
+multi-format handling are not yet decided. Affects tbl_items schema
+and Goodreads migration. See deferred items 12 and 14.
+
+### 3. Reading status
+Not decided. May belong on tbl_items (shared) or tbl_book_details
+(book-only). Affects schema and Goodreads migration.
+See collectcore_books_module_design.md Section 16.
+
+### 4. API category handling
+Whether to store, ignore, or convert Google Books / Open Library
+categories to tags is not decided. Affects the API normalization
+layer. Must be decided before building external search endpoints.
+
+### 5. Duplicate detection UX
+Soft warning vs. hard block on ISBN duplicates not decided.
+Must be decided before POST /books is finalized.
+
+### 6. Genre/subgenre lookup admin UI
+Genre system is designed but the UI for adding new genres and
+subgenres from within the app must be scoped before frontend work
+begins. See collectcore_books_module_design.md Section 17.
+
+---
+
+## Deferred Items (Prioritized)
+
+These are intentionally not yet built. Do not implement without instruction:
+
+1. Image field schema finalization and image ingest rebuild
+2. Ownership status dropdown — move to lookup-driven UI
+3. Books module — full backend and frontend implementation
+   ⚠️ See Books Module Prerequisites above before starting
+4. Return full object on create endpoints (currently returns minimal response)
+5. Lookup admin/management UI
+6. Validation improvements and consistent error handling across endpoints
+7. Full Library UI (binder view, filtering, editing, bulk actions)
+8. Export functionality (PDF, filtered + sorted)
+9. Card Detail modal
+10. Bulk Edit panel
+11. Books module — genre/subgenre lookup admin UI
+12. Books module — book format sub-format detail and multi-format
+    handling (top-level Physical/Digital/Audio decided; platform detail
+    and multi-format record strategy still open — decide before
+    implementing tbl_book_details)
+13. Books module — reading status field design and implementation
+    (open question: shared tbl_items vs. book-specific;
+    see collectcore_books_module_design.md Section 16)
+14. Format field implementation on tbl_items (placement decided,
+    sub-format detail and multi-format handling still open)
+15. Tags architecture — global vs. module-specific decision required
+    before implementing tags for any module
+16. API category handling — decide whether to store, ignore, or
+    convert to tags before building API normalization layer
+17. Duplicate detection UX — soft warning vs. hard block on ISBN
+18. Pagination — not designed or implemented for any module
+19. Consistent validation rules and response shapes across all endpoints
+
+---
+
+## Reference Documentation
+
+All docs are in the `docs/` folder. Use these as authoritative references:
+
+| File | Purpose |
+|---|---|
+| `docs/photocard_tracker_design_notes.md` | Original app design decisions and rationale |
+| `docs/photocard_tracker_ui_spec.md` | Full UI behavioral spec — use as reference for all UI work |
+| `docs/photocard_tracker_ingest_workflow.md` | Image ingest workflow — must be rebuilt in CollectCore |
+| `docs/collectcore_summary.md` | Schema changes, active endpoints, current implementation state |
+| `docs/collectcore_photocard_migration_mapping.md` | Field-level migration mapping from original to new schema |
+| `docs/collectcore_books_module_design.md` | Books module design decisions, philosophy, and open items |
+| `docs/collectcore_books_v1_schema_proposal.md` | Books module v1 schema, SQL, API endpoints, request/response shapes |
+
+---
+
+## Implementation Status Notes
+
+- `docs/collectcore_books_module_design.md` and
+  `docs/collectcore_books_v1_schema_proposal.md` are **design documents
+  only** — nothing in the Books module has been implemented yet.
+- `docs/collectcore_photocard_migration_mapping.md` is a **reference
+  document only** — no migration script has been written yet.
+- The active endpoint list in `docs/collectcore_summary.md` is the
+  authoritative source for what is currently built and working.
+
+---
+
+## Session Notes
+
+_Format: ### YYYY-MM-DD — brief completed / next summary_
+_Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
+
+> Update this section at the end of each working session with a brief
+> summary of what was completed and what is next.
+
+### 2026-04-08 — Phase 3 Export complete
+
+**Completed:**
+- Backend: `POST /export/photocards` — accepts `item_ids` (ordered), `include_captions`, `include_backs`; generates PDF via reportlab (4-column grid, A4 portrait, 1.54 portrait ratio, caption below each image); returns as streaming binary
+- `api.js`: added `exportPhotocards` (returns blob, not JSON)
+- Rewrote `ExportPage.jsx` using CollectCore patterns: same data loading + filter state as `PhotocardLibraryPage`, reuses `PhotocardFilters` sidebar, export summary panel, downloads PDF on button click
+- **Fix:** Export silently dropped cards with no front image (`if card["front_image_path"]:` guard); changed to always add an entry per card — missing image renders as grey placeholder so no card is ever excluded
+
+**Next:**
+- Phase 4: Full testing and tweaks
+- Phase 5: Migration script (original photocard tracker → CollectCore schema)
+  - See `docs/collectcore_photocard_migration_mapping.md` for field mapping
+
+### 2026-04-08 — Phase 2 Image Ingest complete
+
+**Completed:**
+- Backend ingest endpoints: `GET /ingest/inbox`, `POST /ingest/upload`, `POST /ingest/front`, `GET /ingest/candidates` (member-filtered), `POST /ingest/attach-back`, `POST /ingest/pair`, `POST /photocards/{id}/replace-front`, `POST /photocards/{id}/replace-back`
+- Rebuilt `InboxPage.jsx`: drag/drop upload zone, unified inbox queue with per-file F/B toggles, persistent metadata form (survives file changes), auto-select on upload
+- Multi-select (max 2): single F → ingest front; single B → candidate grid + attach back; F+B pair → atomic pair ingest; same-side pair → error
+- Candidate filtering includes member_ids (important for back matching accuracy)
+- `api.js` legacy stubs replaced with real implementations
+
+### 2026-04-08 — Phase 1 Library Foundation complete
+
+**Completed:**
+- Added backend endpoints: `GET /ownership-statuses`, `GET /photocards/{id}`, `PUT /photocards/{id}`, `DELETE /photocards/{id}`, `PATCH /photocards/bulk`
+- Enhanced `GET /photocards` response to include `group_id`, `top_level_category_id`, `ownership_status_id`, `source_origin_id`, `front_image_path`, `back_image_path` (via `tbl_attachments` LEFT JOIN pivot)
+- Confirmed image schema decision: use `tbl_attachments` for all modules
+- Built fresh photocard library UI: `PhotocardLibraryPage`, `PhotocardFilters`, `PhotocardGrid`, `PhotocardDetailModal`, `PhotocardBulkEdit`
+- Fixed `InboxManager`: ownership status now loads from API; member checkboxes added to form
+- Wired `/library` route to new `PhotocardLibraryPage`
+
+**Next:**
+- Phase 2: Image ingest (`POST /ingest/front`, back candidate matching, `POST /ingest/attach-back`, replace-front/back endpoints, new `InboxPage.jsx`)
+- Phase 3: Export (`POST /export/photocards`, new `ExportPage.jsx`)

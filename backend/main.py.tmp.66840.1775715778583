@@ -756,7 +756,7 @@ class BookCreate(BaseModel):
     title: str
     description: Optional[str] = None
     age_level_id: Optional[int] = None
-    star_rating: Optional[float] = None
+    star_rating: Optional[int] = None
     review: Optional[str] = None
     api_categories_raw: Optional[str] = None
     author_names: List[str]
@@ -784,7 +784,7 @@ class BookUpdate(BaseModel):
     title: str
     description: Optional[str] = None
     age_level_id: Optional[int] = None
-    star_rating: Optional[float] = None
+    star_rating: Optional[int] = None
     review: Optional[str] = None
     api_categories_raw: Optional[str] = None
     author_names: List[str]
@@ -1327,68 +1327,28 @@ def list_books():
                     bd.title_sort,
                     bd.star_rating,
                     al.age_level_name,
-                    bd.age_level_id,
-                    (SELECT GROUP_CONCAT(la.author_name, ', ')
-                     FROM xref_book_item_authors xa
-                     JOIN lkup_book_authors la ON xa.author_id = la.author_id
-                     WHERE xa.item_id = i.item_id) AS authors_str,
-                    (SELECT ts.series_name FROM xref_book_item_series xs
-                     JOIN tbl_book_series ts ON xs.series_id = ts.series_id
-                     WHERE xs.item_id = i.item_id LIMIT 1) AS series_name,
-                    (SELECT xs.series_number FROM xref_book_item_series xs
-                     WHERE xs.item_id = i.item_id LIMIT 1) AS series_number,
-                    (SELECT bc.cover_image_url FROM tbl_book_copies bc
-                     WHERE bc.item_id = i.item_id AND bc.cover_image_url IS NOT NULL LIMIT 1) AS cover_image_url,
-                    (SELECT bc.isbn_13 FROM tbl_book_copies bc
-                     WHERE bc.item_id = i.item_id AND bc.isbn_13 IS NOT NULL LIMIT 1) AS isbn_13,
-                    (SELECT GROUP_CONCAT(lfd.format_name || '|' || lfd.top_level_format, '|||')
-                     FROM tbl_book_copies bc2
-                     JOIN lkup_book_format_details lfd ON bc2.format_detail_id = lfd.format_detail_id
-                     WHERE bc2.item_id = i.item_id) AS formats_str,
-                    (SELECT GROUP_CONCAT(lg.genre_name, '|||')
-                     FROM xref_book_item_genres xg
-                     JOIN lkup_book_top_level_genres lg ON xg.top_level_genre_id = lg.top_level_genre_id
-                     WHERE xg.item_id = i.item_id) AS genres_str,
-                    (SELECT GROUP_CONCAT(ls.sub_genre_name, '|||')
-                     FROM xref_book_item_genres xg2
-                     JOIN lkup_book_sub_genres ls ON xg2.sub_genre_id = ls.sub_genre_id
-                     WHERE xg2.item_id = i.item_id AND xg2.sub_genre_id IS NOT NULL) AS subgenres_str,
-                    (SELECT GROUP_CONCAT(lt.tag_name, '|||')
-                     FROM xref_book_item_tags xt
-                     JOIN lkup_book_tags lt ON xt.tag_id = lt.tag_id
-                     WHERE xt.item_id = i.item_id) AS tags_str
+                    GROUP_CONCAT(la.author_name, ', ') AS authors,
+                    MIN(ts.series_name) AS series_name,
+                    MIN(xs.series_number) AS series_number,
+                    MIN(bc.cover_image_url) AS cover_image_url,
+                    MIN(bc.isbn_13) AS isbn_13
                 FROM tbl_items i
                 JOIN tbl_book_details bd ON i.item_id = bd.item_id
                 JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
                 JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
                 LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
                 LEFT JOIN lkup_book_age_levels al ON bd.age_level_id = al.age_level_id
+                LEFT JOIN xref_book_item_authors xa ON i.item_id = xa.item_id
+                LEFT JOIN lkup_book_authors la ON xa.author_id = la.author_id
+                LEFT JOIN xref_book_item_series xs ON i.item_id = xs.item_id
+                LEFT JOIN tbl_book_series ts ON xs.series_id = ts.series_id
+                LEFT JOIN tbl_book_copies bc ON i.item_id = bc.item_id
                 WHERE i.collection_type_id = :ct
+                GROUP BY i.item_id
                 ORDER BY COALESCE(bd.title_sort, bd.title)
             """),
             {"ct": BOOK_COLLECTION_TYPE_ID},
         ).fetchall()
-
-        def parse_formats(s):
-            if not s:
-                return []
-            result = []
-            for entry in s.split("|||"):
-                parts = entry.split("|", 1)
-                if len(parts) == 2:
-                    result.append({"format_name": parts[0], "top_level_format": parts[1]})
-            return result
-
-        def parse_list(s):
-            if not s:
-                return []
-            seen = set()
-            out = []
-            for v in s.split("|||"):
-                if v not in seen:
-                    seen.add(v)
-                    out.append(v)
-            return out
 
         return [
             {
@@ -1404,16 +1364,11 @@ def list_books():
                 "title_sort": row[9],
                 "star_rating": row[10],
                 "age_level": row[11],
-                "age_level_id": row[12],
-                "authors": row[13].split(", ") if row[13] else [],
-                "series_name": row[14],
-                "series_number": row[15],
-                "cover_image_url": row[16],
-                "isbn_13": row[17],
-                "formats": parse_formats(row[18]),
-                "genres": parse_list(row[19]),
-                "subgenres": parse_list(row[20]),
-                "tags": parse_list(row[21]),
+                "authors": row[12].split(", ") if row[12] else [],
+                "series_name": row[13],
+                "series_number": row[14],
+                "cover_image_url": row[15],
+                "isbn_13": row[16],
             }
             for row in rows
         ]
@@ -1626,88 +1581,6 @@ def delete_book(item_id: int):
         db.commit()
 
         return {"item_id": item_id, "status": "deleted"}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@app.patch("/books/bulk")
-def bulk_update_books(payload: BookBulkUpdatePayload):
-    if not payload.item_ids:
-        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
-
-    db = SessionLocal()
-    try:
-        placeholders = ",".join(str(i) for i in payload.item_ids)
-        found = db.execute(
-            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
-            {"ct": BOOK_COLLECTION_TYPE_ID},
-        ).fetchall()
-        if len(found) != len(payload.item_ids):
-            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
-
-        f = payload.fields
-        updates = []
-        params = {}
-
-        if f.ownership_status_id is not None:
-            updates.append("ownership_status_id = :ownership_status_id")
-            params["ownership_status_id"] = f.ownership_status_id
-        if f.reading_status_id is not None:
-            updates.append("reading_status_id = :reading_status_id")
-            params["reading_status_id"] = f.reading_status_id
-
-        if updates:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            for item_id in payload.item_ids:
-                db.execute(
-                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :item_id"),
-                    {**params, "item_id": item_id},
-                )
-
-        db.commit()
-        return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@app.post("/books/bulk-delete")
-def bulk_delete_books(payload: BulkDeletePayload):
-    if not payload.item_ids:
-        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
-
-    db = SessionLocal()
-    try:
-        placeholders = ",".join(str(i) for i in payload.item_ids)
-        found = db.execute(
-            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
-            {"ct": BOOK_COLLECTION_TYPE_ID},
-        ).fetchall()
-        if len(found) != len(payload.item_ids):
-            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
-
-        for item_id in payload.item_ids:
-            db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
-
-        db.commit()
-        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
         raise

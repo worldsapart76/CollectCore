@@ -367,24 +367,6 @@ export async function deleteBook(itemId) {
   return handleJsonResponse(res, "Failed to delete book");
 }
 
-export async function bulkUpdateBooks(itemIds, fields) {
-  const res = await fetch(`${API}/books/bulk`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_ids: itemIds, fields }),
-  });
-  return handleJsonResponse(res, "Failed to bulk update books");
-}
-
-export async function bulkDeleteBooks(itemIds) {
-  const res = await fetch(`${API}/books/bulk-delete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_ids: itemIds }),
-  });
-  return handleJsonResponse(res, "Failed to bulk delete books");
-}
-
 // --- Export ---
 
 export async function exportPhotocards({ itemIds, includeCaptions, includeBacks }) {

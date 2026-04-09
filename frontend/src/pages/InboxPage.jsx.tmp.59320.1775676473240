@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   attachBack,
   createPhotocardSourceOrigin,
-  deleteFromInbox,
   fetchInbox,
   fetchIngestCandidates,
   fetchOwnershipStatuses,
@@ -11,7 +10,6 @@ import {
   fetchPhotocardSourceOrigins,
   fetchTopLevelCategories,
   ingestFront,
-  ingestPair,
   uploadToInbox,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
@@ -72,18 +70,13 @@ function UploadZone({ onUploaded }) {
       style={{
         border: `2px dashed ${dragging ? "#1976d2" : "#bbb"}`,
         borderRadius: 6,
-        padding: "22px 20px",
+        padding: "10px 20px",
         textAlign: "center",
         cursor: "pointer",
         background: dragging ? "#e3f2fd" : "#fafafa",
         marginBottom: 12,
         fontSize: 13,
         color: "#666",
-        minHeight: 70,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
       }}
     >
       {uploading ? "Uploading..." : "Drop images here or click to upload to inbox"}
@@ -96,7 +89,7 @@ function UploadZone({ onUploaded }) {
 
 // ─── Inbox queue ─────────────────────────────────────────────────────────────
 
-function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSide, onRemove }) {
+function InboxQueue({ files, selectedFilename, fileSides, onSelect, onToggleSide }) {
   if (!files.length) {
     return <div style={{ padding: "8px 0", color: "#999", fontSize: 13 }}>Inbox is empty.</div>;
   }
@@ -105,8 +98,7 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {files.map((f) => {
         const side = fileSides[f.filename] ?? "front";
-        const selIdx = selectedFilenames.indexOf(f.filename);
-        const isSelected = selIdx !== -1;
+        const isSelected = selectedFilename === f.filename;
         return (
           <div
             key={f.filename}
@@ -143,9 +135,9 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
               {side === "back" ? "B" : "F"}
             </button>
 
-            {/* Thumbnail + name — clicking toggles selection */}
+            {/* Thumbnail + name — clicking selects */}
             <div
-              onClick={() => onSelect(f.filename)}
+              onClick={() => onSelect(f)}
               style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, cursor: "pointer", minWidth: 0 }}
             >
               <img
@@ -157,33 +149,6 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
                 {f.filename}
               </span>
             </div>
-
-            {/* Remove button */}
-            <button
-              type="button"
-              title="Remove from inbox"
-              onClick={(e) => { e.stopPropagation(); onRemove(f.filename); }}
-              style={{
-                flexShrink: 0,
-                width: 18,
-                height: 18,
-                fontSize: 11,
-                lineHeight: 1,
-                padding: 0,
-                border: "none",
-                borderRadius: 2,
-                cursor: "pointer",
-                background: "transparent",
-                color: "#999",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#c62828"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "#999"; }}
-            >
-              ✕
-            </button>
           </div>
         );
       })}
@@ -302,7 +267,7 @@ function CandidateGrid({ candidates, selectedId, onSelect }) {
 export default function InboxPage() {
   // Inbox state
   const [inboxFiles, setInboxFiles] = useState([]);
-  const [selectedFilenames, setSelectedFilenames] = useState([]); // ordered, max 2
+  const [selectedFile, setSelectedFile] = useState(null);
   const [fileSides, setFileSides] = useState({}); // {filename: 'front'|'back'}
 
   // Lookup data
@@ -334,9 +299,6 @@ export default function InboxPage() {
   const [actionError, setActionError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
 
-  // Preview thumbnail size
-  const [previewLarge, setPreviewLarge] = useState(false);
-
   // ── Initial load ──
   useEffect(() => {
     Promise.all([
@@ -353,7 +315,7 @@ export default function InboxPage() {
         if (g.length) setGroupId(String(g[0].group_id));
         if (c.length) setCategoryId(String(c[0].top_level_category_id));
         if (os.length) setOwnershipStatusId(String(os[0].ownership_status_id));
-        if (inbox.length) setSelectedFilenames([inbox[0].filename]);
+        if (inbox.length) setSelectedFile(inbox[0]);
       })
       .catch((err) => setLookupError(err.message || "Failed to load data"))
       .finally(() => setLoadingLookups(false));
@@ -378,36 +340,11 @@ export default function InboxPage() {
       .catch(() => {});
   }, [groupId, categoryId]);
 
-  // ── Derive selected file objects from filenames ──
-  const selectedFiles = selectedFilenames
-    .map((name) => inboxFiles.find((f) => f.filename === name))
-    .filter(Boolean);
+  // ── Candidates: auto-load when selected file is back mode ──
+  const selectedSide = selectedFile ? (fileSides[selectedFile.filename] ?? "front") : null;
 
-  // Determine panel mode from selection
-  let panelMode = "none"; // none | front | back | pair | invalid-pair
-  if (selectedFiles.length === 1) {
-    panelMode = (fileSides[selectedFiles[0].filename] ?? "front") === "back" ? "back" : "front";
-  } else if (selectedFiles.length === 2) {
-    const sides = selectedFiles.map((f) => fileSides[f.filename] ?? "front");
-    if (sides[0] !== sides[1]) {
-      panelMode = "pair";
-    } else {
-      panelMode = "invalid-pair";
-    }
-  }
-
-  // Convenience for single-file panels
-  const singleFile = selectedFiles.length === 1 ? selectedFiles[0] : null;
-  const pairFront = panelMode === "pair"
-    ? selectedFiles.find((f) => (fileSides[f.filename] ?? "front") === "front")
-    : null;
-  const pairBack = panelMode === "pair"
-    ? selectedFiles.find((f) => (fileSides[f.filename] ?? "front") === "back")
-    : null;
-
-  // ── Candidates: auto-load when single back file is selected ──
   useEffect(() => {
-    if (panelMode !== "back" || !groupId || !categoryId) {
+    if (selectedSide !== "back" || !groupId || !categoryId) {
       setCandidates([]);
       setSelectedCandidateId(null);
       return;
@@ -422,7 +359,7 @@ export default function InboxPage() {
       })
       .catch((err) => setCandidateError(err.message || "Failed to load candidates."))
       .finally(() => setLoadingCandidates(false));
-  }, [singleFile?.filename, panelMode, groupId, categoryId, selectedMemberIds.join(",")]);
+  }, [selectedFile?.filename, selectedSide, groupId, categoryId, selectedMemberIds.join(",")]);
 
   // ── Helpers ──
   async function refreshInbox() {
@@ -447,51 +384,28 @@ export default function InboxPage() {
     setActionSuccess("");
   }
 
-  // Toggle a filename in/out of selection (max 2; adding a 3rd bumps the oldest)
-  function toggleFileSelection(filename) {
-    setSelectedFilenames((prev) => {
-      if (prev.includes(filename)) return prev.filter((n) => n !== filename);
-      if (prev.length < 2) return [...prev, filename];
-      return [prev[1], filename]; // drop oldest, add new
-    });
-    setActionError("");
-    setActionSuccess("");
-  }
-
-  function removeFromInbox(filenames) {
-    const names = Array.isArray(filenames) ? filenames : [filenames];
+  function removeFromInbox(filename) {
     setInboxFiles((prev) => {
-      const next = prev.filter((f) => !names.includes(f.filename));
-      // auto-select next available file not already selected
-      setSelectedFilenames((prevSel) => {
-        const remaining = next.filter((f) => !prevSel.includes(f.filename));
-        const kept = prevSel.filter((n) => !names.includes(n));
-        if (kept.length === 0 && remaining.length > 0) return [remaining[0].filename];
-        return kept;
-      });
+      const next = prev.filter((f) => f.filename !== filename);
+      if (selectedFile?.filename === filename) {
+        setSelectedFile(next.length ? next[0] : null);
+      }
       return next;
     });
     setFileSides((prev) => {
       const copy = { ...prev };
-      names.forEach((n) => delete copy[n]);
+      delete copy[filename];
       return copy;
     });
   }
 
-  async function handleRemoveFromInbox(filename) {
-    try {
-      await deleteFromInbox(filename);
-    } catch {
-      // silently ignore — remove from UI regardless
-    }
-    removeFromInbox(filename);
-  }
-
   // ── Front ingest ──
-  async function handleIngestFront() {
+  async function handleIngestFront(e) {
+    e.preventDefault();
     setActionError("");
     setActionSuccess("");
-    if (!singleFile) { setActionError("Select a file first."); return; }
+
+    if (!selectedFile) { setActionError("Select an inbox file first."); return; }
     if (!groupId) { setActionError("Select a group."); return; }
     if (!categoryId) { setActionError("Select a category."); return; }
     if (selectedMemberIds.length === 0) { setActionError("Select at least one member."); return; }
@@ -499,7 +413,7 @@ export default function InboxPage() {
     setSaving(true);
     try {
       const result = await ingestFront({
-        inboxFilename: singleFile.filename,
+        inboxFilename: selectedFile.filename,
         collectionTypeId: COLLECTION_TYPE_ID,
         topLevelCategoryId: Number(categoryId),
         ownershipStatusId: Number(ownershipStatusId),
@@ -510,7 +424,7 @@ export default function InboxPage() {
         memberIds: selectedMemberIds.map(Number),
       });
       setActionSuccess(`Created item #${result.item_id} — ${result.filename}`);
-      removeFromInbox(singleFile.filename);
+      removeFromInbox(selectedFile.filename);
     } catch (err) {
       setActionError(err.message || "Ingest failed.");
     } finally {
@@ -522,48 +436,17 @@ export default function InboxPage() {
   async function handleAttachBack() {
     setActionError("");
     setActionSuccess("");
-    if (!singleFile) { setActionError("Select a file first."); return; }
+
+    if (!selectedFile) { setActionError("Select an inbox file first."); return; }
     if (!selectedCandidateId) { setActionError("Select a candidate card."); return; }
 
     setSaving(true);
     try {
-      const result = await attachBack(singleFile.filename, selectedCandidateId);
+      const result = await attachBack(selectedFile.filename, selectedCandidateId);
       setActionSuccess(`Attached back to item #${result.item_id} — ${result.filename}`);
-      removeFromInbox(singleFile.filename);
+      removeFromInbox(selectedFile.filename);
     } catch (err) {
       setActionError(err.message || "Attach failed.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // ── Pair ingest ──
-  async function handleIngestPair() {
-    setActionError("");
-    setActionSuccess("");
-    if (!pairFront || !pairBack) { setActionError("Need one front and one back file."); return; }
-    if (!groupId) { setActionError("Select a group."); return; }
-    if (!categoryId) { setActionError("Select a category."); return; }
-    if (selectedMemberIds.length === 0) { setActionError("Select at least one member."); return; }
-
-    setSaving(true);
-    try {
-      const result = await ingestPair({
-        frontFilename: pairFront.filename,
-        backFilename: pairBack.filename,
-        collectionTypeId: COLLECTION_TYPE_ID,
-        topLevelCategoryId: Number(categoryId),
-        ownershipStatusId: Number(ownershipStatusId),
-        notes: notes.trim() || null,
-        groupId: Number(groupId),
-        sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
-        version: version.trim() || null,
-        memberIds: selectedMemberIds.map(Number),
-      });
-      setActionSuccess(`Created item #${result.item_id} with front + back`);
-      removeFromInbox([pairFront.filename, pairBack.filename]);
-    } catch (err) {
-      setActionError(err.message || "Pair ingest failed.");
     } finally {
       setSaving(false);
     }
@@ -572,11 +455,11 @@ export default function InboxPage() {
   // ── Upload handler ──
   function handleUploaded(results) {
     refreshInbox().then((files) => {
-      if (results.length > 0) {
+      if (files.length > 0 && !selectedFile) setSelectedFile(files[0]);
+      else if (files.length > 0 && results.length > 0) {
+        // Auto-select first newly uploaded file
         const newFile = files.find((f) => f.filename === results[0].filename);
-        if (newFile) setSelectedFilenames([newFile.filename]);
-      } else if (files.length > 0 && selectedFilenames.length === 0) {
-        setSelectedFilenames([files[0].filename]);
+        if (newFile) setSelectedFile(newFile);
       }
     });
   }
@@ -587,6 +470,8 @@ export default function InboxPage() {
   if (lookupError) {
     return <PageContainer><div style={{ padding: 20, color: "#c62828" }}>{lookupError}</div></PageContainer>;
   }
+
+  const isBackMode = selectedSide === "back";
 
   return (
     <PageContainer>
@@ -604,95 +489,48 @@ export default function InboxPage() {
             </div>
             <InboxQueue
               files={inboxFiles}
-              selectedFilenames={selectedFilenames}
+              selectedFilename={selectedFile?.filename}
               fileSides={fileSides}
-              onSelect={toggleFileSelection}
+              onSelect={(f) => {
+                setSelectedFile((prev) => prev?.filename === f.filename ? null : f);
+                setActionError("");
+                setActionSuccess("");
+              }}
               onToggleSide={toggleFileSide}
-              onRemove={handleRemoveFromInbox}
             />
           </div>
 
           {/* Right: metadata form + action */}
           <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 16, background: "#fff" }}>
 
-            {/* Selected file preview */}
-            {panelMode === "none" && (
-              <div style={{ color: "#999", fontSize: 13, marginBottom: 14 }}>
-                Select a file from the inbox queue.
-              </div>
-            )}
-            {panelMode !== "none" && panelMode !== "pair" && singleFile && (
+            {selectedFile && (
               <div style={{ marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <img
-                    src={inboxImageUrl(singleFile.filename, singleFile.mtime)}
-                    alt={singleFile.filename}
-                    style={{
-                      maxHeight: previewLarge ? 220 : 80,
-                      maxWidth: previewLarge ? 180 : 70,
-                      objectFit: "contain",
-                      borderRadius: 4,
-                      border: "1px solid #ddd",
-                      display: "block",
-                    }}
-                  />
-                  <button
-                    type="button"
-                    title={previewLarge ? "Shrink preview" : "Enlarge preview"}
-                    onClick={() => setPreviewLarge((p) => !p)}
-                    style={{
-                      position: "absolute", bottom: 3, right: 3,
-                      fontSize: 9, padding: "1px 4px", lineHeight: 1.4,
-                      border: "1px solid #bbb", borderRadius: 2, cursor: "pointer",
-                      background: "rgba(255,255,255,0.85)", color: "#555",
-                    }}
-                  >
-                    {previewLarge ? "−" : "+"}
-                  </button>
-                </div>
+                <img
+                  src={inboxImageUrl(selectedFile.filename, selectedFile.mtime)}
+                  alt={selectedFile.filename}
+                  style={{ maxHeight: 90, maxWidth: 80, objectFit: "contain", borderRadius: 4, border: "1px solid #ddd", flexShrink: 0 }}
+                />
                 <div>
-                  <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>{singleFile.filename}</div>
+                  <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>{selectedFile.filename}</div>
                   <div style={{
-                    display: "inline-block", padding: "2px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                    background: panelMode === "back" ? "#fff3e0" : "#e8f5e9",
-                    color: panelMode === "back" ? "#e65100" : "#2e7d32",
-                    border: `1px solid ${panelMode === "back" ? "#ffcc80" : "#a5d6a7"}`,
+                    display: "inline-block",
+                    padding: "2px 10px",
+                    borderRadius: 3,
+                    fontSize: 12,
+                    fontWeight: "bold",
+                    background: isBackMode ? "#fff3e0" : "#e8f5e9",
+                    color: isBackMode ? "#e65100" : "#2e7d32",
+                    border: `1px solid ${isBackMode ? "#ffcc80" : "#a5d6a7"}`,
                   }}>
-                    {panelMode === "back" ? "Back" : "Front"}
+                    {isBackMode ? "Back" : "Front"}
                   </div>
                 </div>
               </div>
             )}
-            {panelMode === "pair" && (
-              <div style={{ marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[pairFront, pairBack].map((f, i) => (
-                    <div key={f.filename} style={{ textAlign: "center" }}>
-                      <img
-                        src={inboxImageUrl(f.filename, f.mtime)}
-                        alt={f.filename}
-                        style={{ maxHeight: 80, maxWidth: 70, objectFit: "contain", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
-                      />
-                      <div style={{
-                        fontSize: 10, fontWeight: "bold", marginTop: 2,
-                        color: i === 0 ? "#2e7d32" : "#e65100",
-                      }}>
-                        {i === 0 ? "FRONT" : "BACK"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{
-                  alignSelf: "center", padding: "3px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                  background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #ce93d8",
-                }}>
-                  Pair
-                </div>
-              </div>
-            )}
-            {panelMode === "invalid-pair" && (
-              <div style={{ ...alertError, marginBottom: 14 }}>
-                Both selected files are marked as the same side. Toggle one to F and one to B to ingest as a pair.
+
+            {!selectedFile && (
+              <div style={{ color: "#999", fontSize: 13, marginBottom: 14 }}>
+                Select a file from the inbox queue.
               </div>
             )}
 
@@ -787,14 +625,19 @@ export default function InboxPage() {
 
             <hr style={{ margin: "14px 0", borderColor: "#e0e0e0" }} />
 
-            {/* ── Action area ── */}
-            {panelMode === "front" && (
-              <button type="button" onClick={handleIngestFront} disabled={saving} style={btnPrimary}>
+            {/* ── Action area: changes based on front/back ── */}
+            {!isBackMode && (
+              <button
+                type="button"
+                onClick={handleIngestFront}
+                disabled={saving || !selectedFile}
+                style={{ ...btnPrimary, opacity: (!selectedFile) ? 0.6 : 1 }}
+              >
                 {saving ? "Ingesting..." : "Ingest as Front"}
               </button>
             )}
 
-            {panelMode === "back" && (
+            {isBackMode && (
               <div>
                 <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 8 }}>
                   Attach back to:
@@ -806,7 +649,11 @@ export default function InboxPage() {
                   )}
                 </div>
                 {candidateError && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 8 }}>{candidateError}</div>}
-                <CandidateGrid candidates={candidates} selectedId={selectedCandidateId} onSelect={setSelectedCandidateId} />
+                <CandidateGrid
+                  candidates={candidates}
+                  selectedId={selectedCandidateId}
+                  onSelect={setSelectedCandidateId}
+                />
                 {candidates.length > 0 && (
                   <button
                     type="button"
@@ -818,12 +665,6 @@ export default function InboxPage() {
                   </button>
                 )}
               </div>
-            )}
-
-            {panelMode === "pair" && (
-              <button type="button" onClick={handleIngestPair} disabled={saving} style={btnPrimary}>
-                {saving ? "Ingesting..." : "Ingest as Front + Back"}
-              </button>
             )}
           </div>
         </div>

@@ -756,7 +756,7 @@ class BookCreate(BaseModel):
     title: str
     description: Optional[str] = None
     age_level_id: Optional[int] = None
-    star_rating: Optional[float] = None
+    star_rating: Optional[int] = None
     review: Optional[str] = None
     api_categories_raw: Optional[str] = None
     author_names: List[str]
@@ -784,7 +784,7 @@ class BookUpdate(BaseModel):
     title: str
     description: Optional[str] = None
     age_level_id: Optional[int] = None
-    star_rating: Optional[float] = None
+    star_rating: Optional[int] = None
     review: Optional[str] = None
     api_categories_raw: Optional[str] = None
     author_names: List[str]
@@ -1626,88 +1626,6 @@ def delete_book(item_id: int):
         db.commit()
 
         return {"item_id": item_id, "status": "deleted"}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@app.patch("/books/bulk")
-def bulk_update_books(payload: BookBulkUpdatePayload):
-    if not payload.item_ids:
-        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
-
-    db = SessionLocal()
-    try:
-        placeholders = ",".join(str(i) for i in payload.item_ids)
-        found = db.execute(
-            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
-            {"ct": BOOK_COLLECTION_TYPE_ID},
-        ).fetchall()
-        if len(found) != len(payload.item_ids):
-            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
-
-        f = payload.fields
-        updates = []
-        params = {}
-
-        if f.ownership_status_id is not None:
-            updates.append("ownership_status_id = :ownership_status_id")
-            params["ownership_status_id"] = f.ownership_status_id
-        if f.reading_status_id is not None:
-            updates.append("reading_status_id = :reading_status_id")
-            params["reading_status_id"] = f.reading_status_id
-
-        if updates:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            for item_id in payload.item_ids:
-                db.execute(
-                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :item_id"),
-                    {**params, "item_id": item_id},
-                )
-
-        db.commit()
-        return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@app.post("/books/bulk-delete")
-def bulk_delete_books(payload: BulkDeletePayload):
-    if not payload.item_ids:
-        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
-
-    db = SessionLocal()
-    try:
-        placeholders = ",".join(str(i) for i in payload.item_ids)
-        found = db.execute(
-            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
-            {"ct": BOOK_COLLECTION_TYPE_ID},
-        ).fetchall()
-        if len(found) != len(payload.item_ids):
-            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
-
-        for item_id in payload.item_ids:
-            db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
-            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
-
-        db.commit()
-        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
         raise

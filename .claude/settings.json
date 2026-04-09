@@ -1,0 +1,17 @@
+{
+  "defaultMode": "acceptEdits",
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(pip *)",
+      "Bash(python *)",
+      "Bash(uvicorn *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(sqlite3 *)"
+    ]
+  }
+}
