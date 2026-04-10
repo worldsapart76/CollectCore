@@ -6,6 +6,68 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-09 — Goodreads migration complete
+
+**Completed:**
+- Added `date_read TEXT` column to `tbl_items` (via ALTER TABLE in migration script, guarded by PRAGMA check)
+- Ran `backend/migrate_goodreads.py` against `docs/goodreads_library_export.csv` → `data/collectcore.db`
+- Fixed two bugs during run:
+  - `format_detail_id NOT NULL` error: books with no library-* tags had a copy row inserted with NULL format; fixed by skipping copy insert when no format entries (bibliographic data enrichable via API later)
+  - Duplicate author UNIQUE constraint: same name appearing in both Author and Additional Authors columns; fixed by deduplicating author list before insert
+  - Series number parse error on `0.2.1` style numbers; fixed with try/except fallback to None
+  - Duplicate format entry UNIQUE constraint (e.g. library-hardback + library-hardcover both = id 1); fixed with INSERT OR IGNORE on copies
+- Final result: **4,724 books** in DB; 0 errors; 5 true duplicates skipped
+  - Format: Paperback 2,913 | Kindle 1,292 | Other Audio 321 | Audible 207 | Other Ebook 139 | Kobo 3
+  - Read status: Want to Read 3,185 | Read 878 | DNF 57
+  - 181 books flagged `read_without_library_tag` (imported, no copy record — read on Goodreads without a library-* shelf)
+
+**Next:**
+- API enrichment pass (cover art, bibliographic data for the 181 flagged + format-missing books)
+- Books library UI verification with real data
+
+### 2026-04-09 — Shared filter sidebar system
+
+**Completed:**
+- Created `frontend/src/components/library/FilterSidebar.jsx` — shared module for all library filter sidebars:
+  - State helpers: `emptySection`, `cycleItem`, `getItemState`, `sectionActive`, `applySection`
+  - UI components: `FilterSidebarShell` (outer wrapper), `TriStateFilterSection`, `SearchableTriStateSection`, `GroupedTriStateSection`
+  - All components extracted from `BooksLibraryPage.jsx` where they were previously defined inline
+- Rewrote `PhotocardFilters.jsx` to use shared components:
+  - All checkbox filters replaced with tri-state +/− toggle (same pattern as books sidebar)
+  - `backStatus` radio replaced with `TriStateFilterSection` (Has Back / Missing Back)
+  - Style/spacing now matches books sidebar
+  - Prop renamed `onFilterChange` → `onSectionChange`
+- Updated `PhotocardLibraryPage.jsx`:
+  - Filter state changed from `groupIds: []` arrays to `group: emptySection()` sections
+  - Filter logic now uses `applySection()` instead of `.includes()` checks
+  - `handleFilterChange` → `handleSectionChange`
+- Updated `BooksLibraryPage.jsx`:
+  - All filter state helpers and UI components removed from file (now imported from shared module)
+  - `BookFilters` sidebar now uses `FilterSidebarShell` instead of inline div wrapper
+- New module pattern for future modules: import from `FilterSidebar.jsx`, wrap with `FilterSidebarShell`, add `TriStateFilterSection` / `SearchableTriStateSection` per field
+
+**Next:**
+- Verify Inter font loads correctly (requires network access for Google Fonts)
+- Further dark mode spot-checks on modal and ingest pages
+
+### 2026-04-09 — Phase 8 Styling Refresh (full pass 2)
+
+**Completed:**
+- CSS variable system overhauled: rich hunter green (`#166534`) in light mode; vivid neon green (`#4ade80`) + glow shadows in dark mode
+- Font upgraded from Arial → Inter (Google Fonts import with Segoe UI fallback)
+- Light mode: green-tinted borders (`#d4e8d8`), surfaces (`#f8fdf9`/`#f0faf2`), green-tinted card shadows
+- Dark mode: near-black base (`#080e08`), vivid text (`#f0fdf4` primary, `#d1d5db` secondary), neon green glow on card hover
+- Active nav link: bottom indicator bar (`box-shadow: inset 0 -2px 0 var(--green)`) + green text
+- Home tile count text changed to `--green-vivid` for pop
+- All remaining blue hardcoded colors in `BooksLibraryPage.jsx` replaced with vars: `BookRow` hover/selected, `BookGridItem` selected outline, `TriStateItem` text/bg, `SectionHeader` labels, sidebar Filters label, `SearchableTriStateSection` chips, `GenrePicker` chips, table cell text colors
+- `GroupedTriStateSection` sub-header label → `var(--text-muted)` (was `#bbb`, unreadable in dark)
+- `FORMAT_COLORS` split into light/dark maps with `getFormatColors()` reading `data-theme` at render time
+- Transition animations added to home tiles and card items (translateY on hover)
+
+**Next:**
+- Verify Inter font loads correctly (requires network access for Google Fonts)
+- Further dark mode spot-checks on modal and ingest pages
+
 ### 2026-04-09 — Books Phase 3: Frontend ingest + library
 
 **Completed:**

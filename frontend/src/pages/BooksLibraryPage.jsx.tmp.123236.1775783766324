@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -158,11 +158,11 @@ function BookFilters({ books, genres, ownershipStatuses, readStatuses, ageLevels
       <TriStateFilterSection title="Read Status"
         items={readStatuses.map((s) => ({ id: String(s.read_status_id), label: s.status_name }))}
         section={filters.readStatus} onChange={(s) => onSectionChange("readStatus", s)} />
-      <TriStateFilterSection title="Ownership" defaultShown={2}
+      <TriStateFilterSection title="Ownership"
         items={ownershipStatuses.map((s) => ({ id: String(s.ownership_status_id), label: s.status_name }))}
         section={filters.ownership} onChange={(s) => onSectionChange("ownership", s)} />
       {allSeries.length > 0 && (
-        <SearchableTriStateSection title="Series" items={allSeries} selectedOnly
+        <TriStateFilterSection title="Series" items={allSeries}
           section={filters.series} onChange={(s) => onSectionChange("series", s)} />
       )}
       {allTags.length > 0 && (
@@ -303,15 +303,14 @@ function FormatBadges({ formats }) {
 function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div onClick={onClick} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: 3, boxSizing: "border-box",
     }}>
-      <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
-        <input type="checkbox" checked={isSelected}
-          onChange={() => onToggleSelect(book.item_id)}
-          style={{ margin: 0, cursor: "pointer" }} />
+      <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(book.item_id); }}>
+        <input type="checkbox" checked={isSelected} onChange={() => {}} style={{ margin: 0, cursor: "pointer" }} />
       </div>
       <OwnershipBadge statusName={book.ownership_status} />
       {book.cover_image_url ? (
@@ -337,11 +336,11 @@ function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) 
   const genreText = book.genres?.length ? book.genres.join(", ") : null;
   const subgenreText = book.subgenres?.length ? book.subgenres.join(", ") : null;
   return (
-    <tr onClick={onClick} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
+    <tr onClick={onClick} style={{ cursor: "pointer", background: isSelected ? "var(--green-light)" : undefined }}
       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}>
       <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }}
-        onClick={(e) => e.stopPropagation()}>
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(book.item_id); }}>
         <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(book.item_id)} style={{ margin: 0, cursor: "pointer" }} />
       </td>
       {showThumbnails && (
@@ -351,25 +350,25 @@ function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) 
             : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
         </td>
       )}
-      <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}>
-        <div style={{ fontWeight: "bold", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title}</div>
+      <td style={{ padding: "3px 8px" }}>
+        <div style={{ fontWeight: "bold", fontSize: 13 }}>{book.title}</div>
         {book.series_name && (
-          <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.series_name}{book.series_number ? ` #${book.series_number}` : ""}</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{book.series_name}{book.series_number ? ` #${book.series_number}` : ""}</div>
         )}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</td>
-      <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}><FormatBadges formats={book.formats} /></td>
-      <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)" }}>{(book.authors || []).join(", ")}</td>
+      <td style={{ padding: "3px 8px" }}><FormatBadges formats={book.formats} /></td>
+      <td style={{ padding: "3px 8px" }}>
         {genreText
-          ? <div style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{genreText}{subgenreText && <span style={{ color: "var(--text-muted)" }}>{" — "}{subgenreText}</span>}</div>
+          ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{genreText}{subgenreText && <span style={{ color: "var(--text-muted)" }}>{" — "}{subgenreText}</span>}</div>
           : <span style={{ color: "var(--text-label)", fontSize: 11 }}>—</span>}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <td style={{ padding: "3px 8px", fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
         {book.age_level || <span style={{ color: "var(--text-label)" }}>—</span>}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.reading_status || "—"}</td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.ownership_status}</td>
-      <td style={{ padding: "3px 8px", whiteSpace: "nowrap" }}><StarRatingDisplay rating={book.star_rating} /></td>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)" }}>{book.reading_status || "—"}</td>
+      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)" }}>{book.ownership_status}</td>
+      <td style={{ padding: "3px 8px" }}><StarRatingDisplay rating={book.star_rating} /></td>
     </tr>
   );
 }
@@ -644,53 +643,23 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
 
 // ─── Bulk edit panel ──────────────────────────────────────────────────────────
 
-function BulkField({ label, enabled, onToggle, children }) {
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
-  );
-}
-
-function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, ageLevels, formatDetails, genres, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
+function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, onClose, onSaved, onDeleted }) {
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipStatusId, setOwnershipStatusId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updateReadStatus, setUpdateReadStatus] = useState(false);
   const [readStatusId, setReadStatusId] = useState(String(readStatuses[0]?.read_status_id || ""));
-  const [updateCategory, setUpdateCategory] = useState(false);
-  const [categoryId, setCategoryId] = useState("3");
-  const [updateAgeLevel, setUpdateAgeLevel] = useState(false);
-  const [ageLevelId, setAgeLevelId] = useState(String(ageLevels[0]?.age_level_id || ""));
-  const [updateRating, setUpdateRating] = useState(false);
-  const [starRating, setStarRating] = useState("3");
-  const [updateFormat, setUpdateFormat] = useState(false);
-  const [formatDetailId, setFormatDetailId] = useState(String(formatDetails[0]?.format_detail_id || ""));
-  const [updateGenres, setUpdateGenres] = useState(false);
-  const [genreList, setGenreList] = useState([]);
-
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
-  const anyEnabled = updateOwnership || updateReadStatus || updateCategory || updateAgeLevel || updateRating || updateFormat || updateGenres;
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
 
   async function handleSave() {
-    if (!anyEnabled) { setError("Select at least one field to update."); return; }
+    if (!updateOwnership && !updateReadStatus) { setError("Select at least one field to update."); return; }
     const fields = {};
     if (updateOwnership) fields.ownership_status_id = Number(ownershipStatusId);
     if (updateReadStatus) fields.reading_status_id = Number(readStatusId);
-    if (updateCategory) fields.top_level_category_id = Number(categoryId);
-    if (updateAgeLevel) fields.age_level_id = Number(ageLevelId);
-    if (updateRating) fields.star_rating = Number(starRating);
-    if (updateFormat) fields.format_detail_id = Number(formatDetailId);
-    if (updateGenres) fields.genres = genreList.map((g) => ({ top_level_genre_id: g.top_level_genre_id, sub_genre_id: g.sub_genre_id || null }));
     setSaving(true); setError("");
     try { await bulkUpdateBooks(selectedBooks.map((b) => b.item_id), fields); onSaved(); }
     catch (err) { setError(err.message || "Failed to update"); }
@@ -708,49 +677,29 @@ function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, ageLevel
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 380, display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0" }}>
           <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedBooks.length} books</span>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
         </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Read Status" enabled={updateReadStatus} onToggle={() => setUpdateReadStatus((p) => !p)}>
-            <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={fieldStyle}>
-              {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Category" enabled={updateCategory} onToggle={() => setUpdateCategory((p) => !p)}>
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={fieldStyle}>
-              <option value="3">Fiction</option>
-              <option value="4">Non-Fiction</option>
-            </select>
-          </BulkField>
-          <BulkField label="Age Level" enabled={updateAgeLevel} onToggle={() => setUpdateAgeLevel((p) => !p)}>
-            <select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)} style={fieldStyle}>
-              {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Star Rating" enabled={updateRating} onToggle={() => setUpdateRating((p) => !p)}>
-            <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={fieldStyle}>
-              {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Format" enabled={updateFormat} onToggle={() => setUpdateFormat((p) => !p)}>
-            <select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)} style={fieldStyle}>
-              {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Genre (replaces existing)" enabled={updateGenres} onToggle={() => setUpdateGenres((p) => !p)}>
-            <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
-          </BulkField>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828" }}>{error}</div>}
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={updateOwnership} onChange={() => setUpdateOwnership((p) => !p)} style={{ marginRight: 8 }} />
+              <span style={{ fontWeight: "bold", fontSize: 13 }}>Ownership</span>
+            </label>
+            {updateOwnership && <div style={{ marginTop: 6, paddingLeft: 24 }}><select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={fieldStyle}>{ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}</select></div>}
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={updateReadStatus} onChange={() => setUpdateReadStatus((p) => !p)} style={{ marginRight: 8 }} />
+              <span style={{ fontWeight: "bold", fontSize: 13 }}>Read Status</span>
+            </label>
+            {updateReadStatus && <div style={{ marginTop: 6, paddingLeft: 24 }}><select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={fieldStyle}>{readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}</select></div>}
+          </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0" }}>
           <div>
             {!confirmDelete
               ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedBooks.length} books</button>
@@ -787,6 +736,15 @@ const DEFAULT_FILTERS = {
   tag: emptySection(),
 };
 
+const SORT_OPTIONS = [
+  { value: "title", label: "Title A–Z" },
+  { value: "title_desc", label: "Title Z–A" },
+  { value: "author", label: "Author" },
+  { value: "rating_desc", label: "Rating ↓" },
+  { value: "rating_asc", label: "Rating ↑" },
+  { value: "id_asc", label: "ID ↑" },
+  { value: "id_desc", label: "ID ↓" },
+];
 
 function ToggleButton({ active, onClick, children }) {
   return (
@@ -845,11 +803,8 @@ export default function BooksLibraryPage() {
     title: 220, author: 150, format: 120, genre: 150, age: 70, readStatus: 110, ownership: 100, rating: 60,
   });
 
-  const colResizingRef = useRef(false);
-
   const makeResizeHandler = useCallback((col) => (e) => {
     e.preventDefault();
-    colResizingRef.current = true;
     const startX = e.clientX;
     const startW = colWidths[col];
     function onMove(ev) {
@@ -858,7 +813,6 @@ export default function BooksLibraryPage() {
     function onUp() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      setTimeout(() => { colResizingRef.current = false; }, 0);
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -1009,7 +963,7 @@ export default function BooksLibraryPage() {
   if (error) return <div style={{ padding: 24, color: "#c62828" }}>Error: {error}</div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", fontSize: 13 }}>
       {/* Controls bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid #ddd", background: "#f5f5f5", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1068,7 +1022,7 @@ export default function BooksLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ minWidth: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -1081,14 +1035,14 @@ export default function BooksLibraryPage() {
                 <col style={{ width: colWidths.ownership }} />
                 <col style={{ width: colWidths.rating }} />
               </colgroup>
-              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+              <thead>
                 <tr style={{ background: "#f5f5f5", borderBottom: "1px solid #ddd" }}>
-                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid #d0d0d0" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center" }}>
                     <input type="checkbox" checked={allVisibleSelected}
                       onChange={() => allVisibleSelected ? clearSelection() : selectAll()}
                       style={{ margin: 0, cursor: "pointer" }} />
                   </th>
-                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid #d0d0d0" }} />}
+                  {showThumbnails && <th style={{ padding: "5px 6px" }} />}
                   {[
                     { key: "title", label: "Title" },
                     { key: "author", label: "Author" },
@@ -1103,7 +1057,7 @@ export default function BooksLibraryPage() {
                     return (
                       <th
                         key={label}
-                        onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                        onClick={key ? () => handleHeaderSort(key) : undefined}
                         style={{
                           padding: "5px 8px",
                           textAlign: "left",
@@ -1112,7 +1066,6 @@ export default function BooksLibraryPage() {
                           cursor: key ? "pointer" : "default",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
-                          borderRight: "1px solid #d0d0d0",
                         }}
                       >
                         {label}{key ? sortIndicator(key) : ""}
@@ -1160,7 +1113,6 @@ export default function BooksLibraryPage() {
       {bulkEditOpen && (
         <BookBulkEdit
           selectedBooks={selectedBooks} ownershipStatuses={ownershipStatuses} readStatuses={readStatuses}
-          ageLevels={ageLevels} formatDetails={formatDetails} genres={genres}
           onClose={() => setBulkEditOpen(false)}
           onSaved={async () => { setBulkEditOpen(false); clearSelection(); await reloadBooks(); }}
           onDeleted={() => { setBulkEditOpen(false); setBooks((prev) => prev.filter((b) => !selectedIds.has(b.item_id))); clearSelection(); }}

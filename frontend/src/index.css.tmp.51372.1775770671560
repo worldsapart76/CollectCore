@@ -18,14 +18,10 @@ a:hover {
   color: var(--green-vivid);
 }
 
-html, body {
-  height: 100%;
-  overflow: hidden;
-}
-
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100vh;
 }
 
 h1 {

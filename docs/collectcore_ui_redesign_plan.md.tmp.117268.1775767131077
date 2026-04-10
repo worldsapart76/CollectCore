@@ -1,0 +1,187 @@
+# CollectCore UI Redesign — Branding, Module System & Subtle Styling
+
+## Context
+CollectCore is being rebuilt from a photocard-specific app into a multi-module collection tracker. The UI still says "Photocard Tracker" everywhere, uses a flat single-module nav, and has no concept of module switching. This plan introduces the CollectCore brand, a module-aware nav with a dropdown switcher, a module-selection landing page, and subtle styling improvements (green brand accent, alternating row shading). Module enable/disable is stored in a new backend settings table.
+
+---
+
+## Design Decisions (confirmed)
+
+- **Module tiles on home** → click goes directly to module library (no sub-landing)
+- **Module switcher** → dropdown on brand: `[CC] CollectCore / Photocards ▾`
+- **Logo** → CSS badge mark: green square with "CC" in white, followed by "CollectCore" bold text
+- **Module settings storage** → backend SQLite settings table (`tbl_app_settings`)
+
+---
+
+## Phase 1: Backend — Settings Table + API
+
+### Schema (`backend/sql/schema.sql`)
+Add at the end of the file:
+```sql
+CREATE TABLE IF NOT EXISTS tbl_app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO tbl_app_settings (key, value)
+VALUES ('modules_enabled', '["photocards","books"]');
+```
+
+### Endpoints (`backend/main.py`)
+Add two endpoints in a "Settings" section:
+
+```
+GET  /settings          → returns { key: value, ... } for all rows
+PUT  /settings/{key}    → body: { "value": "..." }, upserts row, returns updated row
+```
+
+The `modules_enabled` value is a JSON array string (e.g. `'["photocards","books"]'`). The frontend parses it.
+
+---
+
+## Phase 2: Frontend — Module Definitions (static config)
+
+Create `frontend/src/modules.js` — a single static file that defines all known modules. This is the only place module metadata lives.
+
+```js
+export const MODULE_DEFS = {
+  photocards: {
+    id: 'photocards',
+    label: 'Photocards',
+    primaryPath: '/library',
+    description: 'Track your photocard collection',
+    links: [
+      { label: 'Inbox',   to: '/inbox' },
+      { label: 'Library', to: '/library' },
+      { label: 'Export',  to: '/export' },
+    ],
+  },
+  books: {
+    id: 'books',
+    label: 'Books',
+    primaryPath: '/books/library',
+    description: 'Track your book collection',
+    links: [
+      { label: 'Add Book', to: '/books/add' },
+      { label: 'Library',  to: '/books/library' },
+    ],
+  },
+};
+
+// Derive active module from current pathname
+export function getActiveModuleId(pathname) {
+  if (pathname.startsWith('/books')) return 'books';
+  if (['/inbox', '/library', '/export'].some(p => pathname.startsWith(p))) return 'photocards';
+  return null;
+}
+```
+
+---
+
+## Phase 3: TopNav — Rebrand + Module Dropdown
+
+**File:** `frontend/src/components/layout/TopNav.jsx`
+
+### Changes:
+1. **Logo mark** — Replace "Photocard Tracker" text with:
+   - A small CSS badge: green square (`#2e7d32` bg, white "CC" text, ~22px, border-radius 4px)
+   - Followed by bold "CollectCore" text
+   - Clicking the logo navigates to `/`
+
+2. **Module context** — Use `useLocation()` to derive active module via `getActiveModuleId()`.
+
+3. **Dropdown** — When an active module exists, show `ModuleName ▾` next to the logo. Clicking opens a dropdown listing all enabled modules. Selecting a module navigates to its `primaryPath`. Close on outside click or selection.
+
+4. **Nav links** — Replace the hardcoded mixed link list with the active module's `links` array (from `MODULE_DEFS`). If no module is active (home, admin), show no module links.
+
+5. **Admin link** — Keep on right side. Remove the divider pipe hack.
+
+6. **Active state color** — Change `.topnav-link.active` background from `#f0f0f0` to `#e8f5e9` (light green). Update in `app.css`.
+
+### Dropdown state:
+- Local `useState` in TopNav
+- `useEffect` with document click listener to close on outside click
+- Enabled modules list fetched directly in TopNav on mount
+
+---
+
+## Phase 4: HomePage — Module Tiles from API
+
+**File:** `frontend/src/pages/HomePage.jsx`
+
+### Changes:
+- On mount, `GET /settings` to get `modules_enabled` list
+- Parse the JSON array, map to `MODULE_DEFS` entries
+- Render one `HomeTile` per enabled module
+- Each tile links directly to `module.primaryPath`
+- Remove the hardcoded Inbox/Library/Export tiles
+
+---
+
+## Phase 5: AdminPage — Module Toggle UI
+
+**File:** `frontend/src/pages/AdminPage.jsx`
+
+Replace the placeholder with a real settings section:
+- Fetch current `modules_enabled` from `GET /settings`
+- Show checkboxes/toggles for each module in `MODULE_DEFS`
+- On toggle, `PUT /settings/modules_enabled` with updated JSON array
+
+---
+
+## Phase 6: api.js — Settings API Functions
+
+**File:** `frontend/src/api.js`
+
+Add:
+```js
+export async function fetchSettings() { ... }
+export async function updateSetting(key, value) { ... }
+```
+
+---
+
+## Phase 7: Subtle Styling
+
+**File:** `frontend/src/styles/app.css`
+
+1. **Brand badge** — `.brand-badge`: `background: #2e7d32; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 5px; border-radius: 4px; letter-spacing: 0.5px;`
+2. **Active nav color** — `.topnav-link.active` bg: `#e8f5e9` (light green)
+3. **Alternating row shading** — subtle `#f7f7f7` on even rows in books table view
+4. **Module dropdown** — `.module-dropdown` styles: absolute, white bg, `1px solid #ddd`, box-shadow, z-index
+
+---
+
+## Out of Scope (Deferred)
+- Dark mode
+- Photocard sidebar style update (backlog item #17)
+- Adding new module definitions (movies, music, etc.)
+
+---
+
+## Critical Files
+
+| File | Change |
+|---|---|
+| `backend/sql/schema.sql` | Add `tbl_app_settings` + seed insert |
+| `backend/main.py` | Add `GET /settings`, `PUT /settings/{key}` |
+| `frontend/src/modules.js` | New — static module definitions |
+| `frontend/src/api.js` | Add `fetchSettings`, `updateSetting` |
+| `frontend/src/styles/app.css` | Badge style, active nav color, dropdown styles |
+| `frontend/src/components/layout/TopNav.jsx` | Rebrand + module dropdown |
+| `frontend/src/pages/HomePage.jsx` | Module tiles from API |
+| `frontend/src/pages/AdminPage.jsx` | Module toggle UI |
+
+---
+
+## Verification
+
+1. Start backend: `uvicorn main:app --reload --port 8001`
+2. `GET /settings` returns `{ "modules_enabled": "[\"photocards\",\"books\"]" }`
+3. Home page shows two tiles: Photocards and Books
+4. TopNav shows `[CC] CollectCore / Photocards ▾` when on `/library`
+5. Clicking dropdown shows both modules; selecting Books navigates to `/books/library` with updated nav links
+6. Admin page: uncheck Books → home shows only Photocards tile
+7. Logo badge is green with white "CC"; nav active state is light green
+8. Books library table shows subtle alternating row shading

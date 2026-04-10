@@ -1,20 +1,50 @@
-import { NavLink } from "react-router-dom";
-import { useState } from "react";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { MODULE_DEFS, getActiveModuleId } from "../../modules";
+import { fetchSettings } from "../../api";
 
 function navClass({ isActive }) {
   return isActive ? "topnav-link active" : "topnav-link";
 }
 
-export default function TopNav() {
+export default function TopNav({ theme, toggleTheme }) {
   const [isShuttingDown, setIsShuttingDown] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [enabledModuleIds, setEnabledModuleIds] = useState([]);
+  const dropdownRef = useRef(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const activeModuleId = getActiveModuleId(location.pathname);
+  const activeModule = activeModuleId ? MODULE_DEFS[activeModuleId] : null;
+
+  useEffect(() => {
+    fetchSettings()
+      .then(settings => {
+        try {
+          setEnabledModuleIds(JSON.parse(settings.modules_enabled || "[]"));
+        } catch {
+          setEnabledModuleIds([]);
+        }
+      })
+      .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS)));
+  }, []);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    function handleOutsideClick(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [dropdownOpen]);
 
   async function handleExit() {
     setIsShuttingDown(true);
-
     try {
-      await fetch("http://127.0.0.1:8000/shutdown", {
-        method: "POST",
-      });
+      await fetch("http://127.0.0.1:8000/shutdown", { method: "POST" });
     } catch (error) {
       console.error("Shutdown request failed:", error);
     }
@@ -46,54 +76,76 @@ export default function TopNav() {
     );
   }
 
+  const enabledModules = enabledModuleIds
+    .map(id => MODULE_DEFS[id])
+    .filter(Boolean);
+
   return (
     <header className="topnav">
       <div className="topnav-left">
-        <NavLink to="/" className="topnav-brand">
-          Photocard Tracker
+        {/* Logo */}
+        <NavLink to="/" className="topnav-brand" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="brand-badge">CC</span>
+          <span>CollectCore</span>
         </NavLink>
 
-        <nav className="topnav-links">
-          <NavLink to="/" className={navClass} end>
-            Home
-          </NavLink>
-          <NavLink to="/inbox" className={navClass}>
-            Inbox
-          </NavLink>
-          <NavLink to="/library" className={navClass}>
-            Library
-          </NavLink>
-          <NavLink to="/export" className={navClass}>
-            Export
-          </NavLink>
-          <span style={{ color: "#555", fontSize: 12, padding: "0 2px" }}>|</span>
-          <NavLink to="/books/add" className={navClass}>
-            Add Book
-          </NavLink>
-          <NavLink to="/books/library" className={navClass}>
-            Books
-          </NavLink>
-        </nav>
+        {/* Module switcher dropdown */}
+        {activeModule && (
+          <div className="module-switcher" ref={dropdownRef} style={{ position: "relative" }}>
+            <button
+              className="module-switcher-btn"
+              onClick={() => setDropdownOpen(o => !o)}
+            >
+              {activeModule.label} ▾
+            </button>
+            {dropdownOpen && (
+              <div className="module-dropdown">
+                {enabledModules.map(mod => (
+                  <button
+                    key={mod.id}
+                    className={`module-dropdown-item${mod.id === activeModuleId ? " active" : ""}`}
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      navigate(mod.primaryPath);
+                    }}
+                  >
+                    {mod.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Module-specific nav links */}
+        {activeModule && (
+          <nav className="topnav-links">
+            {activeModule.links.map(link => (
+              <NavLink key={link.to} to={link.to} className={navClass}>
+                {link.label}
+              </NavLink>
+            ))}
+          </nav>
+        )}
       </div>
 
-      <div
-        className="topnav-right"
-        style={{ display: "flex", gap: "8px", alignItems: "center" }}
-      >
+      <div className="topnav-right">
         <NavLink to="/admin" className={navClass}>
           Admin
         </NavLink>
-
+        <button
+          type="button"
+          className="theme-toggle-btn"
+          onClick={toggleTheme}
+          title="Toggle dark mode"
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
         <button
           type="button"
           className="topnav-link"
           onClick={handleExit}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            font: "inherit",
-          }}
+          style={{ background: "none", border: "none", cursor: "pointer", font: "inherit" }}
         >
           Exit
         </button>

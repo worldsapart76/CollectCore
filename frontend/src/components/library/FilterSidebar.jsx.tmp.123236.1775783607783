@@ -1,0 +1,483 @@
+/**
+ * Shared filter sidebar primitives for CollectCore library pages.
+ *
+ * Exports — state helpers:
+ *   emptySection()           → { mode: "or", include: [], exclude: [] }
+ *   cycleItem(section, id)   → none → include → exclude → none
+ *   getItemState(section, id) → "include" | "exclude" | "none"
+ *   sectionActive(section)   → boolean
+ *   applySection(section, itemValues) → boolean (filter predicate)
+ *
+ * Exports — UI components:
+ *   FilterSidebarShell         outer wrapper with header + optional search
+ *   TriStateFilterSection      list of items with +/- cycling, show-more
+ *   SearchableTriStateSection  searchable list with selected chips
+ *   GroupedTriStateSection     items nested under group headings
+ */
+import { useMemo, useState } from "react";
+
+// ─── State helpers ────────────────────────────────────────────────────────────
+
+export function emptySection() {
+  return { mode: "or", include: [], exclude: [] };
+}
+
+export function cycleItem(section, id) {
+  const sid = String(id);
+  if (section.include.includes(sid)) {
+    return {
+      ...section,
+      include: section.include.filter((x) => x !== sid),
+      exclude: [...section.exclude, sid],
+    };
+  }
+  if (section.exclude.includes(sid)) {
+    return { ...section, exclude: section.exclude.filter((x) => x !== sid) };
+  }
+  return { ...section, include: [...section.include, sid] };
+}
+
+export function getItemState(section, id) {
+  const sid = String(id);
+  if (section.include.includes(sid)) return "include";
+  if (section.exclude.includes(sid)) return "exclude";
+  return "none";
+}
+
+export function sectionActive(s) {
+  return s.include.length > 0 || s.exclude.length > 0;
+}
+
+/**
+ * Returns true if the item (represented by itemValues, an array of strings)
+ * passes the filter section. OR mode: any include match is enough. AND mode:
+ * all includes must match. Excludes always reject.
+ */
+export function applySection(section, itemValues) {
+  const { mode, include, exclude } = section;
+  if (include.length === 0 && exclude.length === 0) return true;
+  const vals = itemValues.map(String);
+  if (exclude.length > 0 && vals.some((v) => exclude.includes(v))) return false;
+  if (include.length === 0) return true;
+  if (mode === "or") return vals.some((v) => include.includes(v));
+  return include.every((v) => vals.includes(v)); // AND
+}
+
+// ─── Shared micro-styles ──────────────────────────────────────────────────────
+
+const inputStyle = {
+  fontSize: 12,
+  padding: "3px 6px",
+  borderRadius: 3,
+  border: "1px solid var(--border-input)",
+  width: "100%",
+  boxSizing: "border-box",
+};
+
+const btnSm = {
+  fontSize: 11,
+  padding: "2px 7px",
+  background: "var(--btn-secondary-bg)",
+  border: "1px solid var(--btn-secondary-border)",
+  borderRadius: 3,
+  cursor: "pointer",
+};
+
+// ─── Internal sub-components ──────────────────────────────────────────────────
+
+function AndOrToggle({ mode, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {["or", "and"].map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          style={{
+            fontSize: 9,
+            padding: "1px 4px",
+            cursor: "pointer",
+            borderRadius: 2,
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            background: mode === m ? "var(--btn-primary-bg)" : "var(--bg-base)",
+            color: mode === m ? "var(--btn-primary-text)" : "var(--text-muted)",
+            border: `1px solid ${mode === m ? "var(--btn-primary-bg)" : "var(--border-input)"}`,
+          }}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SectionHeader({ title, section, onChange }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 4,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: "700",
+          color: "var(--text-label)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {title}
+      </div>
+      {sectionActive(section) && (
+        <AndOrToggle
+          mode={section.mode}
+          onChange={(m) => onChange({ ...section, mode: m })}
+        />
+      )}
+    </div>
+  );
+}
+
+function TriStateItem({ label, state, onClick }) {
+  const isInclude = state === "include";
+  const isExclude = state === "exclude";
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 12,
+        cursor: "pointer",
+        userSelect: "none",
+        padding: "1px 3px",
+        borderRadius: 3,
+        background: isInclude
+          ? "var(--green-light)"
+          : isExclude
+          ? "var(--error-bg)"
+          : "transparent",
+      }}
+    >
+      <div
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: "50%",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: isInclude
+            ? "var(--green-vivid)"
+            : isExclude
+            ? "#ef5350"
+            : "var(--border-input)",
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: "bold",
+          lineHeight: 1,
+        }}
+      >
+        {isInclude ? "+" : isExclude ? "−" : ""}
+      </div>
+      <span
+        style={{
+          color: isInclude
+            ? "var(--green)"
+            : isExclude
+            ? "var(--error-text)"
+            : "var(--text-primary)",
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// ─── Exported filter section components ──────────────────────────────────────
+
+/**
+ * A list of items with tri-state click cycling (+/−/none).
+ * Shows first 5 by default; show-more button when list is longer.
+ *
+ * Props:
+ *   title   — section header string
+ *   items   — array of { id, label }
+ *   section — emptySection() value
+ *   onChange — callback(newSection)
+ */
+export function TriStateFilterSection({ title, items, section, onChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? items : items.slice(0, 5);
+  const hasMore = items.length > 5;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {shown.map((item) => (
+          <TriStateItem
+            key={item.id}
+            label={item.label}
+            state={getItemState(section, item.id)}
+            onClick={() => onChange(cycleItem(section, item.id))}
+          />
+        ))}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((p) => !p)}
+          style={{ ...btnSm, marginTop: 4 }}
+        >
+          {expanded ? "Show less" : `+${items.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Like TriStateFilterSection but with a search input.
+ * Selected items (include/exclude) float to the top as chips.
+ * Search filters the unselected items below.
+ *
+ * Props: same as TriStateFilterSection, plus:
+ *   selectedOnly — when true, hides the unselected list until the user types a search
+ */
+export function SearchableTriStateSection({ title, items, section, onChange, selectedOnly = false }) {
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const selectedItems = items.filter((i) => getItemState(section, i.id) !== "none");
+
+  const unselectedFiltered = useMemo(() => {
+    const unselected = items.filter((i) => getItemState(section, i.id) === "none");
+    if (!search.trim()) return selectedOnly ? [] : unselected;
+    const q = search.toLowerCase();
+    return unselected.filter((i) => i.label.toLowerCase().includes(q));
+  }, [items, section, search, selectedOnly]);
+
+  const shown = selectedOnly
+    ? unselectedFiltered.slice(0, 8)
+    : expanded ? unselectedFiltered : unselectedFiltered.slice(0, 5);
+  const hasMore = !selectedOnly && unselectedFiltered.length > 5;
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+
+      {selectedItems.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
+          {selectedItems.map((item) => {
+            const state = getItemState(section, item.id);
+            const isInc = state === "include";
+            return (
+              <span
+                key={item.id}
+                onClick={() => onChange(cycleItem(section, item.id))}
+                style={{
+                  fontSize: 11,
+                  padding: "2px 6px",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  userSelect: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  background: isInc ? "var(--green-light)" : "var(--error-bg)",
+                  border: `1px solid ${isInc ? "var(--border-input)" : "var(--error-border)"}`,
+                  color: isInc ? "var(--green)" : "var(--error-text)",
+                }}
+              >
+                <span style={{ fontWeight: "bold" }}>{isInc ? "+" : "−"}</span>
+                {item.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder={`Search ${title.toLowerCase()}...`}
+        style={{ ...inputStyle, marginBottom: 3 }}
+      />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {shown.map((item) => (
+          <TriStateItem
+            key={item.id}
+            label={item.label}
+            state="none"
+            onClick={() => onChange(cycleItem(section, item.id))}
+          />
+        ))}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((p) => !p)}
+          style={{ ...btnSm, marginTop: 4 }}
+        >
+          {expanded ? "Show less" : `+${unselectedFiltered.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Like TriStateFilterSection but items are nested under labelled group headings.
+ *
+ * Props:
+ *   title   — section header string
+ *   groups  — array of { groupLabel, items: [{ id, label }] }
+ *   section — emptySection() value
+ *   onChange — callback(newSection)
+ */
+export function GroupedTriStateSection({ title, groups, section, onChange }) {
+  const [expanded, setExpanded] = useState(false);
+  const allItems = groups.flatMap((g) =>
+    g.items.map((i) => ({ ...i, groupLabel: g.groupLabel }))
+  );
+  const hasMore = allItems.length > 5;
+  const shownItems = expanded ? allItems : allItems.slice(0, 5);
+
+  const shownGroups = {};
+  for (const item of shownItems) {
+    if (!shownGroups[item.groupLabel]) shownGroups[item.groupLabel] = [];
+    shownGroups[item.groupLabel].push(item);
+  }
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <SectionHeader title={title} section={section} onChange={onChange} />
+      {Object.entries(shownGroups).map(([groupLabel, items]) => (
+        <div key={groupLabel}>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: "700",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              marginTop: 3,
+              marginBottom: 2,
+            }}
+          >
+            {groupLabel}
+          </div>
+          <div
+            style={{ paddingLeft: 6, display: "flex", flexDirection: "column", gap: 2 }}
+          >
+            {items.map((item) => (
+              <TriStateItem
+                key={item.id}
+                label={item.label}
+                state={getItemState(section, item.id)}
+                onClick={() => onChange(cycleItem(section, item.id))}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((p) => !p)}
+          style={{ ...btnSm, marginTop: 4 }}
+        >
+          {expanded ? "Show less" : `+${allItems.length - 5} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── FilterSidebarShell ───────────────────────────────────────────────────────
+
+/**
+ * Outer container for a filter sidebar. Renders the sidebar box, "Filters"
+ * header with optional Clear button, optional text search input, then children.
+ *
+ * Props:
+ *   hasFilters        — show Clear button when true
+ *   onClearAll        — clear-all callback
+ *   searchValue       — controlled value for the text search input (omit to hide)
+ *   onSearch          — onChange callback for the text search input
+ *   searchPlaceholder — placeholder text (default: "Search...")
+ *   children          — filter section components
+ */
+export function FilterSidebarShell({
+  hasFilters,
+  onClearAll,
+  searchValue,
+  onSearch,
+  searchPlaceholder = "Search...",
+  children,
+}) {
+  return (
+    <div
+      style={{
+        width: 180,
+        flexShrink: 0,
+        borderRight: "1px solid var(--border)",
+        overflowY: "auto",
+        padding: "12px 10px",
+        background: "var(--bg-sidebar)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 10,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: "700",
+            color: "var(--text-label)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Filters
+        </div>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={onClearAll}
+            style={{ ...btnSm, fontSize: 10 }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {onSearch !== undefined && (
+        <div style={{ marginBottom: 12 }}>
+          <input
+            value={searchValue || ""}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder={searchPlaceholder}
+            style={inputStyle}
+          />
+        </div>
+      )}
+
+      {children}
+    </div>
+  );
+}

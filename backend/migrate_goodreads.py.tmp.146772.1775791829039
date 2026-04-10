@@ -1,0 +1,730 @@
+"""
+Goodreads CSV migration script.
+
+Usage:
+    python migrate_goodreads.py [CSV_PATH] [--db DB_PATH] [--dry-run] [--verbose]
+
+Defaults:
+    CSV_PATH  ~/Downloads/goodreads_library_export.csv
+    --db      ../data/collectcore.db
+    --dry-run  parse only; print tag inventory + mapping preview; no DB writes
+    --verbose  print each imported title during full run
+"""
+
+import argparse
+import csv
+import re
+import sqlite3
+import sys
+from collections import Counter
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+APP_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DB = APP_ROOT / "data" / "collectcore.db"
+DEFAULT_CSV = Path.home() / "Downloads" / "goodreads_library_export.csv"
+
+# ---------------------------------------------------------------------------
+# Genre mapping
+#
+# Keys are lowercase Goodreads shelf tags.
+# Values are (genre_name, subgenre_name_or_None) using exact DB names.
+#
+# Genre names (Fiction): Fantasy, Science Fiction, Romance, Crime, Horror, Other
+# Genre names (Non-Fiction): Biography, History, Learning, True Crime, Other
+#
+# Subgenres: see lkup_book_sub_genres — keyed by (genre_name, sub_genre_name).
+# Ambiguous subgenre names (e.g. "Contemporary", "Historical", "Paranormal")
+# exist under multiple genres, so genre_name is always required.
+# ---------------------------------------------------------------------------
+
+GENRE_MAP: dict[str, tuple[str, str | None]] = {
+    # Fantasy
+    "fantasy":              ("Fantasy", None),
+    "urban-fantasy":        ("Fantasy", "Urban Fantasy"),
+    "fairy-tales":          ("Fantasy", "Fairy Tale"),
+    "magical-realism":      ("Fantasy", "Magical Realism"),
+    # Science Fiction
+    "sci-fi":               ("Science Fiction", None),
+    # Romance
+    "romance":              ("Romance", None),
+    "romance-dark":         ("Romance", "Dark"),
+    "romance-fantasy":      ("Romance", "Fantasy"),
+    "romance-historical":   ("Romance", "Historical"),
+    "romance-other":        ("Romance", None),
+    "romance-paranormal":   ("Romance", "Paranormal"),
+    "romance-scifi":        ("Romance", "Sci-Fi"),
+    "romance-suspense":     ("Romance", "Romantic Suspense"),
+    # Crime
+    "mystery":              ("Crime", "Mystery"),
+    "suspense-thriller":    ("Crime", "Suspense/Thriller"),
+    # Horror
+    "gothic":               ("Horror", "Gothic"),
+    "horror-paranormal":    ("Horror", "Paranormal"),
+    # Other fiction
+    "contemporary":         ("Other", "Contemporary"),
+    "historical-fiction":   ("Other", "Historical Fiction"),
+    # Non-Fiction
+    "biography":            ("Biography", None),
+}
+
+# YA shelf tags: "ya-{suffix}" sets age_level=Young Adult and maps suffix to genre.
+# If suffix is not in this map, it goes to freeform.
+YA_GENRE_SUFFIX_MAP: dict[str, tuple[str, str | None]] = {
+    "contemporary":    ("Other", "Contemporary"),
+    "dystopia":        ("Science Fiction", "Dystopian"),
+    "fantasy":         ("Fantasy", None),
+    "historical":      ("Other", "Historical Fiction"),
+    "horror":          ("Horror", None),
+    "mystery":         ("Crime", "Mystery"),
+    "mythology":       ("Fantasy", "Mythology"),
+    "paranormal":      ("Horror", "Paranormal"),
+    "romance":         ("Romance", None),
+    "scifi":           ("Science Fiction", None),
+    "suspense":        ("Crime", "Suspense/Thriller"),
+    "suspense-mystery":("Crime", "Mystery"),  # combined tag; Mystery is alphabetically first
+}
+
+# ---------------------------------------------------------------------------
+# Known status / format / tag-only shelf tags
+# ---------------------------------------------------------------------------
+
+READING_STATUS_TAGS = {"to-read", "currently-reading", "read"}
+DNF_TAGS = {"dnf-permanent", "dnf-read-later"}
+
+FORMAT_TAG_MAP = {
+    "library-hardback":         (1, "Owned", None),
+    "library-hardcover":        (1, "Owned", None),
+    "library-paper":            (2, "Owned", None),
+    "library-kindle":           (4, "Owned", None),
+    "library-kobo":             (5, "Owned", None),
+    "library-audible":          (7, "Owned", None),
+    "library-kindle-unlimited": (4, "Borrowed", "kindle-unlimited"),
+    "library-overdrive":        (6, "Borrowed", "overdrive"),
+    "library-smashwords":       (6, "Owned", "smashwords"),
+    "library-glose":            (6, "Owned", "glose"),
+    "library-free-online":      (6, "Owned", "free-online"),
+    "library-audio-file":       (8, "Owned", "audio-file"),
+    "library-audiocd":          (8, "Owned", "audiocd"),
+    "library-kobo-audio":       (8, "Owned", "kobo-audio"),
+    "library-chirp":            (8, "Owned", "chirp"),
+    "library-other":            (6, "Owned", "other"),
+    "library-formerly-owned":   (None, "Formerly Owned", None),
+}
+
+TAG_ONLY_TAGS = {"freebie", "stripped-or-arc", "advanced-reader-copy"}
+
+# Tags that force top_level_category_id = Non-Fiction.
+# "writing-and-moviemaking" matches actual Goodreads export spelling.
+NON_FICTION_TAGS = {
+    "biography", "gaming", "non-fiction",
+    "writing-and-movie-making", "writing-and-moviemaking",
+}
+
+SERIES_RE = re.compile(r"^(.+?)\s*\((.+?),\s*#([\d.]+)\)\s*$")
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+def get_columns(conn, table_name):
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+
+def ensure_date_read_column(conn):
+    cols = get_columns(conn, "tbl_items")
+    if "date_read" not in cols:
+        conn.execute("ALTER TABLE tbl_items ADD COLUMN date_read TEXT")
+        print("  Added date_read column to tbl_items")
+
+
+def load_lookup_ids(conn):
+    """Return dicts mapping names/codes to IDs for all needed lookups."""
+    ids = {}
+
+    # collection_type_id for books
+    row = conn.execute(
+        "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'book'"
+    ).fetchone()
+    if not row:
+        sys.exit("ERROR: book collection type not found in DB. Run migrate_books_schema.py first.")
+    ids["book_collection_type_id"] = row[0]
+
+    # top_level_category_id: Fiction, Non-Fiction (scoped to book collection type)
+    cats = conn.execute(
+        "SELECT category_name, top_level_category_id FROM lkup_top_level_categories WHERE collection_type_id = ?",
+        (ids["book_collection_type_id"],),
+    ).fetchall()
+    ids["top_level_categories"] = {name: cid for name, cid in cats}
+    if "Fiction" not in ids["top_level_categories"] or "Non-Fiction" not in ids["top_level_categories"]:
+        sys.exit("ERROR: Fiction/Non-Fiction top-level categories not found. Run migrate_books_schema.py first.")
+
+    # ownership_status_id
+    rows = conn.execute("SELECT status_name, ownership_status_id FROM lkup_ownership_statuses").fetchall()
+    ids["ownership"] = {name: oid for name, oid in rows}
+
+    # reading_status_id
+    rows = conn.execute("SELECT status_name, read_status_id FROM lkup_book_read_statuses").fetchall()
+    ids["read_status"] = {name: sid for name, sid in rows}
+
+    # genre IDs: top_level_genre_id keyed by genre_name
+    rows = conn.execute(
+        "SELECT genre_name, top_level_genre_id FROM lkup_book_top_level_genres"
+    ).fetchall()
+    ids["genres"] = {name: gid for name, gid in rows}
+
+    # sub-genre IDs: keyed by (genre_name, sub_genre_name) to handle duplicate names
+    rows = conn.execute(
+        """
+        SELECT g.genre_name, s.sub_genre_name, s.sub_genre_id
+        FROM lkup_book_sub_genres s
+        JOIN lkup_book_top_level_genres g ON g.top_level_genre_id = s.top_level_genre_id
+        """
+    ).fetchall()
+    ids["subgenres"] = {(gname, sname): sid for gname, sname, sid in rows}
+
+    # age level IDs
+    rows = conn.execute("SELECT age_level_name, age_level_id FROM lkup_book_age_levels").fetchall()
+    ids["age_levels"] = {name: aid for name, aid in rows}
+
+    return ids
+
+
+# ---------------------------------------------------------------------------
+# Row parsing helpers
+# ---------------------------------------------------------------------------
+
+def parse_shelves(bookshelves_raw: str) -> list[str]:
+    return [s.strip().lower() for s in bookshelves_raw.split(",") if s.strip()]
+
+
+def parse_series_from_title(raw_title: str):
+    """Returns (clean_title, series_name_or_None, series_number_or_None)."""
+    m = SERIES_RE.match(raw_title.strip())
+    if m:
+        return m.group(1).strip(), m.group(2).strip(), float(m.group(3))
+    return raw_title.strip(), None, None
+
+
+def classify_shelves(shelves: list[str]):
+    """
+    Returns a dict with classified shelf info:
+      reading_status_tag, dnf_tags, format_entries, ownership_override,
+      non_fiction, age_level_name, freeform_tags, genre_entries
+    """
+    result = {
+        "reading_status_tag": None,
+        "dnf_tags": [],
+        "format_entries": [],    # list of (format_detail_id, ownership_str, extra_tag_or_None)
+        "ownership_override": None,
+        "non_fiction": False,
+        "age_level_name": None,  # "Young Adult", "New Adult", etc.
+        "freeform_tags": [],
+        "genre_entries": [],     # list of (genre_name, subgenre_name_or_None)
+    }
+
+    for tag in shelves:
+        # Reading status
+        if tag in READING_STATUS_TAGS:
+            if result["reading_status_tag"] is None:
+                result["reading_status_tag"] = tag
+            continue
+
+        # DNF
+        if tag in DNF_TAGS:
+            result["dnf_tags"].append(tag)
+            continue
+
+        # Tag-only (no format or genre effect)
+        if tag in TAG_ONLY_TAGS:
+            result["freeform_tags"].append(tag)
+            continue
+
+        # Non-Fiction indicators
+        if tag in NON_FICTION_TAGS:
+            result["non_fiction"] = True
+            # Check for genre mapping too (e.g. biography -> Biography genre)
+            if tag in GENRE_MAP:
+                result["genre_entries"].append(GENRE_MAP[tag])
+            else:
+                result["freeform_tags"].append(tag)
+            continue
+
+        # New Adult age level
+        if tag == "new-adult":
+            result["age_level_name"] = "New Adult"
+            continue
+
+        # YA prefix: ya-{suffix} -> age_level=Young Adult + genre from suffix
+        if tag.startswith("ya-"):
+            result["age_level_name"] = "Young Adult"
+            suffix = tag[3:]
+            if suffix in YA_GENRE_SUFFIX_MAP:
+                result["genre_entries"].append(YA_GENRE_SUFFIX_MAP[suffix])
+            else:
+                result["freeform_tags"].append(tag)
+            continue
+
+        # Known format tags
+        if tag in FORMAT_TAG_MAP:
+            fmt_id, ownership_str, extra_tag = FORMAT_TAG_MAP[tag]
+            if tag == "library-formerly-owned":
+                result["ownership_override"] = "Formerly Owned"
+            else:
+                result["format_entries"].append((fmt_id, ownership_str, extra_tag))
+                if extra_tag:
+                    result["freeform_tags"].append(extra_tag)
+            continue
+
+        # Unknown library-* tags
+        if tag.startswith("library-"):
+            stripped = tag[len("library-"):]
+            result["format_entries"].append((6, "Owned", stripped))
+            result["freeform_tags"].append(stripped)
+            continue
+
+        # Genre map
+        if tag in GENRE_MAP:
+            result["genre_entries"].append(GENRE_MAP[tag])
+            continue
+
+        # Everything else -> freeform
+        result["freeform_tags"].append(tag)
+
+    return result
+
+
+def resolve_ownership(classified, exclusive_shelf: str, ids: dict) -> int:
+    if classified["ownership_override"] == "Formerly Owned":
+        oid = ids["ownership"].get("Formerly Owned")
+        if oid:
+            return oid
+
+    format_entries = classified["format_entries"]
+    if format_entries:
+        has_owned = any(e[1] == "Owned" for e in format_entries)
+        if has_owned:
+            return ids["ownership"]["Owned"]
+        return ids["ownership"].get("Borrowed", ids["ownership"]["Owned"])
+
+    if exclusive_shelf in ("to-read", "currently-reading"):
+        return ids["ownership"].get("Wanted", ids["ownership"]["Owned"])
+    if exclusive_shelf == "read":
+        return ids["ownership"]["Owned"]
+
+    return ids["ownership"].get("Pending", ids["ownership"]["Owned"])
+
+
+def resolve_reading_status(classified, exclusive_shelf: str, ids: dict):
+    if classified["dnf_tags"]:
+        return ids["read_status"].get("DNF")
+
+    shelf = exclusive_shelf or classified["reading_status_tag"] or ""
+    if shelf == "read":
+        return ids["read_status"].get("Read")
+    if shelf in ("currently-reading", "to-read"):
+        return ids["read_status"].get("Want to Read")
+
+    return None
+
+
+def resolve_top_level_category(classified, ids: dict) -> int:
+    if classified["non_fiction"]:
+        return ids["top_level_categories"]["Non-Fiction"]
+    return ids["top_level_categories"]["Fiction"]
+
+
+# ---------------------------------------------------------------------------
+# DB write helpers
+# ---------------------------------------------------------------------------
+
+def upsert_author(conn, name: str) -> int:
+    name = name.strip()
+    row = conn.execute(
+        "SELECT author_id FROM lkup_book_authors WHERE author_name = ?", (name,)
+    ).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute("INSERT INTO lkup_book_authors (author_name) VALUES (?)", (name,))
+    return cur.lastrowid
+
+
+def upsert_series(conn, name: str) -> int:
+    name = name.strip()
+    row = conn.execute(
+        "SELECT series_id FROM tbl_book_series WHERE series_name = ?", (name,)
+    ).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute("INSERT INTO tbl_book_series (series_name) VALUES (?)", (name,))
+    return cur.lastrowid
+
+
+def upsert_tag(conn, name: str) -> int:
+    name = name.strip().lower()
+    row = conn.execute(
+        "SELECT tag_id FROM lkup_book_tags WHERE tag_name = ?", (name,)
+    ).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute("INSERT INTO lkup_book_tags (tag_name) VALUES (?)", (name,))
+    return cur.lastrowid
+
+
+def make_title_sort(title: str) -> str:
+    lower = title.lower()
+    for prefix in ("the ", "a ", "an "):
+        if lower.startswith(prefix):
+            return title[len(prefix):]
+    return title
+
+
+def is_duplicate(conn, title: str, primary_author_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT bd.item_id
+        FROM tbl_book_details bd
+        JOIN xref_book_item_authors xia ON xia.item_id = bd.item_id AND xia.author_order = 1
+        JOIN lkup_book_authors a ON a.author_id = xia.author_id
+        WHERE lower(bd.title) = lower(?) AND lower(a.author_name) = lower(?)
+        """,
+        (title, primary_author_name),
+    ).fetchone()
+    return row is not None
+
+
+def insert_book(conn, row_data: dict, ids: dict, verbose: bool) -> str:
+    """
+    Insert one Goodreads row into the DB.
+    Returns "imported", "skipped", or "flagged:<reason>".
+    """
+    raw_title = row_data.get("Title", "").strip()
+    if not raw_title:
+        return "flagged:empty_title"
+
+    clean_title, series_name, series_number = parse_series_from_title(raw_title)
+
+    primary_author_raw = row_data.get("Author", "").strip()
+    additional_raw = row_data.get("Additional Authors", "").strip()
+
+    if not primary_author_raw:
+        return "flagged:no_author"
+
+    all_author_names = [primary_author_raw]
+    if additional_raw:
+        all_author_names += [a.strip() for a in additional_raw.split(",") if a.strip()]
+
+    # Duplicate check
+    if is_duplicate(conn, clean_title, primary_author_raw):
+        return "skipped"
+
+    # Shelves
+    bookshelves_raw = row_data.get("Bookshelves", "")
+    exclusive_shelf = row_data.get("Exclusive Shelf", "").strip().lower()
+    shelves = parse_shelves(bookshelves_raw)
+    classified = classify_shelves(shelves)
+
+    ownership_status_id = resolve_ownership(classified, exclusive_shelf, ids)
+    reading_status_id = resolve_reading_status(classified, exclusive_shelf, ids)
+    top_level_category_id = resolve_top_level_category(classified, ids)
+    age_level_id = ids["age_levels"].get(classified["age_level_name"]) if classified["age_level_name"] else None
+
+    date_added = row_data.get("Date Added", "").strip() or None
+    date_read_raw = row_data.get("Date Read", "").strip() or None
+
+    my_rating_raw = row_data.get("My Rating", "0").strip()
+    try:
+        star_rating = float(my_rating_raw)
+        if star_rating == 0:
+            star_rating = None
+    except ValueError:
+        star_rating = None
+
+    review = row_data.get("My Review", "").strip() or None
+
+    flag_reason = None
+    if not classified["format_entries"] and exclusive_shelf == "read":
+        flag_reason = "read_without_library_tag"
+
+    # --- Insert tbl_items ---
+    if date_added:
+        cur = conn.execute(
+            """INSERT INTO tbl_items
+               (collection_type_id, top_level_category_id, ownership_status_id,
+                reading_status_id, date_read, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (ids["book_collection_type_id"], top_level_category_id, ownership_status_id,
+             reading_status_id, date_read_raw, date_added),
+        )
+    else:
+        cur = conn.execute(
+            """INSERT INTO tbl_items
+               (collection_type_id, top_level_category_id, ownership_status_id,
+                reading_status_id, date_read)
+               VALUES (?, ?, ?, ?, ?)""",
+            (ids["book_collection_type_id"], top_level_category_id, ownership_status_id,
+             reading_status_id, date_read_raw),
+        )
+    item_id = cur.lastrowid
+
+    # --- Insert tbl_book_details ---
+    conn.execute(
+        """INSERT INTO tbl_book_details
+           (item_id, title, title_sort, age_level_id, star_rating, review)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (item_id, clean_title, make_title_sort(clean_title), age_level_id, star_rating, review),
+    )
+
+    # --- Authors ---
+    for order, aname in enumerate(all_author_names, start=1):
+        author_id = upsert_author(conn, aname)
+        conn.execute(
+            "INSERT INTO xref_book_item_authors (item_id, author_id, author_order) VALUES (?, ?, ?)",
+            (item_id, author_id, order),
+        )
+
+    # --- Series ---
+    if series_name:
+        series_id = upsert_series(conn, series_name)
+        conn.execute(
+            "INSERT OR IGNORE INTO xref_book_item_series (item_id, series_id, series_number) VALUES (?, ?, ?)",
+            (item_id, series_id, series_number),
+        )
+
+    # --- Copies (one per format) ---
+    publisher = row_data.get("Publisher", "").strip() or None
+    page_count_raw = row_data.get("Number of Pages", "").strip()
+    try:
+        page_count = int(page_count_raw) if page_count_raw else None
+    except ValueError:
+        page_count = None
+    year_published = row_data.get("Year Published", "").strip() or None
+
+    format_entries = classified["format_entries"]
+    for (fmt_id, _ownership_str, _extra_tag) in format_entries:
+        conn.execute(
+            """INSERT INTO tbl_book_copies
+               (item_id, format_detail_id, publisher, page_count, published_date)
+               VALUES (?, ?, ?, ?, ?)""",
+            (item_id, fmt_id, publisher, page_count, year_published),
+        )
+
+    # --- Tags ---
+    freeform_tags = list(dict.fromkeys(classified["freeform_tags"]))  # dedupe, preserve order
+    if classified["dnf_tags"]:
+        for dt in classified["dnf_tags"]:
+            if dt not in freeform_tags:
+                freeform_tags.append(dt)
+    for tag_name in freeform_tags:
+        tag_id = upsert_tag(conn, tag_name)
+        conn.execute(
+            "INSERT OR IGNORE INTO xref_book_item_tags (item_id, tag_id) VALUES (?, ?)",
+            (item_id, tag_id),
+        )
+
+    # --- Genres ---
+    seen_genres = set()
+    for (genre_name, subgenre_name) in classified["genre_entries"]:
+        genre_id = ids["genres"].get(genre_name)
+        if not genre_id:
+            continue
+        sub_genre_id = ids["subgenres"].get((genre_name, subgenre_name)) if subgenre_name else None
+        key = (genre_id, sub_genre_id)
+        if key in seen_genres:
+            continue
+        seen_genres.add(key)
+        conn.execute(
+            "INSERT OR IGNORE INTO xref_book_item_genres (item_id, top_level_genre_id, sub_genre_id) VALUES (?, ?, ?)",
+            (item_id, genre_id, sub_genre_id),
+        )
+
+    if verbose:
+        print(f"  Imported: {clean_title} -- {primary_author_raw}")
+
+    if flag_reason:
+        return f"flagged:{flag_reason}"
+    return "imported"
+
+
+# ---------------------------------------------------------------------------
+# Dry-run: tag inventory
+# ---------------------------------------------------------------------------
+
+def classify_tag_for_display(tag: str) -> str:
+    if tag in READING_STATUS_TAGS or tag in DNF_TAGS:
+        return "reading-status"
+    if tag in TAG_ONLY_TAGS:
+        return "tag-only"
+    if tag in NON_FICTION_TAGS:
+        cat = "non-fiction-indicator"
+        if tag in GENRE_MAP:
+            cat += " + genre"
+        return cat
+    if tag == "new-adult":
+        return "age-level: New Adult"
+    if tag.startswith("ya-"):
+        suffix = tag[3:]
+        if suffix in YA_GENRE_SUFFIX_MAP:
+            g, s = YA_GENRE_SUFFIX_MAP[suffix]
+            sub = f" / {s}" if s else ""
+            return f"age-level: YA + genre: {g}{sub}"
+        return "age-level: YA + genre: UNMAPPED (freeform)"
+    if tag in FORMAT_TAG_MAP:
+        return "format"
+    if tag.startswith("library-"):
+        return "format (unknown library-*)"
+    if tag in GENRE_MAP:
+        g, s = GENRE_MAP[tag]
+        sub = f" / {s}" if s else ""
+        return f"genre: {g}{sub}"
+    return "-> FREEFORM"
+
+
+def run_dry_run(csv_path: Path):
+    tag_counter: Counter = Counter()
+    exclusive_shelf_counter: Counter = Counter()
+    total_rows = 0
+    missing_title = 0
+    missing_author = 0
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            total_rows += 1
+            if not row.get("Title", "").strip():
+                missing_title += 1
+            if not row.get("Author", "").strip():
+                missing_author += 1
+
+            exclusive_shelf_counter[row.get("Exclusive Shelf", "").strip().lower()] += 1
+
+            for tag in parse_shelves(row.get("Bookshelves", "")):
+                tag_counter[tag] += 1
+
+    print(f"\n{'='*60}")
+    print(f"DRY RUN -- {csv_path.name}")
+    print(f"{'='*60}")
+    print(f"\nTotal rows:     {total_rows:,}")
+    print(f"Missing title:  {missing_title}")
+    print(f"Missing author: {missing_author}")
+
+    print(f"\n--- Exclusive Shelf distribution ---")
+    for shelf, count in exclusive_shelf_counter.most_common():
+        print(f"  {count:>6,}  {shelf}")
+
+    print(f"\n--- All shelf tags (by frequency) ---")
+    print(f"  {'Count':>6}  {'Tag':<45}  Classification")
+    print(f"  {'------':>6}  {'-'*45}  {'-'*40}")
+    for tag, count in tag_counter.most_common():
+        category = classify_tag_for_display(tag)
+        line = f"  {count:>6,}  {tag:<45}  {category}"
+        print(line.encode("ascii", "replace").decode("ascii"))
+
+    print(f"\n--- Genre map: {len(GENRE_MAP)} direct mappings ---")
+    for tag, (genre, subgenre) in sorted(GENRE_MAP.items()):
+        sub = f" / {subgenre}" if subgenre else ""
+        print(f"  {tag:<40}  {genre}{sub}")
+
+    print(f"\n--- YA genre suffix map: {len(YA_GENRE_SUFFIX_MAP)} mappings ---")
+    for suffix, (genre, subgenre) in sorted(YA_GENRE_SUFFIX_MAP.items()):
+        sub = f" / {subgenre}" if subgenre else ""
+        print(f"  ya-{suffix:<37}  YA + {genre}{sub}")
+
+    print(f"\n{'='*60}")
+    print("Review tags above, then run without --dry-run to import.")
+    print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# Full run
+# ---------------------------------------------------------------------------
+
+def run_migration(csv_path: Path, db_path: Path, verbose: bool):
+    print(f"\nConnecting to DB: {db_path}")
+    if not db_path.exists():
+        sys.exit(f"ERROR: DB not found at {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    print("Ensuring date_read column exists...")
+    ensure_date_read_column(conn)
+
+    print("Loading lookup IDs...")
+    ids = load_lookup_ids(conn)
+
+    counts = {"imported": 0, "skipped": 0, "flagged": 0, "errors": 0, "total": 0}
+    flagged_rows = []
+    error_rows = []
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            counts["total"] += 1
+            try:
+                result = insert_book(conn, row, ids, verbose)
+            except Exception as e:
+                counts["errors"] += 1
+                error_rows.append((row.get("Title", "?"), str(e)))
+                conn.rollback()
+                continue
+
+            if result == "imported":
+                counts["imported"] += 1
+            elif result == "skipped":
+                counts["skipped"] += 1
+            elif result.startswith("flagged:"):
+                counts["flagged"] += 1
+                flagged_rows.append((row.get("Title", "?"), result))
+            conn.commit()
+
+    conn.close()
+
+    print(f"\n{'='*50}")
+    print("Goodreads migration complete")
+    print(f"  Imported:  {counts['imported']:>6,}")
+    print(f"  Skipped:   {counts['skipped']:>6,}  (duplicate title+author)")
+    print(f"  Flagged:   {counts['flagged']:>6,}  (ambiguous ownership, read-without-library-tag, etc.)")
+    print(f"  Errors:    {counts['errors']:>6,}")
+    print(f"  Total rows:{counts['total']:>6,}")
+    print(f"{'='*50}")
+
+    if flagged_rows:
+        print(f"\nFlagged titles ({len(flagged_rows)}):")
+        for title, reason in flagged_rows[:30]:
+            print(f"  [{reason}] {title}".encode("ascii", "replace").decode("ascii"))
+        if len(flagged_rows) > 30:
+            print(f"  ... and {len(flagged_rows) - 30} more")
+
+    if error_rows:
+        print(f"\nErrors ({len(error_rows)}):")
+        for title, err in error_rows[:20]:
+            print(f"  {title}: {err}".encode("ascii", "replace").decode("ascii"))
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Migrate Goodreads CSV export to CollectCore")
+    parser.add_argument("csv_path", nargs="?", default=str(DEFAULT_CSV), help="Path to Goodreads CSV export")
+    parser.add_argument("--db", default=str(DEFAULT_DB), help="Path to CollectCore SQLite DB")
+    parser.add_argument("--dry-run", action="store_true", help="Parse only; print tag inventory; no DB writes")
+    parser.add_argument("--verbose", action="store_true", help="Print each imported title")
+    args = parser.parse_args()
+
+    csv_path = Path(args.csv_path).expanduser()
+    db_path = Path(args.db).expanduser()
+
+    if not csv_path.exists():
+        sys.exit(f"ERROR: CSV not found at {csv_path}")
+
+    if args.dry_run:
+        run_dry_run(csv_path)
+    else:
+        run_migration(csv_path, db_path, args.verbose)

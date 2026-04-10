@@ -9,22 +9,17 @@ import PhotocardFilters from "../components/photocard/PhotocardFilters";
 import PhotocardGrid from "../components/photocard/PhotocardGrid";
 import PhotocardDetailModal from "../components/photocard/PhotocardDetailModal";
 import PhotocardBulkEdit from "../components/photocard/PhotocardBulkEdit";
-import {
-  emptySection,
-  sectionActive,
-  applySection,
-} from "../components/library/FilterSidebar";
 
 const COLLECTION_TYPE_ID = 1;
 
 const DEFAULT_FILTERS = {
   notesSearch: "",
-  group: emptySection(),
-  member: emptySection(),
-  category: emptySection(),
-  sourceOrigin: emptySection(),
-  ownership: emptySection(),
-  backImage: emptySection(),
+  groupIds: [],
+  memberIds: [],
+  categoryIds: [],
+  sourceOriginIds: [],
+  ownershipStatusIds: [],
+  backStatus: "all",
 };
 
 const SORT_OPTIONS = [
@@ -149,41 +144,41 @@ export default function PhotocardLibraryPage() {
   const filteredCards = useMemo(() => {
     let result = cards;
 
-    if (sectionActive(filters.group)) {
+    if (filters.groupIds?.length > 0) {
       result = result.filter((c) =>
-        applySection(filters.group, [String(c.group_id)])
+        filters.groupIds.includes(String(c.group_id))
       );
     }
 
-    if (sectionActive(filters.member)) {
-      // member IDs in this sidebar are member names (derived from card data)
+    if (filters.memberIds?.length > 0) {
+      // Member filter uses names (since our filter sidebar uses names as IDs for derived members)
       result = result.filter((c) =>
-        applySection(filters.member, c.members || [])
+        c.members?.some((name) => filters.memberIds.includes(name))
       );
     }
 
-    if (sectionActive(filters.category)) {
+    if (filters.categoryIds?.length > 0) {
       result = result.filter((c) =>
-        applySection(filters.category, [String(c.top_level_category_id)])
+        filters.categoryIds.includes(String(c.top_level_category_id))
       );
     }
 
-    if (sectionActive(filters.sourceOrigin)) {
+    if (filters.sourceOriginIds?.length > 0) {
       result = result.filter((c) =>
-        applySection(filters.sourceOrigin, [String(c.source_origin_id)])
+        filters.sourceOriginIds.includes(String(c.source_origin_id))
       );
     }
 
-    if (sectionActive(filters.ownership)) {
+    if (filters.ownershipStatusIds?.length > 0) {
       result = result.filter((c) =>
-        applySection(filters.ownership, [String(c.ownership_status_id)])
+        filters.ownershipStatusIds.includes(String(c.ownership_status_id))
       );
     }
 
-    if (sectionActive(filters.backImage)) {
-      result = result.filter((c) =>
-        applySection(filters.backImage, [c.back_image_path ? "has_back" : "no_back"])
-      );
+    if (filters.backStatus === "has_back") {
+      result = result.filter((c) => c.back_image_path);
+    } else if (filters.backStatus === "missing_back") {
+      result = result.filter((c) => !c.back_image_path);
     }
 
     if (filters.notesSearch?.trim()) {
@@ -226,7 +221,7 @@ export default function PhotocardLibraryPage() {
     }
   }, [filteredCards, sortMode]);
 
-  function handleSectionChange(key, value) {
+  function handleFilterChange(key, value) {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
   }
@@ -375,7 +370,7 @@ export default function PhotocardLibraryPage() {
           sourceOrigins={filterSourceOrigins}
           ownershipStatuses={ownershipStatuses}
           filters={filters}
-          onSectionChange={handleSectionChange}
+          onFilterChange={handleFilterChange}
           onClearAll={handleClearAll}
         />
 
@@ -466,6 +461,7 @@ const styles = {
     flexDirection: "column",
     height: "100vh",
     overflow: "hidden",
+    fontFamily: "sans-serif",
     fontSize: 13,
   },
   controlsBar: {
@@ -497,7 +493,7 @@ const styles = {
   },
   controlLabel: {
     fontSize: 11,
-    color: "var(--text-muted)",
+    color: "#666",
     fontWeight: "bold",
     textTransform: "uppercase",
     letterSpacing: "0.04em",
@@ -505,27 +501,27 @@ const styles = {
   controlSelect: {
     fontSize: 13,
     padding: "3px 5px",
-    border: "1px solid var(--border-input)",
+    border: "1px solid #ccc",
     borderRadius: 3,
   },
   toggleGroup: {
     display: "flex",
-    border: "1px solid var(--border-input)",
+    border: "1px solid #ccc",
     borderRadius: 3,
     overflow: "hidden",
   },
   toggleBtn: {
     padding: "3px 8px",
     fontSize: 12,
-    background: "var(--bg-base)",
+    background: "#fff",
     border: "none",
-    borderRight: "1px solid var(--border-input)",
+    borderRight: "1px solid #ccc",
     cursor: "pointer",
     lineHeight: 1.4,
   },
   toggleBtnActive: {
-    background: "var(--btn-primary-bg)",
-    color: "var(--btn-primary-text)",
+    background: "#1565c0",
+    color: "#fff",
   },
   toggleLabel: {
     display: "flex",
@@ -537,18 +533,18 @@ const styles = {
     padding: "4px 10px",
     fontSize: 12,
     cursor: "pointer",
-    border: "1px solid var(--border-input)",
+    border: "1px solid #ccc",
     borderRadius: 3,
-    background: "var(--bg-base)",
+    background: "#fff",
   },
   primaryBtn: {
-    background: "var(--btn-primary-bg)",
-    color: "var(--btn-primary-text)",
-    border: "none",
+    background: "#1565c0",
+    color: "#fff",
+    border: "1px solid #1565c0",
   },
   selectCount: {
     fontSize: 12,
-    color: "var(--text-secondary)",
+    color: "#555",
     fontWeight: "bold",
   },
   body: {

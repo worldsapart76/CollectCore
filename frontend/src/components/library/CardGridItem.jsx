@@ -50,8 +50,8 @@ export default function CardGridItem({
         position: "relative",
         width: "100%",
         display: "block",
-        background: "#fff",
-        border: isSelected ? "3px solid #4a67ff" : "1px solid #ccc",
+        background: "var(--bg-base)",
+        border: isSelected ? "3px solid var(--selection-border)" : "1px solid var(--border-input)",
         borderRadius: 8,
         padding: 4,
         cursor: "pointer",
@@ -67,8 +67,8 @@ export default function CardGridItem({
             width: 16,
             height: 16,
             borderRadius: 3,
-            border: "1px solid #666",
-            background: isSelected ? "#4a67ff" : "#fff",
+            border: "1px solid var(--border-input)",
+            background: isSelected ? "var(--selection-border)" : "var(--bg-base)",
             zIndex: 3,
           }}
         />

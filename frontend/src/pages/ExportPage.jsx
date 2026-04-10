@@ -316,7 +316,6 @@ const styles = {
     flexDirection: "column",
     height: "100vh",
     overflow: "hidden",
-    fontFamily: "sans-serif",
     fontSize: 13,
   },
   controlsBar: {

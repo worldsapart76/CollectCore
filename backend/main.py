@@ -741,6 +741,11 @@ class BookGenreInput(BaseModel):
 class BookBulkUpdateFields(BaseModel):
     ownership_status_id: Optional[int] = None
     reading_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+    age_level_id: Optional[int] = None
+    star_rating: Optional[float] = None
+    format_detail_id: Optional[int] = None
+    genres: Optional[List[BookGenreInput]] = None
 
 
 class BookBulkUpdatePayload(BaseModel):
@@ -1652,23 +1657,67 @@ def bulk_update_books(payload: BookBulkUpdatePayload):
             raise HTTPException(status_code=404, detail="One or more item_ids not found.")
 
         f = payload.fields
-        updates = []
-        params = {}
 
+        # tbl_items updates
+        item_updates = []
+        item_params = {}
         if f.ownership_status_id is not None:
-            updates.append("ownership_status_id = :ownership_status_id")
-            params["ownership_status_id"] = f.ownership_status_id
+            item_updates.append("ownership_status_id = :ownership_status_id")
+            item_params["ownership_status_id"] = f.ownership_status_id
         if f.reading_status_id is not None:
-            updates.append("reading_status_id = :reading_status_id")
-            params["reading_status_id"] = f.reading_status_id
+            item_updates.append("reading_status_id = :reading_status_id")
+            item_params["reading_status_id"] = f.reading_status_id
+        if f.top_level_category_id is not None:
+            item_updates.append("top_level_category_id = :top_level_category_id")
+            item_params["top_level_category_id"] = f.top_level_category_id
 
-        if updates:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
+        if item_updates:
+            item_updates.append("updated_at = CURRENT_TIMESTAMP")
             for item_id in payload.item_ids:
                 db.execute(
-                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :item_id"),
-                    {**params, "item_id": item_id},
+                    text(f"UPDATE tbl_items SET {', '.join(item_updates)} WHERE item_id = :item_id"),
+                    {**item_params, "item_id": item_id},
                 )
+
+        # tbl_book_details updates
+        detail_updates = []
+        detail_params = {}
+        if f.age_level_id is not None:
+            detail_updates.append("age_level_id = :age_level_id")
+            detail_params["age_level_id"] = f.age_level_id
+        if f.star_rating is not None:
+            detail_updates.append("star_rating = :star_rating")
+            detail_params["star_rating"] = f.star_rating
+
+        if detail_updates:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_book_details SET {', '.join(detail_updates)} WHERE item_id = :item_id"),
+                    {**detail_params, "item_id": item_id},
+                )
+
+        # tbl_book_copies: update first copy's format_detail_id per item
+        if f.format_detail_id is not None:
+            for item_id in payload.item_ids:
+                first_copy = db.execute(
+                    text("SELECT copy_id FROM tbl_book_copies WHERE item_id = :id ORDER BY copy_id LIMIT 1"),
+                    {"id": item_id},
+                ).fetchone()
+                if first_copy:
+                    db.execute(
+                        text("UPDATE tbl_book_copies SET format_detail_id = :fd WHERE copy_id = :cid"),
+                        {"fd": f.format_detail_id, "cid": first_copy[0]},
+                    )
+
+        # Genre replace: delete existing and insert new
+        if f.genres is not None:
+            for item_id in payload.item_ids:
+                db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
+                for g in f.genres:
+                    db.execute(
+                        text("INSERT INTO xref_book_item_genres (item_id, top_level_genre_id, sub_genre_id) VALUES (:item_id, :tg, :sg)"),
+                        {"item_id": item_id, "tg": g.top_level_genre_id, "sg": g.sub_genre_id},
+                    )
 
         db.commit()
         return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
@@ -2131,6 +2180,44 @@ async def replace_back(item_id: int, file: UploadFile = File(...)):
     if Path(file.filename).suffix.lower() not in _ALLOWED_IMAGE_SUFFIXES:
         raise HTTPException(status_code=400, detail="Unsupported file type.")
     return _replace_image(item_id, "b", file)
+
+
+# ---------- Settings endpoints ----------
+
+
+class SettingUpdate(BaseModel):
+    value: str
+
+
+@app.get("/settings")
+def get_settings():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("SELECT key, value FROM tbl_app_settings")).fetchall()
+        return {row[0]: row[1] for row in rows}
+    finally:
+        db.close()
+
+
+@app.put("/settings/{key}")
+def put_setting(key: str, body: SettingUpdate):
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                "INSERT INTO tbl_app_settings (key, value) VALUES (:key, :value) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+            ),
+            {"key": key, "value": body.value},
+        )
+        db.commit()
+        row = db.execute(
+            text("SELECT key, value FROM tbl_app_settings WHERE key = :key"),
+            {"key": key},
+        ).fetchone()
+        return {"key": row[0], "value": row[1]}
+    finally:
+        db.close()
 
 
 # ---------- Export endpoints ----------

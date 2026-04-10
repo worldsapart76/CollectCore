@@ -19,28 +19,28 @@
   --text-label:     #9ca3af;
 
   /* Green palette */
-  --green:       #377e00;   /* dark forest green */
-  --green-vivid: #9ced5a;   /* vivid lime green */
-  --green-light: #f2fde8;   /* tinted surface */
+  --green:       #166534;   /* rich hunter green */
+  --green-vivid: #16a34a;   /* action / button green */
+  --green-light: #f0fdf4;   /* tinted surface */
 
   /* Buttons */
-  --btn-primary-bg:     #377e00;
+  --btn-primary-bg:     #166534;
   --btn-primary-text:   #ffffff;
   --btn-secondary-bg:   #f9fafb;
   --btn-secondary-text: #374151;
   --btn-secondary-border: #d1d5db;
 
   /* States */
-  --selection-border: #377e00;
+  --selection-border: #166534;
   --error-text:   #991b1b;
   --error-bg:     #fef2f2;
   --error-border: #dc2626;
 
   /* Shadows — green-tinted */
-  --shadow-card:       0 1px 3px rgba(55, 126, 0, 0.08), 0 2px 8px rgba(55, 126, 0, 0.05);
-  --shadow-card-hover: 0 4px 16px rgba(55, 126, 0, 0.16), 0 2px 4px rgba(55, 126, 0, 0.08);
-  --shadow-tile:       0 2px 8px rgba(55, 126, 0, 0.10), 0 1px 2px rgba(55, 126, 0, 0.06);
-  --shadow-tile-hover: 0 6px 24px rgba(55, 126, 0, 0.18), 0 2px 6px rgba(55, 126, 0, 0.10);
+  --shadow-card:       0 1px 3px rgba(22, 101, 52, 0.08), 0 2px 8px rgba(22, 101, 52, 0.05);
+  --shadow-card-hover: 0 4px 16px rgba(22, 101, 52, 0.16), 0 2px 4px rgba(22, 101, 52, 0.08);
+  --shadow-tile:       0 2px 8px rgba(22, 101, 52, 0.10), 0 1px 2px rgba(22, 101, 52, 0.06);
+  --shadow-tile-hover: 0 6px 24px rgba(22, 101, 52, 0.18), 0 2px 6px rgba(22, 101, 52, 0.10);
 }
 
 [data-theme="dark"] {
@@ -60,28 +60,28 @@
   --text-label:     #6b7280;
 
   /* Green palette — vivid / neon */
-  --green:       #9ced5a;   /* vivid lime — readable on dark */
-  --green-vivid: #9ced5a;   /* same lime as accent */
-  --green-light: rgba(156, 237, 90, 0.10);
+  --green:       #4ade80;   /* vivid green */
+  --green-vivid: #00e676;   /* neon accent */
+  --green-light: rgba(74, 222, 128, 0.10);
 
   /* Buttons */
-  --btn-primary-bg:     #377e00;
+  --btn-primary-bg:     #16a34a;
   --btn-primary-text:   #ffffff;
   --btn-secondary-bg:   #1a2e1a;
   --btn-secondary-text: #d1d5db;
   --btn-secondary-border: #26402a;
 
   /* States */
-  --selection-border: #9ced5a;
+  --selection-border: #4ade80;
   --error-text:   #fca5a5;
   --error-bg:     rgba(220, 38, 38, 0.12);
   --error-border: #7f1d1d;
 
   /* Shadows — glow effect */
-  --shadow-card:       0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(156, 237, 90, 0.07);
-  --shadow-card-hover: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(156, 237, 90, 0.28), 0 0 16px rgba(156, 237, 90, 0.07);
-  --shadow-tile:       0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(156, 237, 90, 0.08);
-  --shadow-tile-hover: 0 6px 24px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(156, 237, 90, 0.35), 0 0 24px rgba(156, 237, 90, 0.10);
+  --shadow-card:       0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(74, 222, 128, 0.07);
+  --shadow-card-hover: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(74, 222, 128, 0.28), 0 0 16px rgba(74, 222, 128, 0.07);
+  --shadow-tile:       0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(74, 222, 128, 0.08);
+  --shadow-tile-hover: 0 6px 24px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(74, 222, 128, 0.35), 0 0 24px rgba(74, 222, 128, 0.10);
 }
 
 /* ── Utility button classes ──────────────────────────────────────────────────── */
@@ -127,15 +127,10 @@ select {
 
 /* ── App shell ───────────────────────────────────────────────────────────────── */
 
-#root {
-  height: 100%;
-}
-
 .app-shell {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 /* ── Top nav ─────────────────────────────────────────────────────────────────── */
@@ -190,7 +185,6 @@ select {
 .app-main {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .page-container {

@@ -385,6 +385,22 @@ export async function bulkDeleteBooks(itemIds) {
   return handleJsonResponse(res, "Failed to bulk delete books");
 }
 
+// --- Settings ---
+
+export async function fetchSettings() {
+  const res = await fetch(`${API}/settings`);
+  return handleJsonResponse(res, "Failed to fetch settings");
+}
+
+export async function updateSetting(key, value) {
+  const res = await fetch(`${API}/settings/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  return handleJsonResponse(res, "Failed to update setting");
+}
+
 // --- Export ---
 
 export async function exportPhotocards({ itemIds, includeCaptions, includeBacks }) {

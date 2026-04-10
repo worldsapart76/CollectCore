@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -303,7 +303,7 @@ function FormatBadges({ formats }) {
 function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div onClick={onClick} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: 3, boxSizing: "border-box",
@@ -311,6 +311,7 @@ function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, sho
       <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
         <input type="checkbox" checked={isSelected}
           onChange={() => onToggleSelect(book.item_id)}
+          onClick={(e) => e.stopPropagation()}
           style={{ margin: 0, cursor: "pointer" }} />
       </div>
       <OwnershipBadge statusName={book.ownership_status} />
@@ -341,7 +342,7 @@ function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) 
       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}>
       <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }}
-        onClick={(e) => e.stopPropagation()}>
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(book.item_id); }}>
         <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(book.item_id)} style={{ margin: 0, cursor: "pointer" }} />
       </td>
       {showThumbnails && (
@@ -845,11 +846,8 @@ export default function BooksLibraryPage() {
     title: 220, author: 150, format: 120, genre: 150, age: 70, readStatus: 110, ownership: 100, rating: 60,
   });
 
-  const colResizingRef = useRef(false);
-
   const makeResizeHandler = useCallback((col) => (e) => {
     e.preventDefault();
-    colResizingRef.current = true;
     const startX = e.clientX;
     const startW = colWidths[col];
     function onMove(ev) {
@@ -858,7 +856,6 @@ export default function BooksLibraryPage() {
     function onUp() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      setTimeout(() => { colResizingRef.current = false; }, 0);
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -1009,7 +1006,7 @@ export default function BooksLibraryPage() {
   if (error) return <div style={{ padding: 24, color: "#c62828" }}>Error: {error}</div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", fontSize: 13 }}>
       {/* Controls bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid #ddd", background: "#f5f5f5", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1068,7 +1065,7 @@ export default function BooksLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ minWidth: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -1081,7 +1078,7 @@ export default function BooksLibraryPage() {
                 <col style={{ width: colWidths.ownership }} />
                 <col style={{ width: colWidths.rating }} />
               </colgroup>
-              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+              <thead>
                 <tr style={{ background: "#f5f5f5", borderBottom: "1px solid #ddd" }}>
                   <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid #d0d0d0" }}>
                     <input type="checkbox" checked={allVisibleSelected}
@@ -1103,7 +1100,7 @@ export default function BooksLibraryPage() {
                     return (
                       <th
                         key={label}
-                        onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                        onClick={key ? () => handleHeaderSort(key) : undefined}
                         style={{
                           padding: "5px 8px",
                           textAlign: "left",
@@ -1160,7 +1157,6 @@ export default function BooksLibraryPage() {
       {bulkEditOpen && (
         <BookBulkEdit
           selectedBooks={selectedBooks} ownershipStatuses={ownershipStatuses} readStatuses={readStatuses}
-          ageLevels={ageLevels} formatDetails={formatDetails} genres={genres}
           onClose={() => setBulkEditOpen(false)}
           onSaved={async () => { setBulkEditOpen(false); clearSelection(); await reloadBooks(); }}
           onDeleted={() => { setBulkEditOpen(false); setBooks((prev) => prev.filter((b) => !selectedIds.has(b.item_id))); clearSelection(); }}

@@ -1,30 +1,37 @@
+import { useEffect, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import HomeTile from "../components/home/HomeTile";
+import { MODULE_DEFS } from "../modules";
+import { fetchSettings } from "../api";
 
 export default function HomePage() {
+  const [modules, setModules] = useState([]);
+
+  useEffect(() => {
+    fetchSettings()
+      .then(settings => {
+        try {
+          const ids = JSON.parse(settings.modules_enabled || "[]");
+          setModules(ids.map(id => MODULE_DEFS[id]).filter(Boolean));
+        } catch {
+          setModules(Object.values(MODULE_DEFS));
+        }
+      })
+      .catch(() => setModules(Object.values(MODULE_DEFS)));
+  }, []);
+
   return (
     <PageContainer>
       <div className="home-grid">
-        <HomeTile
-          title="Inbox"
-          description="Process new scans"
-          countLabel="Open inbox workflow"
-          to="/inbox"
-        />
-
-        <HomeTile
-          title="Library"
-          description="Browse collection"
-          countLabel="Open library"
-          to="/library"
-        />
-
-        <HomeTile
-          title="Export"
-          description="Create a shareable PDF"
-          countLabel="Open export tools"
-          to="/export"
-        />
+        {modules.map(mod => (
+          <HomeTile
+            key={mod.id}
+            title={mod.label}
+            description={mod.description}
+            countLabel={`Open ${mod.label.toLowerCase()} library`}
+            to={mod.primaryPath}
+          />
+        ))}
       </div>
     </PageContainer>
   );
