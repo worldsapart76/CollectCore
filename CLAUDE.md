@@ -231,6 +231,23 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 
 ---
 
+## Backup & Restore
+
+The Admin page has Backup and Restore functions (`GET /admin/backup`,
+`POST /admin/restore`).
+
+**New modules require no changes to backup** — the SQLite backup is a
+complete hot-copy of the entire database, so any tables added by future
+modules are captured automatically. The images directory is also backed
+up wholesale.
+
+**Checklist item when building a new module:** Verify that any
+module-specific file assets stored outside `images/library/` are covered
+by the backup. If a new module stores files in a different directory,
+update `GET /admin/backup` to include that directory in the ZIP.
+
+---
+
 ## Session Notes
 
 See `docs/session_notes.md` for the full session history.

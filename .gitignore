@@ -11,6 +11,9 @@ images/
 data/
 exports/
 
+# API keys and secrets (never commit)
+backend/.env
+
 # OS junk
 .DS_Store
 Thumbs.db

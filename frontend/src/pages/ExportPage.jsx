@@ -7,17 +7,35 @@ import {
   exportPhotocards,
 } from "../api";
 import PhotocardFilters from "../components/photocard/PhotocardFilters";
+import {
+  emptySection,
+  sectionActive,
+  applySection,
+} from "../components/library/FilterSidebar";
 
 const COLLECTION_TYPE_ID = 1;
 
+// Stray Kids canonical member order — multi-member cards sort to bottom
+const MEMBER_ORDER = [
+  "Bang Chan", "Lee Know", "Changbin", "Hyunjin",
+  "Han", "Felix", "Seungmin", "I.N",
+];
+function memberSortKey(card) {
+  const members = card.members || [];
+  if (members.length !== 1) return MEMBER_ORDER.length;
+  const idx = MEMBER_ORDER.indexOf(members[0]);
+  return idx === -1 ? MEMBER_ORDER.length - 0.5 : idx;
+}
+
 const DEFAULT_FILTERS = {
   notesSearch: "",
-  groupIds: [],
-  memberIds: [],
-  categoryIds: [],
-  sourceOriginIds: [],
-  ownershipStatusIds: [],
-  backStatus: "all",
+  group: emptySection(),
+  member: emptySection(),
+  category: emptySection(),
+  sourceOrigin: emptySection(),
+  version: emptySection(),
+  ownership: emptySection(),
+  backImage: emptySection(),
 };
 
 const SORT_OPTIONS = [
@@ -78,9 +96,24 @@ export default function ExportPage() {
         }
       }
     }
-    return [...memberMap.values()].sort((a, b) =>
-      a.member_name.localeCompare(b.member_name)
-    );
+    return [...memberMap.values()].sort((a, b) => {
+      const ai = MEMBER_ORDER.indexOf(a.member_name);
+      const bi = MEMBER_ORDER.indexOf(b.member_name);
+      const aIdx = ai === -1 ? MEMBER_ORDER.length : ai;
+      const bIdx = bi === -1 ? MEMBER_ORDER.length : bi;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      return a.member_name.localeCompare(b.member_name);
+    });
+  }, [cards]);
+
+  const filterVersions = useMemo(() => {
+    const seen = new Map();
+    for (const card of cards) {
+      if (card.version && !seen.has(card.version)) {
+        seen.set(card.version, { id: card.version, label: card.version });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [cards]);
 
   const filterSourceOrigins = useMemo(() => {
@@ -103,33 +136,36 @@ export default function ExportPage() {
   const filteredCards = useMemo(() => {
     let result = cards;
 
-    if (filters.groupIds?.length > 0) {
-      result = result.filter((c) => filters.groupIds.includes(String(c.group_id)));
+    if (sectionActive(filters.group)) {
+      result = result.filter((c) => applySection(filters.group, [String(c.group_id)]));
     }
-    if (filters.memberIds?.length > 0) {
+    if (sectionActive(filters.member)) {
+      result = result.filter((c) => applySection(filters.member, c.members || []));
+    }
+    if (sectionActive(filters.category)) {
       result = result.filter((c) =>
-        c.members?.some((name) => filters.memberIds.includes(name))
+        applySection(filters.category, [String(c.top_level_category_id)])
       );
     }
-    if (filters.categoryIds?.length > 0) {
+    if (sectionActive(filters.sourceOrigin)) {
       result = result.filter((c) =>
-        filters.categoryIds.includes(String(c.top_level_category_id))
+        applySection(filters.sourceOrigin, [String(c.source_origin_id)])
       );
     }
-    if (filters.sourceOriginIds?.length > 0) {
+    if (sectionActive(filters.version)) {
       result = result.filter((c) =>
-        filters.sourceOriginIds.includes(String(c.source_origin_id))
+        applySection(filters.version, [c.version || ""])
       );
     }
-    if (filters.ownershipStatusIds?.length > 0) {
+    if (sectionActive(filters.ownership)) {
       result = result.filter((c) =>
-        filters.ownershipStatusIds.includes(String(c.ownership_status_id))
+        applySection(filters.ownership, [String(c.ownership_status_id)])
       );
     }
-    if (filters.backStatus === "has_back") {
-      result = result.filter((c) => c.back_image_path);
-    } else if (filters.backStatus === "missing_back") {
-      result = result.filter((c) => !c.back_image_path);
+    if (sectionActive(filters.backImage)) {
+      result = result.filter((c) =>
+        applySection(filters.backImage, [c.back_image_path ? "has_back" : "no_back"])
+      );
     }
     if (filters.notesSearch?.trim()) {
       const q = filters.notesSearch.toLowerCase();
@@ -153,9 +189,7 @@ export default function ExportPage() {
       case "id_desc":
         return result.sort((a, b) => b.item_id - a.item_id);
       case "member":
-        return result.sort((a, b) =>
-          (a.members?.[0] || "").localeCompare(b.members?.[0] || "")
-        );
+        return result.sort((a, b) => memberSortKey(a) - memberSortKey(b));
       case "category":
         return result.sort((a, b) => (a.category || "").localeCompare(b.category || ""));
       case "group":
@@ -166,7 +200,7 @@ export default function ExportPage() {
     }
   }, [filteredCards, sortMode]);
 
-  function handleFilterChange(key, value) {
+  function handleSectionChange(key, value) {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -272,9 +306,10 @@ export default function ExportPage() {
           members={filterMembers}
           categories={categories}
           sourceOrigins={filterSourceOrigins}
+          versions={filterVersions}
           ownershipStatuses={ownershipStatuses}
           filters={filters}
-          onFilterChange={handleFilterChange}
+          onSectionChange={handleSectionChange}
           onClearAll={handleClearAll}
         />
 

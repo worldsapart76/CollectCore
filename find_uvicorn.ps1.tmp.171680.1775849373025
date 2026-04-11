@@ -1,0 +1,7 @@
+$procs = Get-WmiObject Win32_Process -Filter "Name = 'python.exe'"
+Write-Host "=== All Python processes with cmd ==="
+foreach ($proc in $procs) {
+    $procId = $proc.ProcessId
+    $mem = [math]::Round((Get-Process -Id $procId -ErrorAction SilentlyContinue).WorkingSet64 / 1MB, 1)
+    Write-Host "PID=$procId mem=${mem}MB cmd=$($proc.CommandLine)"
+}

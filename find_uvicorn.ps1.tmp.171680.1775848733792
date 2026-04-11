@@ -1,0 +1,19 @@
+$procs = Get-WmiObject Win32_Process -Filter "Name = 'python.exe'"
+foreach ($proc in $procs) {
+    if ($proc.CommandLine -like "*uvicorn*") {
+        $procId = $proc.ProcessId
+        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        Write-Host "PID=$procId  started=$($p.StartTime)"
+        Write-Host "  CMD: $($proc.CommandLine)"
+        Write-Host "  WorkDir: $($proc.ExecutablePath)"
+
+        # Get working directory via .NET
+        try {
+            Add-Type -TypeDefinition "using System; using System.Diagnostics; public class ProcInfo { public static string GetWorkDir(int pid) { return System.IO.Directory.GetCurrentDirectory(); }}" -ErrorAction SilentlyContinue
+        } catch {}
+    }
+}
+
+# Also check netstat now
+Write-Host "`nPort 8001 listeners:"
+netstat -ano | Select-String ":8001.*LISTEN"

@@ -17,12 +17,25 @@ import {
 
 const COLLECTION_TYPE_ID = 1;
 
+// Stray Kids canonical member order — cards with multiple members sort to bottom
+const MEMBER_ORDER = [
+  "Bang Chan", "Lee Know", "Changbin", "Hyunjin",
+  "Han", "Felix", "Seungmin", "I.N",
+];
+function memberSortKey(card) {
+  const members = card.members || [];
+  if (members.length !== 1) return MEMBER_ORDER.length; // multi → bottom
+  const idx = MEMBER_ORDER.indexOf(members[0]);
+  return idx === -1 ? MEMBER_ORDER.length - 0.5 : idx;
+}
+
 const DEFAULT_FILTERS = {
   notesSearch: "",
   group: emptySection(),
   member: emptySection(),
   category: emptySection(),
   sourceOrigin: emptySection(),
+  version: emptySection(),
   ownership: emptySection(),
   backImage: emptySection(),
 };
@@ -50,6 +63,7 @@ export default function PhotocardLibraryPage() {
   const [viewMode, setViewMode] = useState("fronts"); // "fronts" | "fronts_backs"
   const [sizeMode, setSizeMode] = useState("m"); // "s" | "m" | "l"
   const [showCaptions, setShowCaptions] = useState(true);
+  const [pageSize, setPageSize] = useState(30);
 
   // Selection / bulk edit
   const [selectMode, setSelectMode] = useState(false);
@@ -107,24 +121,37 @@ export default function PhotocardLibraryPage() {
     return [];
   }, [cards]);
 
-  // Member list for filter sidebar — derive from cards grouped by group
-  // We load members per group lazily when needed, but for simplicity we derive
-  // a combined member list from what's present in the card data.
+  // Member list for filter sidebar — sorted by canonical MEMBER_ORDER
   const filterMembers = useMemo(() => {
     const memberMap = new Map();
     for (const card of cards) {
       if (card.members) {
         for (const name of card.members) {
           if (!memberMap.has(name)) {
-            // We don't have member_ids in the list response — use name as key
             memberMap.set(name, { member_id: name, member_name: name });
           }
         }
       }
     }
-    return [...memberMap.values()].sort((a, b) =>
-      a.member_name.localeCompare(b.member_name)
-    );
+    return [...memberMap.values()].sort((a, b) => {
+      const ai = MEMBER_ORDER.indexOf(a.member_name);
+      const bi = MEMBER_ORDER.indexOf(b.member_name);
+      const aIdx = ai === -1 ? MEMBER_ORDER.length : ai;
+      const bIdx = bi === -1 ? MEMBER_ORDER.length : bi;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      return a.member_name.localeCompare(b.member_name);
+    });
+  }, [cards]);
+
+  // Version list for filter sidebar — sorted alphabetically
+  const filterVersions = useMemo(() => {
+    const seen = new Map();
+    for (const card of cards) {
+      if (card.version && !seen.has(card.version)) {
+        seen.set(card.version, { id: card.version, label: card.version });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [cards]);
 
   // Source origins for filter sidebar — derive from cards
@@ -174,6 +201,12 @@ export default function PhotocardLibraryPage() {
       );
     }
 
+    if (sectionActive(filters.version)) {
+      result = result.filter((c) =>
+        applySection(filters.version, [c.version || ""])
+      );
+    }
+
     if (sectionActive(filters.ownership)) {
       result = result.filter((c) =>
         applySection(filters.ownership, [String(c.ownership_status_id)])
@@ -209,9 +242,7 @@ export default function PhotocardLibraryPage() {
       case "id_desc":
         return result.sort((a, b) => b.item_id - a.item_id);
       case "member":
-        return result.sort((a, b) =>
-          (a.members?.[0] || "").localeCompare(b.members?.[0] || "")
-        );
+        return result.sort((a, b) => memberSortKey(a) - memberSortKey(b));
       case "category":
         return result.sort((a, b) =>
           (a.category || "").localeCompare(b.category || "")
@@ -336,9 +367,28 @@ export default function PhotocardLibraryPage() {
             />
             Captions
           </label>
+
+          {/* Per-page */}
+          <div style={styles.controlGroup}>
+            <span style={styles.controlLabel}>Per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              style={styles.controlSelect}
+            >
+              <option value={30}>30</option>
+              <option value={60}>60</option>
+              <option value={120}>120</option>
+              <option value={0}>All</option>
+            </select>
+          </div>
         </div>
 
         <div style={styles.controlsRight}>
+          <span style={styles.cardCount}>
+            {sortedCards.length} cards
+            {selectMode && selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
+          </span>
           {!selectMode ? (
             <button
               style={styles.controlBtn}
@@ -348,7 +398,6 @@ export default function PhotocardLibraryPage() {
             </button>
           ) : (
             <>
-              <span style={styles.selectCount}>{selectedIds.size} selected</span>
               <button style={styles.controlBtn} onClick={handleSelectAll}>All ({sortedCards.length})</button>
               <button style={styles.controlBtn} onClick={handleClearSelection}>Clear</button>
               {selectedIds.size > 0 && (
@@ -373,6 +422,7 @@ export default function PhotocardLibraryPage() {
           members={filterMembers}
           categories={categories}
           sourceOrigins={filterSourceOrigins}
+          versions={filterVersions}
           ownershipStatuses={ownershipStatuses}
           filters={filters}
           onSectionChange={handleSectionChange}
@@ -391,6 +441,7 @@ export default function PhotocardLibraryPage() {
             onCardClick={handleCardClick}
             page={page}
             onPageChange={setPage}
+            pageSize={pageSize}
           />
         </div>
 
@@ -546,10 +597,11 @@ const styles = {
     color: "var(--btn-primary-text)",
     border: "none",
   },
-  selectCount: {
+  cardCount: {
     fontSize: 12,
-    color: "var(--text-secondary)",
+    color: "var(--text-muted)",
     fontWeight: "bold",
+    marginRight: 6,
   },
   body: {
     display: "flex",

@@ -11,25 +11,23 @@
  *   onCardClick    — callback(card) — open detail or toggle select
  *   page           — current page number (1-based)
  *   onPageChange   — callback(newPage)
- *   PAGE_SIZE      — number of cards per page (default 30)
+ *   pageSize       — number of cards per page (default 30, 0 = all)
  */
 
-const PAGE_SIZE = 30;
-
-// First-letter → color mapping so any status name gets a badge
+// First-letter → neon color mapping (black background, neon letter)
 const BADGE_LETTER_COLORS = {
-  O: "#2e7d32",  // Owned
-  W: "#f57f17",  // Want / Wishlist
-  F: "#c62828",  // For Trade / For Sale
-  T: "#1565c0",  // Trading
-  S: "#6a1b9a",  // Sold / Selling
+  O: "#39ff14",  // Owned — neon green
+  W: "#ffff00",  // Want / Wishlist — neon yellow
+  F: "#ff3131",  // For Trade / For Sale — neon red
+  T: "#00ffff",  // Trading — neon cyan
+  S: "#bf00ff",  // Sold / Selling — neon purple
 };
 
 function getOwnershipBadge(statusName) {
   if (!statusName) return null;
   const letter = statusName[0].toUpperCase();
-  const color = BADGE_LETTER_COLORS[letter] || "#607d8b";
-  return { label: letter, color };
+  const neonColor = BADGE_LETTER_COLORS[letter] || "#ffffff";
+  return { label: letter, neonColor };
 }
 
 const SIZE_CONFIG = {
@@ -48,12 +46,14 @@ export default function PhotocardGrid({
   onCardClick,
   page,
   onPageChange,
+  pageSize = 30,
 }) {
   const { cellWidth, imageHeight } = SIZE_CONFIG[sizeMode] || SIZE_CONFIG.m;
-  const totalPages = Math.max(1, Math.ceil(cards.length / PAGE_SIZE));
+  const effectivePageSize = pageSize === 0 ? cards.length : pageSize;
+  const totalPages = Math.max(1, Math.ceil(cards.length / effectivePageSize));
   const safePage = Math.min(page, totalPages);
-  const start = (safePage - 1) * PAGE_SIZE;
-  const pageCards = cards.slice(start, start + PAGE_SIZE);
+  const start = (safePage - 1) * effectivePageSize;
+  const pageCards = cards.slice(start, start + effectivePageSize);
 
   if (cards.length === 0) {
     return (
@@ -208,7 +208,7 @@ function ImageSlot({ path, side, width, height, badge }) {
       )}
 
       {badge && side === "front" && (
-        <div style={{ ...styles.ownershipBadge, background: badge.color }}>
+        <div style={{ ...styles.ownershipBadge, color: badge.neonColor }}>
           {badge.label}
         </div>
       )}
@@ -245,7 +245,7 @@ const styles = {
     position: "absolute",
     bottom: 4,
     left: 4,
-    color: "#fff",
+    background: "#000",
     fontWeight: "bold",
     fontSize: 12,
     width: 20,

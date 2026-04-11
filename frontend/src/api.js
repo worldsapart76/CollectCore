@@ -385,6 +385,126 @@ export async function bulkDeleteBooks(itemIds) {
   return handleJsonResponse(res, "Failed to bulk delete books");
 }
 
+// --- Graphic Novels lookups ---
+
+export async function fetchGnPublishers() {
+  const res = await fetch(`${API}/graphicnovels/publishers`);
+  return handleJsonResponse(res, "Failed to fetch publishers");
+}
+
+export async function createGnPublisher(publisherName) {
+  const res = await fetch(`${API}/graphicnovels/publishers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ publisher_name: publisherName }),
+  });
+  return handleJsonResponse(res, "Failed to create publisher");
+}
+
+export async function fetchGnFormatTypes() {
+  const res = await fetch(`${API}/graphicnovels/format-types`);
+  return handleJsonResponse(res, "Failed to fetch format types");
+}
+
+export async function fetchGnEras() {
+  const res = await fetch(`${API}/graphicnovels/eras`);
+  return handleJsonResponse(res, "Failed to fetch eras");
+}
+
+export async function searchGnWriters(q) {
+  const url = q
+    ? `${API}/graphicnovels/writers?q=${encodeURIComponent(q)}`
+    : `${API}/graphicnovels/writers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch writers");
+}
+
+export async function searchGnArtists(q) {
+  const url = q
+    ? `${API}/graphicnovels/artists?q=${encodeURIComponent(q)}`
+    : `${API}/graphicnovels/artists`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch artists");
+}
+
+export async function searchGnTags(q) {
+  const url = q
+    ? `${API}/graphicnovels/tags?q=${encodeURIComponent(q)}`
+    : `${API}/graphicnovels/tags`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch graphic novel tags");
+}
+
+export async function lookupGnIsbn(isbn, source = "all") {
+  const res = await fetch(`${API}/graphicnovels/lookup-isbn?isbn=${encodeURIComponent(isbn)}&source=${source}`);
+  return handleJsonResponse(res, "Failed to lookup ISBN");
+}
+
+export async function searchGnExternal(q, source = "comicvine") {
+  const res = await fetch(`${API}/graphicnovels/search-external?q=${encodeURIComponent(q)}&source=${source}`);
+  return handleJsonResponse(res, "External search failed");
+}
+
+export async function fixGnCovers() {
+  const res = await fetch(`${API}/graphicnovels/fix-covers`, { method: "POST" });
+  return handleJsonResponse(res, "Fix covers failed");
+}
+
+// --- Graphic Novels CRUD ---
+
+export async function listGraphicNovels() {
+  const res = await fetch(`${API}/graphicnovels`);
+  return handleJsonResponse(res, "Failed to fetch graphic novels");
+}
+
+export async function getGraphicNovel(itemId) {
+  const res = await fetch(`${API}/graphicnovels/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to fetch graphic novel");
+}
+
+export async function createGraphicNovel(payload) {
+  const res = await fetch(`${API}/graphicnovels`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to create graphic novel");
+}
+
+export async function updateGraphicNovel(itemId, payload) {
+  const res = await fetch(`${API}/graphicnovels/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to update graphic novel");
+}
+
+export async function deleteGraphicNovel(itemId) {
+  const res = await fetch(`${API}/graphicnovels/${encodeURIComponent(itemId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete graphic novel");
+}
+
+export async function bulkUpdateGraphicNovels(itemIds, fields) {
+  const res = await fetch(`${API}/graphicnovels/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  return handleJsonResponse(res, "Failed to bulk update graphic novels");
+}
+
+export async function bulkDeleteGraphicNovels(itemIds) {
+  const res = await fetch(`${API}/graphicnovels/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete graphic novels");
+}
+
 // --- Settings ---
 
 export async function fetchSettings() {
@@ -399,6 +519,29 @@ export async function updateSetting(key, value) {
     body: JSON.stringify({ value }),
   });
   return handleJsonResponse(res, "Failed to update setting");
+}
+
+// --- Admin: Backup & Restore ---
+
+export async function downloadBackup() {
+  const res = await fetch(`${API}/admin/backup`);
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || "Backup failed.");
+  }
+  // Extract filename from Content-Disposition header if present
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename=([^\s;]+)/);
+  const filename = match ? match[1] : "collectcore_backup.zip";
+  const blob = await res.blob();
+  return { blob, filename };
+}
+
+export async function restoreBackup(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/admin/restore`, { method: "POST", body: form });
+  return handleJsonResponse(res, "Restore failed.");
 }
 
 // --- Export ---

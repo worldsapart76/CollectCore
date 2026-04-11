@@ -20,11 +20,22 @@ export const MODULE_DEFS = {
       { label: 'Library',  to: '/books/library' },
     ],
   },
+  graphicnovels: {
+    id: 'graphicnovels',
+    label: 'Graphic Novels',
+    primaryPath: '/graphicnovels/library',
+    description: 'Track your graphic novel and omnibus collection',
+    links: [
+      { label: 'Add',     to: '/graphicnovels/add' },
+      { label: 'Library', to: '/graphicnovels/library' },
+    ],
+  },
 };
 
 // Derive active module from current pathname
 export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/books')) return 'books';
+  if (pathname.startsWith('/graphicnovels')) return 'graphicnovels';
   if (['/inbox', '/library', '/export'].some(p => pathname.startsWith(p))) return 'photocards';
   return null;
 }

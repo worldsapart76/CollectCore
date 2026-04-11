@@ -1,0 +1,3480 @@
+import io
+import json
+import shutil
+import sqlite3
+import tempfile
+import urllib.parse
+import urllib.request
+import zipfile
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from db import init_db
+
+print("LOADED BACKEND FILE:", __file__)
+
+# ---------- Paths ----------
+APP_ROOT = Path(__file__).resolve().parents[1]
+IMAGES_DIR = APP_ROOT / "images"
+INBOX_DIR = IMAGES_DIR / "inbox"
+LIBRARY_DIR = IMAGES_DIR / "library"
+
+INBOX_DIR.mkdir(parents=True, exist_ok=True)
+LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------- App ----------
+app = FastAPI(title="CollectCore API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------- DB init ----------
+init_db()
+
+# ---------- Static files ----------
+if IMAGES_DIR.exists():
+    app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
+
+
+# ---------- Helpers ----------
+from db import SessionLocal
+from sqlalchemy import text
+
+
+def _photocard_row_to_dict(row):
+    return {
+        "item_id": row[0],
+        "group_id": row[1],
+        "group_name": row[2],
+        "top_level_category_id": row[3],
+        "category": row[4],
+        "ownership_status_id": row[5],
+        "ownership_status": row[6],
+        "notes": row[7],
+        "source_origin_id": row[8],
+        "source_origin": row[9],
+        "version": row[10],
+        "members": list(dict.fromkeys(row[11].split(", "))) if row[11] else [],
+        "front_image_path": row[12],
+        "back_image_path": row[13],
+    }
+
+
+_PHOTOCARD_SELECT = """
+    SELECT
+        i.item_id,
+        g.group_id,
+        g.group_name,
+        i.top_level_category_id,
+        c.category_name,
+        i.ownership_status_id,
+        os.status_name,
+        i.notes,
+        p.source_origin_id,
+        so.source_origin_name,
+        p.version,
+        COALESCE(
+            (
+                SELECT GROUP_CONCAT(m.member_name, ', ')
+                FROM xref_photocard_members xpm
+                JOIN lkup_photocard_members m ON xpm.member_id = m.member_id
+                WHERE xpm.item_id = i.item_id
+                ORDER BY m.member_id
+            ),
+            ''
+        ) AS members,
+        MAX(CASE WHEN a.attachment_type = 'front' THEN a.file_path END) AS front_image_path,
+        MAX(CASE WHEN a.attachment_type = 'back' THEN a.file_path END) AS back_image_path
+    FROM tbl_items i
+    JOIN tbl_photocard_details p
+        ON i.item_id = p.item_id
+    JOIN lkup_top_level_categories c
+        ON i.top_level_category_id = c.top_level_category_id
+    JOIN lkup_ownership_statuses os
+        ON i.ownership_status_id = os.ownership_status_id
+    JOIN lkup_photocard_groups g
+        ON p.group_id = g.group_id
+    LEFT JOIN lkup_photocard_source_origins so
+        ON p.source_origin_id = so.source_origin_id
+    LEFT JOIN tbl_attachments a
+        ON i.item_id = a.item_id
+    WHERE i.collection_type_id = 1
+"""
+
+_PHOTOCARD_GROUP_BY = """
+    GROUP BY
+        i.item_id,
+        g.group_id,
+        g.group_name,
+        i.top_level_category_id,
+        c.category_name,
+        i.ownership_status_id,
+        os.status_name,
+        i.notes,
+        p.source_origin_id,
+        so.source_origin_name,
+        p.version
+"""
+
+
+# ---------- Routes ----------
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "CollectCore API"}
+
+
+# --- Lookup endpoints ---
+
+@app.get("/ownership-statuses")
+def get_ownership_statuses():
+    db = SessionLocal()
+    try:
+        result = db.execute(text("""
+            SELECT ownership_status_id, status_name, sort_order
+            FROM lkup_ownership_statuses
+            WHERE is_active = 1
+            ORDER BY sort_order
+        """)).fetchall()
+        return [
+            {
+                "ownership_status_id": row[0],
+                "status_name": row[1],
+                "sort_order": row[2],
+            }
+            for row in result
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/categories")
+def get_top_level_categories(collection_type_id: int):
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text("""
+                SELECT top_level_category_id, category_name
+                FROM lkup_top_level_categories
+                WHERE collection_type_id = :collection_type_id
+                ORDER BY sort_order
+            """),
+            {"collection_type_id": collection_type_id},
+        ).fetchall()
+        return [
+            {
+                "top_level_category_id": row[0],
+                "category_name": row[1],
+            }
+            for row in result
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/photocards/groups")
+def get_photocard_groups():
+    db = SessionLocal()
+    try:
+        result = db.execute(text("""
+            SELECT group_id, group_code, group_name
+            FROM lkup_photocard_groups
+            ORDER BY sort_order
+        """)).fetchall()
+        return [
+            {
+                "group_id": row[0],
+                "group_code": row[1],
+                "group_name": row[2],
+            }
+            for row in result
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/photocards/groups/{group_id}/members")
+def get_photocard_members(group_id: int):
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text("""
+                SELECT member_id, member_code, member_name
+                FROM lkup_photocard_members
+                WHERE group_id = :group_id
+                ORDER BY sort_order
+            """),
+            {"group_id": group_id},
+        ).fetchall()
+        return [
+            {
+                "member_id": row[0],
+                "member_code": row[1],
+                "member_name": row[2],
+            }
+            for row in result
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/photocards/source-origins")
+def get_source_origins(group_id: int, category_id: int):
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text("""
+                SELECT source_origin_id, source_origin_name
+                FROM lkup_photocard_source_origins
+                WHERE group_id = :group_id
+                  AND top_level_category_id = :category_id
+                ORDER BY sort_order, source_origin_name
+            """),
+            {
+                "group_id": group_id,
+                "category_id": category_id,
+            },
+        ).fetchall()
+        return [
+            {
+                "source_origin_id": row[0],
+                "source_origin_name": row[1],
+            }
+            for row in result
+        ]
+    finally:
+        db.close()
+
+
+# --- Pydantic models ---
+
+class SourceOriginCreate(BaseModel):
+    group_id: int
+    top_level_category_id: int
+    source_origin_name: str
+
+
+class PhotocardCreate(BaseModel):
+    collection_type_id: int
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    group_id: int
+    source_origin_id: Optional[int] = None
+    version: Optional[str] = None
+    member_ids: List[int]
+
+
+class PhotocardUpdate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    source_origin_id: Optional[int] = None
+    version: Optional[str] = None
+    member_ids: List[int]
+
+
+class BulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    notes: Optional[str] = None
+    notes_action: Optional[str] = None  # "set" | "append" | "clear"
+    source_origin_id: Optional[int] = None
+    version: Optional[str] = None
+    member_ids: Optional[List[int]] = None
+    top_level_category_id: Optional[int] = None
+
+
+class BulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: BulkUpdateFields
+
+
+# --- Source origins CRUD ---
+
+@app.post("/photocards/source-origins")
+def create_source_origin(payload: SourceOriginCreate):
+    db = SessionLocal()
+    try:
+        clean_name = payload.source_origin_name.strip()
+
+        if not clean_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Source origin name cannot be blank.",
+            )
+
+        existing = db.execute(
+            text("""
+                SELECT source_origin_id
+                FROM lkup_photocard_source_origins
+                WHERE group_id = :group_id
+                  AND top_level_category_id = :top_level_category_id
+                  AND LOWER(TRIM(source_origin_name)) = LOWER(TRIM(:source_origin_name))
+            """),
+            {
+                "group_id": payload.group_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "source_origin_name": clean_name,
+            },
+        ).fetchone()
+
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail="That source origin already exists for this group and category.",
+            )
+
+        result = db.execute(
+            text("""
+                INSERT INTO lkup_photocard_source_origins (
+                    group_id,
+                    top_level_category_id,
+                    source_origin_name
+                )
+                VALUES (
+                    :group_id,
+                    :top_level_category_id,
+                    :source_origin_name
+                )
+                RETURNING source_origin_id
+            """),
+            {
+                "group_id": payload.group_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "source_origin_name": clean_name,
+            },
+        ).fetchone()
+
+        source_origin_id = result[0]
+        db.commit()
+
+        return {
+            "source_origin_id": source_origin_id,
+            "group_id": payload.group_id,
+            "top_level_category_id": payload.top_level_category_id,
+            "source_origin_name": clean_name,
+            "status": "created",
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# --- Photocard CRUD ---
+
+@app.get("/photocards")
+def list_photocards():
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text(_PHOTOCARD_SELECT + _PHOTOCARD_GROUP_BY + " ORDER BY i.item_id")
+        ).fetchall()
+        return [_photocard_row_to_dict(row) for row in result]
+    finally:
+        db.close()
+
+
+@app.get("/photocards/{item_id}")
+def get_photocard(item_id: int):
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                _PHOTOCARD_SELECT
+                + " AND i.item_id = :item_id"
+                + _PHOTOCARD_GROUP_BY
+            ),
+            {"item_id": item_id},
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        return _photocard_row_to_dict(row)
+    finally:
+        db.close()
+
+
+@app.post("/photocards")
+def create_photocard(payload: PhotocardCreate):
+    db = SessionLocal()
+    try:
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (
+                    collection_type_id,
+                    top_level_category_id,
+                    ownership_status_id,
+                    notes
+                )
+                VALUES (
+                    :collection_type_id,
+                    :top_level_category_id,
+                    :ownership_status_id,
+                    :notes
+                )
+                RETURNING item_id
+            """),
+            {
+                "collection_type_id": payload.collection_type_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_details (
+                    item_id,
+                    group_id,
+                    source_origin_id,
+                    version
+                )
+                VALUES (
+                    :item_id,
+                    :group_id,
+                    :source_origin_id,
+                    :version
+                )
+            """),
+            {
+                "item_id": item_id,
+                "group_id": payload.group_id,
+                "source_origin_id": payload.source_origin_id,
+                "version": payload.version,
+            },
+        )
+
+        for member_id in payload.member_ids:
+            db.execute(
+                text("""
+                    INSERT INTO xref_photocard_members (item_id, member_id)
+                    VALUES (:item_id, :member_id)
+                """),
+                {"item_id": item_id, "member_id": member_id},
+            )
+
+        db.commit()
+
+        return {"item_id": item_id, "status": "created"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/photocards/{item_id}")
+def update_photocard(item_id: int, payload: PhotocardUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :item_id AND collection_type_id = 1"),
+            {"item_id": item_id},
+        ).fetchone()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        db.execute(
+            text("""
+                UPDATE tbl_items
+                SET top_level_category_id = :top_level_category_id,
+                    ownership_status_id = :ownership_status_id,
+                    notes = :notes,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = :item_id
+            """),
+            {
+                "item_id": item_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        )
+
+        db.execute(
+            text("""
+                UPDATE tbl_photocard_details
+                SET source_origin_id = :source_origin_id,
+                    version = :version
+                WHERE item_id = :item_id
+            """),
+            {
+                "item_id": item_id,
+                "source_origin_id": payload.source_origin_id,
+                "version": payload.version,
+            },
+        )
+
+        db.execute(
+            text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+
+        for member_id in payload.member_ids:
+            db.execute(
+                text("""
+                    INSERT INTO xref_photocard_members (item_id, member_id)
+                    VALUES (:item_id, :member_id)
+                """),
+                {"item_id": item_id, "member_id": member_id},
+            )
+
+        db.commit()
+
+        return {"item_id": item_id, "status": "updated"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/photocards/{item_id}")
+def delete_photocard(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :item_id AND collection_type_id = 1"),
+            {"item_id": item_id},
+        ).fetchone()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        db.execute(
+            text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+        db.execute(
+            text("DELETE FROM tbl_attachments WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+        db.execute(
+            text("DELETE FROM tbl_photocard_details WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+        db.execute(
+            text("DELETE FROM tbl_items WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+
+        db.commit()
+
+        return {"item_id": item_id, "status": "deleted"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/photocards/bulk")
+def bulk_update_photocards(payload: BulkUpdatePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        # Verify all items exist and are photocards
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"""
+                SELECT item_id FROM tbl_items
+                WHERE item_id IN ({placeholders})
+                  AND collection_type_id = 1
+            """)
+        ).fetchall()
+
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        f = payload.fields
+
+        # Update tbl_items fields
+        items_updates = []
+        items_params = {}
+
+        if f.ownership_status_id is not None:
+            items_updates.append("ownership_status_id = :ownership_status_id")
+            items_params["ownership_status_id"] = f.ownership_status_id
+
+        if f.top_level_category_id is not None:
+            items_updates.append("top_level_category_id = :top_level_category_id")
+            items_params["top_level_category_id"] = f.top_level_category_id
+
+        if f.notes_action == "clear":
+            items_updates.append("notes = NULL")
+        elif f.notes_action == "set" and f.notes is not None:
+            items_updates.append("notes = :notes")
+            items_params["notes"] = f.notes
+        elif f.notes_action == "append" and f.notes is not None:
+            items_updates.append("notes = CASE WHEN notes IS NULL OR notes = '' THEN :notes ELSE notes || ' ' || :notes END")
+            items_params["notes"] = f.notes
+
+        if items_updates:
+            items_updates.append("updated_at = CURRENT_TIMESTAMP")
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(items_updates)} WHERE item_id = :item_id"),
+                    {**items_params, "item_id": item_id},
+                )
+
+        # Update tbl_photocard_details fields
+        details_updates = []
+        details_params = {}
+
+        if f.source_origin_id is not None:
+            details_updates.append("source_origin_id = :source_origin_id")
+            details_params["source_origin_id"] = f.source_origin_id
+
+        if f.version is not None:
+            details_updates.append("version = :version")
+            details_params["version"] = f.version
+
+        if details_updates:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_photocard_details SET {', '.join(details_updates)} WHERE item_id = :item_id"),
+                    {**details_params, "item_id": item_id},
+                )
+
+        # Replace member associations
+        if f.member_ids is not None:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
+                    {"item_id": item_id},
+                )
+                for member_id in f.member_ids:
+                    db.execute(
+                        text("""
+                            INSERT INTO xref_photocard_members (item_id, member_id)
+                            VALUES (:item_id, :member_id)
+                        """),
+                        {"item_id": item_id, "member_id": member_id},
+                    )
+
+        db.commit()
+
+        return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+class BulkDeletePayload(BaseModel):
+    item_ids: List[int]
+
+
+@app.post("/photocards/bulk-delete")
+def bulk_delete_photocards(payload: BulkDeletePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = 1")
+        ).fetchall()
+
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_photocard_members WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ---------- Books ----------
+
+BOOK_COLLECTION_TYPE_ID = 2
+
+
+# --- Books Pydantic models ---
+
+class BookGenreInput(BaseModel):
+    top_level_genre_id: int
+    sub_genre_id: Optional[int] = None
+
+
+class BookBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    reading_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+    age_level_id: Optional[int] = None
+    star_rating: Optional[float] = None
+    format_detail_id: Optional[int] = None
+    genres: Optional[List[BookGenreInput]] = None
+
+
+class BookBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: BookBulkUpdateFields
+
+
+class BookCreate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    reading_status_id: Optional[int] = None
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    age_level_id: Optional[int] = None
+    star_rating: Optional[float] = None
+    review: Optional[str] = None
+    api_categories_raw: Optional[str] = None
+    author_names: List[str]
+    series_name: Optional[str] = None
+    series_number: Optional[float] = None
+    genres: Optional[List[BookGenreInput]] = None
+    tag_names: Optional[List[str]] = None
+    format_detail_id: Optional[int] = None
+    isbn_13: Optional[str] = None
+    isbn_10: Optional[str] = None
+    publisher: Optional[str] = None
+    published_date: Optional[str] = None
+    page_count: Optional[int] = None
+    language: Optional[str] = "en"
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+class BookUpdate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    reading_status_id: Optional[int] = None
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    age_level_id: Optional[int] = None
+    star_rating: Optional[float] = None
+    review: Optional[str] = None
+    api_categories_raw: Optional[str] = None
+    author_names: List[str]
+    series_name: Optional[str] = None
+    series_number: Optional[float] = None
+    genres: Optional[List[BookGenreInput]] = None
+    tag_names: Optional[List[str]] = None
+    format_detail_id: Optional[int] = None
+    isbn_13: Optional[str] = None
+    isbn_10: Optional[str] = None
+    publisher: Optional[str] = None
+    published_date: Optional[str] = None
+    page_count: Optional[int] = None
+    language: Optional[str] = "en"
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+# --- Books helpers ---
+
+def _make_title_sort(title: str) -> str:
+    for article in ("The ", "A ", "An "):
+        if title.startswith(article):
+            return title[len(article):]
+    return title
+
+
+def _upsert_author(db, author_name: str) -> int:
+    clean = author_name.strip()
+    existing = db.execute(
+        text("SELECT author_id FROM lkup_book_authors WHERE LOWER(TRIM(author_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_book_authors (author_name) VALUES (:name) RETURNING author_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_series(db, series_name: str) -> int:
+    clean = series_name.strip()
+    existing = db.execute(
+        text("SELECT series_id FROM tbl_book_series WHERE LOWER(TRIM(series_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO tbl_book_series (series_name) VALUES (:name) RETURNING series_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_tag(db, tag_name: str) -> int:
+    clean = tag_name.strip()
+    existing = db.execute(
+        text("SELECT tag_id FROM lkup_book_tags WHERE LOWER(TRIM(tag_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_book_tags (tag_name) VALUES (:name) RETURNING tag_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _insert_book_relationships(db, item_id: int, payload) -> None:
+    """Insert all xref relationships and copy for a book. Caller clears existing rows first on update."""
+    for order, name in enumerate(payload.author_names, start=1):
+        if name.strip():
+            author_id = _upsert_author(db, name)
+            db.execute(
+                text("""
+                    INSERT OR IGNORE INTO xref_book_item_authors (item_id, author_id, author_order)
+                    VALUES (:item_id, :author_id, :order)
+                """),
+                {"item_id": item_id, "author_id": author_id, "order": order},
+            )
+
+    if payload.series_name and payload.series_name.strip():
+        series_id = _upsert_series(db, payload.series_name)
+        db.execute(
+            text("""
+                INSERT OR IGNORE INTO xref_book_item_series (item_id, series_id, series_number)
+                VALUES (:item_id, :series_id, :series_number)
+            """),
+            {"item_id": item_id, "series_id": series_id, "series_number": payload.series_number},
+        )
+
+    if payload.genres:
+        for g in payload.genres:
+            db.execute(
+                text("""
+                    INSERT OR IGNORE INTO xref_book_item_genres (item_id, top_level_genre_id, sub_genre_id)
+                    VALUES (:item_id, :top_level_genre_id, :sub_genre_id)
+                """),
+                {"item_id": item_id, "top_level_genre_id": g.top_level_genre_id, "sub_genre_id": g.sub_genre_id},
+            )
+
+    if payload.tag_names:
+        for name in payload.tag_names:
+            if name.strip():
+                tag_id = _upsert_tag(db, name)
+                db.execute(
+                    text("""
+                        INSERT OR IGNORE INTO xref_book_item_tags (item_id, tag_id)
+                        VALUES (:item_id, :tag_id)
+                    """),
+                    {"item_id": item_id, "tag_id": tag_id},
+                )
+
+    if payload.format_detail_id is not None:
+        db.execute(
+            text("""
+                INSERT INTO tbl_book_copies (
+                    item_id, format_detail_id, isbn_13, isbn_10, publisher,
+                    published_date, page_count, language, cover_image_url,
+                    api_source, external_work_id
+                ) VALUES (
+                    :item_id, :format_detail_id, :isbn_13, :isbn_10, :publisher,
+                    :published_date, :page_count, :language, :cover_image_url,
+                    :api_source, :external_work_id
+                )
+            """),
+            {
+                "item_id": item_id,
+                "format_detail_id": payload.format_detail_id,
+                "isbn_13": payload.isbn_13,
+                "isbn_10": payload.isbn_10,
+                "publisher": payload.publisher,
+                "published_date": payload.published_date,
+                "page_count": payload.page_count,
+                "language": payload.language,
+                "cover_image_url": payload.cover_image_url,
+                "api_source": payload.api_source,
+                "external_work_id": payload.external_work_id,
+            },
+        )
+
+
+def _get_book_detail(db, item_id: int):
+    """Return full detail dict for a single book, or None if not found."""
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.top_level_category_id,
+                c.category_name,
+                i.ownership_status_id,
+                os.status_name,
+                i.reading_status_id,
+                rs.status_name,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                bd.title,
+                bd.title_sort,
+                bd.description,
+                bd.age_level_id,
+                al.age_level_name,
+                bd.star_rating,
+                bd.review,
+                bd.api_categories_raw
+            FROM tbl_items i
+            JOIN tbl_book_details bd ON i.item_id = bd.item_id
+            JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_book_age_levels al ON bd.age_level_id = al.age_level_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": BOOK_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    authors = db.execute(
+        text("""
+            SELECT la.author_id, la.author_name, xa.author_order
+            FROM xref_book_item_authors xa
+            JOIN lkup_book_authors la ON xa.author_id = la.author_id
+            WHERE xa.item_id = :item_id
+            ORDER BY xa.author_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    series = db.execute(
+        text("""
+            SELECT ts.series_id, ts.series_name, xs.series_number
+            FROM xref_book_item_series xs
+            JOIN tbl_book_series ts ON xs.series_id = ts.series_id
+            WHERE xs.item_id = :item_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    genres = db.execute(
+        text("""
+            SELECT xg.top_level_genre_id, tg.genre_name, xg.sub_genre_id, sg.sub_genre_name
+            FROM xref_book_item_genres xg
+            JOIN lkup_book_top_level_genres tg ON xg.top_level_genre_id = tg.top_level_genre_id
+            LEFT JOIN lkup_book_sub_genres sg ON xg.sub_genre_id = sg.sub_genre_id
+            WHERE xg.item_id = :item_id
+            ORDER BY tg.genre_name, sg.sub_genre_name
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    tags = db.execute(
+        text("""
+            SELECT lt.tag_id, lt.tag_name
+            FROM xref_book_item_tags xt
+            JOIN lkup_book_tags lt ON xt.tag_id = lt.tag_id
+            WHERE xt.item_id = :item_id
+            ORDER BY lt.tag_name
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    copies = db.execute(
+        text("""
+            SELECT bc.copy_id, bc.format_detail_id, fd.format_name, fd.top_level_format,
+                   bc.isbn_13, bc.isbn_10, bc.publisher, bc.published_date,
+                   bc.page_count, bc.language, bc.cover_image_url, bc.notes,
+                   bc.api_source, bc.external_work_id
+            FROM tbl_book_copies bc
+            JOIN lkup_book_format_details fd ON bc.format_detail_id = fd.format_detail_id
+            WHERE bc.item_id = :item_id
+            ORDER BY bc.copy_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "top_level_category_id": row[1],
+        "category": row[2],
+        "ownership_status_id": row[3],
+        "ownership_status": row[4],
+        "reading_status_id": row[5],
+        "reading_status": row[6],
+        "notes": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
+        "title": row[10],
+        "title_sort": row[11],
+        "description": row[12],
+        "age_level_id": row[13],
+        "age_level": row[14],
+        "star_rating": row[15],
+        "review": row[16],
+        "api_categories_raw": row[17],
+        "authors": [{"author_id": a[0], "author_name": a[1], "author_order": a[2]} for a in authors],
+        "series": [{"series_id": s[0], "series_name": s[1], "series_number": s[2]} for s in series],
+        "genres": [
+            {
+                "top_level_genre_id": g[0],
+                "genre_name": g[1],
+                "sub_genre_id": g[2],
+                "sub_genre_name": g[3],
+            }
+            for g in genres
+        ],
+        "tags": [{"tag_id": t[0], "tag_name": t[1]} for t in tags],
+        "copies": [
+            {
+                "copy_id": c[0],
+                "format_detail_id": c[1],
+                "format_name": c[2],
+                "top_level_format": c[3],
+                "isbn_13": c[4],
+                "isbn_10": c[5],
+                "publisher": c[6],
+                "published_date": c[7],
+                "page_count": c[8],
+                "language": c[9],
+                "cover_image_url": c[10],
+                "notes": c[11],
+                "api_source": c[12],
+                "external_work_id": c[13],
+            }
+            for c in copies
+        ],
+    }
+
+
+# --- Books lookup endpoints ---
+# NOTE: specific paths (/genres, /format-details, etc.) must appear before /{item_id}
+
+@app.get("/books/genres")
+def get_book_genres(category_scope_id: Optional[int] = None):
+    db = SessionLocal()
+    try:
+        query = """
+            SELECT g.top_level_genre_id, g.genre_name, g.category_scope_id,
+                   s.sub_genre_id, s.sub_genre_name
+            FROM lkup_book_top_level_genres g
+            LEFT JOIN lkup_book_sub_genres s
+                ON g.top_level_genre_id = s.top_level_genre_id AND s.is_active = 1
+            WHERE g.is_active = 1
+        """
+        params = {}
+        if category_scope_id is not None:
+            query += " AND g.category_scope_id = :category_scope_id"
+            params["category_scope_id"] = category_scope_id
+        query += " ORDER BY g.sort_order, g.genre_name, s.sort_order, s.sub_genre_name"
+
+        rows = db.execute(text(query), params).fetchall()
+
+        genres: dict = {}
+        for row in rows:
+            gid = row[0]
+            if gid not in genres:
+                genres[gid] = {
+                    "top_level_genre_id": row[0],
+                    "genre_name": row[1],
+                    "category_scope_id": row[2],
+                    "sub_genres": [],
+                }
+            if row[3] is not None:
+                genres[gid]["sub_genres"].append({
+                    "sub_genre_id": row[3],
+                    "sub_genre_name": row[4],
+                })
+
+        return list(genres.values())
+    finally:
+        db.close()
+
+
+@app.get("/books/format-details")
+def get_book_format_details():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT format_detail_id, format_name, top_level_format, sort_order
+            FROM lkup_book_format_details
+            WHERE is_active = 1
+            ORDER BY top_level_format, sort_order, format_name
+        """)).fetchall()
+        return [
+            {
+                "format_detail_id": row[0],
+                "format_name": row[1],
+                "top_level_format": row[2],
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/books/age-levels")
+def get_book_age_levels():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT age_level_id, age_level_name
+            FROM lkup_book_age_levels
+            WHERE is_active = 1
+            ORDER BY sort_order
+        """)).fetchall()
+        return [{"age_level_id": row[0], "age_level_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/books/read-statuses")
+def get_book_read_statuses():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT read_status_id, status_name
+            FROM lkup_book_read_statuses
+            WHERE is_active = 1
+            ORDER BY sort_order
+        """)).fetchall()
+        return [{"read_status_id": row[0], "status_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/books/authors")
+def get_book_authors(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT author_id, author_name
+                    FROM lkup_book_authors
+                    WHERE is_active = 1 AND LOWER(author_name) LIKE LOWER(:q)
+                    ORDER BY author_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT author_id, author_name
+                FROM lkup_book_authors
+                WHERE is_active = 1
+                ORDER BY author_name
+            """)).fetchall()
+        return [{"author_id": row[0], "author_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/books/series")
+def get_book_series(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT series_id, series_name
+                    FROM tbl_book_series
+                    WHERE is_active = 1 AND LOWER(series_name) LIKE LOWER(:q)
+                    ORDER BY series_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT series_id, series_name
+                FROM tbl_book_series
+                WHERE is_active = 1
+                ORDER BY series_name
+            """)).fetchall()
+        return [{"series_id": row[0], "series_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/books/tags")
+def get_book_tags(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT tag_id, tag_name
+                    FROM lkup_book_tags
+                    WHERE is_active = 1 AND LOWER(tag_name) LIKE LOWER(:q)
+                    ORDER BY tag_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT tag_id, tag_name
+                FROM lkup_book_tags
+                WHERE is_active = 1
+                ORDER BY tag_name
+            """)).fetchall()
+        return [{"tag_id": row[0], "tag_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+# --- External book search ---
+
+def _normalize_google_book(volume: dict) -> dict:
+    info = volume.get("volumeInfo", {})
+    isbns = {i["type"]: i["identifier"] for i in info.get("industryIdentifiers", [])}
+    return {
+        "title": info.get("title"),
+        "author_names": info.get("authors", []),
+        "isbn_10": isbns.get("ISBN_10"),
+        "isbn_13": isbns.get("ISBN_13"),
+        "publisher": info.get("publisher"),
+        "published_date": info.get("publishedDate"),
+        "page_count": info.get("pageCount"),
+        "language": info.get("language"),
+        "description": info.get("description"),
+        "cover_image_url": info.get("imageLinks", {}).get("thumbnail"),
+        "api_source": "google_books",
+        "external_work_id": volume.get("id"),
+        "api_categories_raw": ", ".join(info.get("categories", [])) or None,
+    }
+
+
+@app.get("/books/search-external")
+def search_external_books(q: str = Query(..., min_length=1)):
+    encoded = urllib.parse.quote(q)
+    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=10"
+    try:
+        with urllib.request.urlopen(url, timeout=6) as resp:
+            data = json.loads(resp.read())
+        return [_normalize_google_book(v) for v in data.get("items", [])]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"External search failed: {e}")
+
+
+@app.get("/books/lookup-isbn")
+def lookup_isbn(isbn: str = Query(..., min_length=10)):
+    encoded = urllib.parse.quote(f"isbn:{isbn}")
+    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=1"
+    try:
+        with urllib.request.urlopen(url, timeout=6) as resp:
+            data = json.loads(resp.read())
+        items = data.get("items", [])
+        if not items:
+            return None
+        return _normalize_google_book(items[0])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ISBN lookup failed: {e}")
+
+
+# --- Books CRUD ---
+
+@app.get("/books")
+def list_books():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT
+                    i.item_id,
+                    i.top_level_category_id,
+                    c.category_name,
+                    i.ownership_status_id,
+                    os.status_name,
+                    i.reading_status_id,
+                    rs.status_name,
+                    i.notes,
+                    bd.title,
+                    bd.title_sort,
+                    bd.star_rating,
+                    al.age_level_name,
+                    bd.age_level_id,
+                    (SELECT GROUP_CONCAT(la.author_name, ', ')
+                     FROM xref_book_item_authors xa
+                     JOIN lkup_book_authors la ON xa.author_id = la.author_id
+                     WHERE xa.item_id = i.item_id) AS authors_str,
+                    (SELECT ts.series_name FROM xref_book_item_series xs
+                     JOIN tbl_book_series ts ON xs.series_id = ts.series_id
+                     WHERE xs.item_id = i.item_id LIMIT 1) AS series_name,
+                    (SELECT xs.series_number FROM xref_book_item_series xs
+                     WHERE xs.item_id = i.item_id LIMIT 1) AS series_number,
+                    (SELECT bc.cover_image_url FROM tbl_book_copies bc
+                     WHERE bc.item_id = i.item_id AND bc.cover_image_url IS NOT NULL LIMIT 1) AS cover_image_url,
+                    (SELECT bc.isbn_13 FROM tbl_book_copies bc
+                     WHERE bc.item_id = i.item_id AND bc.isbn_13 IS NOT NULL LIMIT 1) AS isbn_13,
+                    (SELECT GROUP_CONCAT(lfd.format_name || '|' || lfd.top_level_format, '|||')
+                     FROM tbl_book_copies bc2
+                     JOIN lkup_book_format_details lfd ON bc2.format_detail_id = lfd.format_detail_id
+                     WHERE bc2.item_id = i.item_id) AS formats_str,
+                    (SELECT GROUP_CONCAT(lg.genre_name, '|||')
+                     FROM xref_book_item_genres xg
+                     JOIN lkup_book_top_level_genres lg ON xg.top_level_genre_id = lg.top_level_genre_id
+                     WHERE xg.item_id = i.item_id) AS genres_str,
+                    (SELECT GROUP_CONCAT(ls.sub_genre_name, '|||')
+                     FROM xref_book_item_genres xg2
+                     JOIN lkup_book_sub_genres ls ON xg2.sub_genre_id = ls.sub_genre_id
+                     WHERE xg2.item_id = i.item_id AND xg2.sub_genre_id IS NOT NULL) AS subgenres_str,
+                    (SELECT GROUP_CONCAT(lt.tag_name, '|||')
+                     FROM xref_book_item_tags xt
+                     JOIN lkup_book_tags lt ON xt.tag_id = lt.tag_id
+                     WHERE xt.item_id = i.item_id) AS tags_str
+                FROM tbl_items i
+                JOIN tbl_book_details bd ON i.item_id = bd.item_id
+                JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+                LEFT JOIN lkup_book_age_levels al ON bd.age_level_id = al.age_level_id
+                WHERE i.collection_type_id = :ct
+                ORDER BY COALESCE(bd.title_sort, bd.title)
+            """),
+            {"ct": BOOK_COLLECTION_TYPE_ID},
+        ).fetchall()
+
+        def parse_formats(s):
+            if not s:
+                return []
+            result = []
+            for entry in s.split("|||"):
+                parts = entry.split("|", 1)
+                if len(parts) == 2:
+                    result.append({"format_name": parts[0], "top_level_format": parts[1]})
+            return result
+
+        def parse_list(s):
+            if not s:
+                return []
+            seen = set()
+            out = []
+            for v in s.split("|||"):
+                if v not in seen:
+                    seen.add(v)
+                    out.append(v)
+            return out
+
+        return [
+            {
+                "item_id": row[0],
+                "top_level_category_id": row[1],
+                "category": row[2],
+                "ownership_status_id": row[3],
+                "ownership_status": row[4],
+                "reading_status_id": row[5],
+                "reading_status": row[6],
+                "notes": row[7],
+                "title": row[8],
+                "title_sort": row[9],
+                "star_rating": row[10],
+                "age_level": row[11],
+                "age_level_id": row[12],
+                "authors": row[13].split(", ") if row[13] else [],
+                "series_name": row[14],
+                "series_number": row[15],
+                "cover_image_url": row[16],
+                "isbn_13": row[17],
+                "formats": parse_formats(row[18]),
+                "genres": parse_list(row[19]),
+                "subgenres": parse_list(row[20]),
+                "tags": parse_list(row[21]),
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/books/{item_id}")
+def get_book(item_id: int):
+    db = SessionLocal()
+    try:
+        book = _get_book_detail(db, item_id)
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found.")
+        return book
+    finally:
+        db.close()
+
+
+@app.post("/books")
+def create_book(payload: BookCreate):
+    if not payload.author_names or not any(n.strip() for n in payload.author_names):
+        raise HTTPException(status_code=400, detail="At least one author name is required.")
+
+    db = SessionLocal()
+    try:
+        # Soft duplicate check: same title + same primary author
+        primary_author = payload.author_names[0].strip()
+        dupe = db.execute(
+            text("""
+                SELECT i.item_id
+                FROM tbl_items i
+                JOIN tbl_book_details bd ON i.item_id = bd.item_id
+                JOIN xref_book_item_authors xa ON i.item_id = xa.item_id
+                JOIN lkup_book_authors la ON xa.author_id = la.author_id
+                WHERE i.collection_type_id = :ct
+                  AND LOWER(TRIM(bd.title)) = LOWER(TRIM(:title))
+                  AND LOWER(TRIM(la.author_name)) = LOWER(TRIM(:author))
+                  AND xa.author_order = 1
+            """),
+            {"ct": BOOK_COLLECTION_TYPE_ID, "title": payload.title, "author": primary_author},
+        ).fetchone()
+
+        if dupe:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A book with that title and primary author already exists (item_id={dupe[0]}).",
+            )
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (
+                    collection_type_id, top_level_category_id, ownership_status_id,
+                    reading_status_id, notes
+                )
+                VALUES (:ct, :cat, :own, :rs, :notes)
+                RETURNING item_id
+            """),
+            {
+                "ct": BOOK_COLLECTION_TYPE_ID,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "rs": payload.reading_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_book_details (
+                    item_id, title, title_sort, description,
+                    age_level_id, star_rating, review, api_categories_raw
+                )
+                VALUES (
+                    :item_id, :title, :title_sort, :description,
+                    :age_level_id, :star_rating, :review, :api_categories_raw
+                )
+            """),
+            {
+                "item_id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "age_level_id": payload.age_level_id,
+                "star_rating": payload.star_rating,
+                "review": payload.review,
+                "api_categories_raw": payload.api_categories_raw,
+            },
+        )
+
+        _insert_book_relationships(db, item_id, payload)
+        db.commit()
+
+        book = _get_book_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "book": book}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        if "ux_book_copies_isbn13" in str(e) or "UNIQUE constraint failed: tbl_book_copies.isbn_13" in str(e):
+            raise HTTPException(status_code=409, detail="A book with that ISBN-13 already exists.")
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/books/{item_id}")
+def update_book(item_id: int, payload: BookUpdate):
+    if not payload.author_names or not any(n.strip() for n in payload.author_names):
+        raise HTTPException(status_code=400, detail="At least one author name is required.")
+
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": BOOK_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Book not found.")
+
+        db.execute(
+            text("""
+                UPDATE tbl_items
+                SET top_level_category_id = :cat,
+                    ownership_status_id = :own,
+                    reading_status_id = :rs,
+                    notes = :notes,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "rs": payload.reading_status_id,
+                "notes": payload.notes,
+            },
+        )
+
+        db.execute(
+            text("""
+                UPDATE tbl_book_details
+                SET title = :title,
+                    title_sort = :title_sort,
+                    description = :description,
+                    age_level_id = :age_level_id,
+                    star_rating = :star_rating,
+                    review = :review,
+                    api_categories_raw = :api_categories_raw
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "age_level_id": payload.age_level_id,
+                "star_rating": payload.star_rating,
+                "review": payload.review,
+                "api_categories_raw": payload.api_categories_raw,
+            },
+        )
+
+        # Clear all xref rows and copies, then re-insert
+        db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+
+        _insert_book_relationships(db, item_id, payload)
+        db.commit()
+
+        book = _get_book_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "book": book}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        if "ux_book_copies_isbn13" in str(e) or "UNIQUE constraint failed: tbl_book_copies.isbn_13" in str(e):
+            raise HTTPException(status_code=409, detail="A book with that ISBN-13 already exists.")
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/books/{item_id}")
+def delete_book(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": BOOK_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Book not found.")
+
+        db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+        db.commit()
+
+        return {"item_id": item_id, "status": "deleted"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/books/bulk")
+def bulk_update_books(payload: BookBulkUpdatePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
+            {"ct": BOOK_COLLECTION_TYPE_ID},
+        ).fetchall()
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        f = payload.fields
+
+        # tbl_items updates
+        item_updates = []
+        item_params = {}
+        if f.ownership_status_id is not None:
+            item_updates.append("ownership_status_id = :ownership_status_id")
+            item_params["ownership_status_id"] = f.ownership_status_id
+        if f.reading_status_id is not None:
+            item_updates.append("reading_status_id = :reading_status_id")
+            item_params["reading_status_id"] = f.reading_status_id
+        if f.top_level_category_id is not None:
+            item_updates.append("top_level_category_id = :top_level_category_id")
+            item_params["top_level_category_id"] = f.top_level_category_id
+
+        if item_updates:
+            item_updates.append("updated_at = CURRENT_TIMESTAMP")
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(item_updates)} WHERE item_id = :item_id"),
+                    {**item_params, "item_id": item_id},
+                )
+
+        # tbl_book_details updates
+        detail_updates = []
+        detail_params = {}
+        if f.age_level_id is not None:
+            detail_updates.append("age_level_id = :age_level_id")
+            detail_params["age_level_id"] = f.age_level_id
+        if f.star_rating is not None:
+            detail_updates.append("star_rating = :star_rating")
+            detail_params["star_rating"] = f.star_rating
+
+        if detail_updates:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_book_details SET {', '.join(detail_updates)} WHERE item_id = :item_id"),
+                    {**detail_params, "item_id": item_id},
+                )
+
+        # tbl_book_copies: update first copy's format_detail_id per item
+        if f.format_detail_id is not None:
+            for item_id in payload.item_ids:
+                first_copy = db.execute(
+                    text("SELECT copy_id FROM tbl_book_copies WHERE item_id = :id ORDER BY copy_id LIMIT 1"),
+                    {"id": item_id},
+                ).fetchone()
+                if first_copy:
+                    db.execute(
+                        text("UPDATE tbl_book_copies SET format_detail_id = :fd WHERE copy_id = :cid"),
+                        {"fd": f.format_detail_id, "cid": first_copy[0]},
+                    )
+
+        # Genre replace: delete existing and insert new
+        if f.genres is not None:
+            for item_id in payload.item_ids:
+                db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
+                for g in f.genres:
+                    db.execute(
+                        text("INSERT INTO xref_book_item_genres (item_id, top_level_genre_id, sub_genre_id) VALUES (:item_id, :tg, :sg)"),
+                        {"item_id": item_id, "tg": g.top_level_genre_id, "sg": g.sub_genre_id},
+                    )
+
+        db.commit()
+        return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/books/bulk-delete")
+def bulk_delete_books(payload: BulkDeletePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
+            {"ct": BOOK_COLLECTION_TYPE_ID},
+        ).fetchall()
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ---------- Graphic Novels ----------
+
+GN_COLLECTION_TYPE_ID = 3
+
+
+# --- Graphic Novels Pydantic models ---
+
+class GnBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    reading_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+    format_type_id: Optional[int] = None
+    era_id: Optional[int] = None
+    publisher_id: Optional[int] = None
+    star_rating: Optional[float] = None
+
+
+class GnBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: GnBulkUpdateFields
+
+
+class GnSourceSeriesEntry(BaseModel):
+    source_series_name: str
+    start_issue: Optional[int] = None
+    end_issue: Optional[int] = None
+
+
+class GraphicNovelCreate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    reading_status_id: Optional[int] = None
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    publisher_id: Optional[int] = None
+    format_type_id: Optional[int] = None
+    era_id: Optional[int] = None
+    series_name: Optional[str] = None
+    series_number: Optional[float] = None
+    source_series: Optional[List[GnSourceSeriesEntry]] = None
+    issue_notes: Optional[str] = None
+    page_count: Optional[int] = None
+    published_date: Optional[str] = None
+    isbn_13: Optional[str] = None
+    isbn_10: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    edition_notes: Optional[str] = None
+    star_rating: Optional[float] = None
+    review: Optional[str] = None
+    writer_names: Optional[List[str]] = None
+    artist_names: Optional[List[str]] = None
+    tag_names: Optional[List[str]] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+class GraphicNovelUpdate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    reading_status_id: Optional[int] = None
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    publisher_id: Optional[int] = None
+    format_type_id: Optional[int] = None
+    era_id: Optional[int] = None
+    series_name: Optional[str] = None
+    series_number: Optional[float] = None
+    source_series: Optional[List[GnSourceSeriesEntry]] = None
+    issue_notes: Optional[str] = None
+    page_count: Optional[int] = None
+    published_date: Optional[str] = None
+    isbn_13: Optional[str] = None
+    isbn_10: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    edition_notes: Optional[str] = None
+    star_rating: Optional[float] = None
+    review: Optional[str] = None
+    writer_names: Optional[List[str]] = None
+    artist_names: Optional[List[str]] = None
+    tag_names: Optional[List[str]] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+class GnPublisherCreate(BaseModel):
+    publisher_name: str
+
+
+# --- Graphic Novels helpers ---
+
+def _upsert_gn_writer(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT writer_id FROM lkup_graphicnovel_writers WHERE LOWER(TRIM(writer_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_graphicnovel_writers (writer_name) VALUES (:name) RETURNING writer_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_gn_artist(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT artist_id FROM lkup_graphicnovel_artists WHERE LOWER(TRIM(artist_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_graphicnovel_artists (artist_name) VALUES (:name) RETURNING artist_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_gn_tag(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT tag_id FROM lkup_graphicnovel_tags WHERE LOWER(TRIM(tag_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_graphicnovel_tags (tag_name) VALUES (:name) RETURNING tag_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _insert_gn_relationships(db, item_id: int, payload) -> None:
+    if payload.writer_names:
+        for order, name in enumerate(payload.writer_names, start=1):
+            if name.strip():
+                writer_id = _upsert_gn_writer(db, name)
+                db.execute(
+                    text("""
+                        INSERT OR IGNORE INTO xref_graphicnovel_item_writers (item_id, writer_id, writer_order)
+                        VALUES (:item_id, :writer_id, :order)
+                    """),
+                    {"item_id": item_id, "writer_id": writer_id, "order": order},
+                )
+
+    if payload.artist_names:
+        for order, name in enumerate(payload.artist_names, start=1):
+            if name.strip():
+                artist_id = _upsert_gn_artist(db, name)
+                db.execute(
+                    text("""
+                        INSERT OR IGNORE INTO xref_graphicnovel_item_artists (item_id, artist_id, artist_order)
+                        VALUES (:item_id, :artist_id, :order)
+                    """),
+                    {"item_id": item_id, "artist_id": artist_id, "order": order},
+                )
+
+    if payload.tag_names:
+        for name in payload.tag_names:
+            if name.strip():
+                tag_id = _upsert_gn_tag(db, name)
+                db.execute(
+                    text("""
+                        INSERT OR IGNORE INTO xref_graphicnovel_item_tags (item_id, tag_id)
+                        VALUES (:item_id, :tag_id)
+                    """),
+                    {"item_id": item_id, "tag_id": tag_id},
+                )
+
+
+def _get_gn_detail(db, item_id: int):
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.top_level_category_id,
+                c.category_name,
+                i.ownership_status_id,
+                os.status_name,
+                i.reading_status_id,
+                rs.status_name,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                gd.title,
+                gd.title_sort,
+                gd.description,
+                gd.publisher_id,
+                pub.publisher_name,
+                gd.format_type_id,
+                ft.format_type_name,
+                gd.era_id,
+                era.era_name,
+                era.era_years,
+                gd.series_name,
+                gd.series_number,
+                gd.source_series_name,
+                gd.start_issue,
+                gd.end_issue,
+                gd.issue_notes,
+                gd.page_count,
+                gd.published_date,
+                gd.isbn_13,
+                gd.isbn_10,
+                gd.cover_image_url,
+                gd.edition_notes,
+                gd.star_rating,
+                gd.review,
+                gd.api_source,
+                gd.external_work_id
+            FROM tbl_items i
+            JOIN tbl_graphicnovel_details gd ON i.item_id = gd.item_id
+            JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_graphicnovel_publishers pub ON gd.publisher_id = pub.publisher_id
+            LEFT JOIN lkup_graphicnovel_format_types ft ON gd.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_graphicnovel_eras era ON gd.era_id = era.era_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": GN_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    writers = db.execute(
+        text("""
+            SELECT lw.writer_id, lw.writer_name, xw.writer_order
+            FROM xref_graphicnovel_item_writers xw
+            JOIN lkup_graphicnovel_writers lw ON xw.writer_id = lw.writer_id
+            WHERE xw.item_id = :item_id
+            ORDER BY xw.writer_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    artists = db.execute(
+        text("""
+            SELECT la.artist_id, la.artist_name, xa.artist_order
+            FROM xref_graphicnovel_item_artists xa
+            JOIN lkup_graphicnovel_artists la ON xa.artist_id = la.artist_id
+            WHERE xa.item_id = :item_id
+            ORDER BY xa.artist_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    tags = db.execute(
+        text("""
+            SELECT lt.tag_id, lt.tag_name
+            FROM xref_graphicnovel_item_tags xt
+            JOIN lkup_graphicnovel_tags lt ON xt.tag_id = lt.tag_id
+            WHERE xt.item_id = :item_id
+            ORDER BY lt.tag_name
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "top_level_category_id": row[1],
+        "category": row[2],
+        "ownership_status_id": row[3],
+        "ownership_status": row[4],
+        "reading_status_id": row[5],
+        "reading_status": row[6],
+        "notes": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
+        "title": row[10],
+        "title_sort": row[11],
+        "description": row[12],
+        "publisher_id": row[13],
+        "publisher_name": row[14],
+        "format_type_id": row[15],
+        "format_type_name": row[16],
+        "era_id": row[17],
+        "era_name": row[18],
+        "era_years": row[19],
+        "series_name": row[20],
+        "series_number": row[21],
+        "source_series_name": row[22],
+        "start_issue": row[23],
+        "end_issue": row[24],
+        "issue_notes": row[25],
+        "page_count": row[26],
+        "published_date": row[27],
+        "isbn_13": row[28],
+        "isbn_10": row[29],
+        "cover_image_url": row[30],
+        "edition_notes": row[31],
+        "star_rating": row[32],
+        "review": row[33],
+        "api_source": row[34],
+        "external_work_id": row[35],
+        "writers": [{"writer_id": w[0], "writer_name": w[1], "writer_order": w[2]} for w in writers],
+        "artists": [{"artist_id": a[0], "artist_name": a[1], "artist_order": a[2]} for a in artists],
+        "tags": [{"tag_id": t[0], "tag_name": t[1]} for t in tags],
+    }
+
+
+# --- Graphic Novels lookup endpoints ---
+# NOTE: specific paths must appear before /{item_id}
+
+@app.get("/graphicnovels/publishers")
+def get_gn_publishers():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT publisher_id, publisher_name
+            FROM lkup_graphicnovel_publishers
+            WHERE is_active = 1
+            ORDER BY sort_order, publisher_name
+        """)).fetchall()
+        return [{"publisher_id": row[0], "publisher_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.post("/graphicnovels/publishers")
+def create_gn_publisher(payload: GnPublisherCreate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT publisher_id FROM lkup_graphicnovel_publishers WHERE LOWER(TRIM(publisher_name)) = LOWER(TRIM(:name))"),
+            {"name": payload.publisher_name.strip()},
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Publisher already exists.")
+        result = db.execute(
+            text("INSERT INTO lkup_graphicnovel_publishers (publisher_name) VALUES (:name) RETURNING publisher_id"),
+            {"name": payload.publisher_name.strip()},
+        ).fetchone()
+        db.commit()
+        return {"publisher_id": result[0], "publisher_name": payload.publisher_name.strip()}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/format-types")
+def get_gn_format_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT format_type_id, format_type_name
+            FROM lkup_graphicnovel_format_types
+            WHERE is_active = 1
+            ORDER BY sort_order, format_type_name
+        """)).fetchall()
+        return [{"format_type_id": row[0], "format_type_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/eras")
+def get_gn_eras():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT era_id, era_name, era_years
+            FROM lkup_graphicnovel_eras
+            WHERE is_active = 1
+            ORDER BY sort_order
+        """)).fetchall()
+        return [{"era_id": row[0], "era_name": row[1], "era_years": row[2]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/writers")
+def get_gn_writers(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT writer_id, writer_name
+                    FROM lkup_graphicnovel_writers
+                    WHERE is_active = 1 AND LOWER(writer_name) LIKE LOWER(:q)
+                    ORDER BY writer_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT writer_id, writer_name
+                FROM lkup_graphicnovel_writers
+                WHERE is_active = 1
+                ORDER BY writer_name
+            """)).fetchall()
+        return [{"writer_id": row[0], "writer_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/artists")
+def get_gn_artists(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT artist_id, artist_name
+                    FROM lkup_graphicnovel_artists
+                    WHERE is_active = 1 AND LOWER(artist_name) LIKE LOWER(:q)
+                    ORDER BY artist_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT artist_id, artist_name
+                FROM lkup_graphicnovel_artists
+                WHERE is_active = 1
+                ORDER BY artist_name
+            """)).fetchall()
+        return [{"artist_id": row[0], "artist_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/tags")
+def get_gn_tags(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("""
+                    SELECT tag_id, tag_name
+                    FROM lkup_graphicnovel_tags
+                    WHERE is_active = 1 AND LOWER(tag_name) LIKE LOWER(:q)
+                    ORDER BY tag_name
+                    LIMIT 20
+                """),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("""
+                SELECT tag_id, tag_name
+                FROM lkup_graphicnovel_tags
+                WHERE is_active = 1
+                ORDER BY tag_name
+            """)).fetchall()
+        return [{"tag_id": row[0], "tag_name": row[1]} for row in rows]
+    finally:
+        db.close()
+
+
+# --- ISBN lookup for graphic novels ---
+
+def _normalize_gn_isbn_result(volume: dict) -> dict:
+    info = volume.get("volumeInfo", {})
+    isbns = {i["type"]: i["identifier"] for i in info.get("industryIdentifiers", [])}
+    return {
+        "title": info.get("title"),
+        "writer_names": info.get("authors", []),
+        "isbn_10": isbns.get("ISBN_10"),
+        "isbn_13": isbns.get("ISBN_13"),
+        "published_date": info.get("publishedDate"),
+        "page_count": info.get("pageCount"),
+        "description": info.get("description"),
+        "cover_image_url": info.get("imageLinks", {}).get("thumbnail"),
+        "api_source": "google_books",
+        "external_work_id": volume.get("id"),
+    }
+
+
+def _gn_isbn_from_open_library(isbn: str):
+    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+    with urllib.request.urlopen(url, timeout=8) as resp:
+        data = json.loads(resp.read())
+    entry = data.get(f"ISBN:{isbn}")
+    if not entry:
+        return None
+    isbns = entry.get("identifiers", {})
+    cover = entry.get("cover", {})
+    authors = [a.get("name", "") for a in entry.get("authors", [])]
+    publish_date = entry.get("publish_date", "")
+    # Normalize date to YYYY if possible
+    import re as _re
+    year_match = _re.search(r"\b(\d{4})\b", publish_date)
+    normalized_date = year_match.group(1) if year_match else publish_date or None
+    return {
+        "title": entry.get("title"),
+        "writer_names": authors,
+        "isbn_10": isbns.get("isbn_10", [None])[0],
+        "isbn_13": isbns.get("isbn_13", [None])[0],
+        "published_date": normalized_date,
+        "page_count": entry.get("number_of_pages"),
+        "description": None,
+        "cover_image_url": cover.get("large") or cover.get("medium") or cover.get("small"),
+        "api_source": "open_library",
+        "external_work_id": entry.get("key"),
+    }
+
+
+@app.get("/graphicnovels/lookup-isbn")
+def gn_lookup_isbn(isbn: str = Query(..., min_length=10)):
+    encoded = urllib.parse.quote(f"isbn:{isbn}")
+    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=1"
+    google_error = None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        items = data.get("items", [])
+        if items:
+            return _normalize_gn_isbn_result(items[0])
+    except Exception as e:
+        google_error = str(e)
+
+    # Fallback to Open Library
+    try:
+        result = _gn_isbn_from_open_library(isbn)
+        if result:
+            return result
+    except Exception:
+        pass
+
+    if google_error:
+        raise HTTPException(status_code=502, detail=f"ISBN lookup failed: {google_error}")
+    return None
+
+
+# --- Graphic Novels CRUD ---
+
+@app.get("/graphicnovels")
+def list_graphicnovels():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT
+                    i.item_id,
+                    i.top_level_category_id,
+                    c.category_name,
+                    i.ownership_status_id,
+                    os.status_name,
+                    i.reading_status_id,
+                    rs.status_name,
+                    i.notes,
+                    gd.title,
+                    gd.title_sort,
+                    gd.series_name,
+                    gd.series_number,
+                    gd.publisher_id,
+                    pub.publisher_name,
+                    gd.format_type_id,
+                    ft.format_type_name,
+                    gd.era_id,
+                    era.era_name,
+                    gd.start_issue,
+                    gd.end_issue,
+                    gd.issue_notes,
+                    gd.page_count,
+                    gd.cover_image_url,
+                    gd.isbn_13,
+                    gd.star_rating,
+                    gd.edition_notes,
+                    gd.source_series_name,
+                    (SELECT GROUP_CONCAT(lw.writer_name, ', ')
+                     FROM xref_graphicnovel_item_writers xw
+                     JOIN lkup_graphicnovel_writers lw ON xw.writer_id = lw.writer_id
+                     WHERE xw.item_id = i.item_id
+                     ORDER BY xw.writer_order) AS writers_str,
+                    (SELECT GROUP_CONCAT(la.artist_name, ', ')
+                     FROM xref_graphicnovel_item_artists xa
+                     JOIN lkup_graphicnovel_artists la ON xa.artist_id = la.artist_id
+                     WHERE xa.item_id = i.item_id
+                     ORDER BY xa.artist_order) AS artists_str,
+                    (SELECT GROUP_CONCAT(lt.tag_name, '|||')
+                     FROM xref_graphicnovel_item_tags xt
+                     JOIN lkup_graphicnovel_tags lt ON xt.tag_id = lt.tag_id
+                     WHERE xt.item_id = i.item_id) AS tags_str
+                FROM tbl_items i
+                JOIN tbl_graphicnovel_details gd ON i.item_id = gd.item_id
+                JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+                LEFT JOIN lkup_graphicnovel_publishers pub ON gd.publisher_id = pub.publisher_id
+                LEFT JOIN lkup_graphicnovel_format_types ft ON gd.format_type_id = ft.format_type_id
+                LEFT JOIN lkup_graphicnovel_eras era ON gd.era_id = era.era_id
+                WHERE i.collection_type_id = :ct
+                ORDER BY COALESCE(gd.title_sort, gd.title)
+            """),
+            {"ct": GN_COLLECTION_TYPE_ID},
+        ).fetchall()
+
+        def parse_list(s):
+            if not s:
+                return []
+            seen = set()
+            out = []
+            for v in s.split("|||"):
+                if v not in seen:
+                    seen.add(v)
+                    out.append(v)
+            return out
+
+        return [
+            {
+                "item_id": row[0],
+                "top_level_category_id": row[1],
+                "category": row[2],
+                "ownership_status_id": row[3],
+                "ownership_status": row[4],
+                "reading_status_id": row[5],
+                "reading_status": row[6],
+                "notes": row[7],
+                "title": row[8],
+                "title_sort": row[9],
+                "series_name": row[10],
+                "series_number": row[11],
+                "publisher_id": row[12],
+                "publisher_name": row[13],
+                "format_type_id": row[14],
+                "format_type_name": row[15],
+                "era_id": row[16],
+                "era_name": row[17],
+                "start_issue": row[18],
+                "end_issue": row[19],
+                "issue_notes": row[20],
+                "page_count": row[21],
+                "cover_image_url": row[22],
+                "isbn_13": row[23],
+                "star_rating": row[24],
+                "edition_notes": row[25],
+                "source_series_name": row[26],
+                "writers": row[27].split(", ") if row[27] else [],
+                "artists": row[28].split(", ") if row[28] else [],
+                "tags": parse_list(row[29]),
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/graphicnovels/{item_id}")
+def get_graphicnovel(item_id: int):
+    db = SessionLocal()
+    try:
+        gn = _get_gn_detail(db, item_id)
+        if not gn:
+            raise HTTPException(status_code=404, detail="Graphic novel not found.")
+        return gn
+    finally:
+        db.close()
+
+
+@app.post("/graphicnovels")
+def create_graphicnovel(payload: GraphicNovelCreate):
+    db = SessionLocal()
+    try:
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (
+                    collection_type_id, top_level_category_id, ownership_status_id,
+                    reading_status_id, notes
+                )
+                VALUES (:ct, :cat, :own, :rs, :notes)
+                RETURNING item_id
+            """),
+            {
+                "ct": GN_COLLECTION_TYPE_ID,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "rs": payload.reading_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_graphicnovel_details (
+                    item_id, title, title_sort, description,
+                    publisher_id, format_type_id, era_id,
+                    series_name, series_number, series_sort,
+                    source_series_name, start_issue, end_issue, issue_notes,
+                    page_count, published_date, isbn_13, isbn_10,
+                    cover_image_url, edition_notes, star_rating, review,
+                    api_source, external_work_id
+                ) VALUES (
+                    :item_id, :title, :title_sort, :description,
+                    :publisher_id, :format_type_id, :era_id,
+                    :series_name, :series_number, :series_sort,
+                    :source_series_name, :start_issue, :end_issue, :issue_notes,
+                    :page_count, :published_date, :isbn_13, :isbn_10,
+                    :cover_image_url, :edition_notes, :star_rating, :review,
+                    :api_source, :external_work_id
+                )
+            """),
+            {
+                "item_id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "publisher_id": payload.publisher_id,
+                "format_type_id": payload.format_type_id,
+                "era_id": payload.era_id,
+                "series_name": payload.series_name,
+                "series_number": payload.series_number,
+                "series_sort": payload.series_number,
+                "source_series_name": payload.source_series_name,
+                "start_issue": payload.start_issue,
+                "end_issue": payload.end_issue,
+                "issue_notes": payload.issue_notes,
+                "page_count": payload.page_count,
+                "published_date": payload.published_date,
+                "isbn_13": payload.isbn_13,
+                "isbn_10": payload.isbn_10,
+                "cover_image_url": payload.cover_image_url,
+                "edition_notes": payload.edition_notes,
+                "star_rating": payload.star_rating,
+                "review": payload.review,
+                "api_source": payload.api_source,
+                "external_work_id": payload.external_work_id,
+            },
+        )
+
+        _insert_gn_relationships(db, item_id, payload)
+        db.commit()
+
+        gn = _get_gn_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "graphicnovel": gn}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        if "ux_graphicnovel_details_isbn13" in str(e):
+            raise HTTPException(status_code=409, detail="A graphic novel with that ISBN-13 already exists.")
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/graphicnovels/{item_id}")
+def update_graphicnovel(item_id: int, payload: GraphicNovelUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": GN_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Graphic novel not found.")
+
+        db.execute(
+            text("""
+                UPDATE tbl_items
+                SET top_level_category_id = :cat,
+                    ownership_status_id = :own,
+                    reading_status_id = :rs,
+                    notes = :notes,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "rs": payload.reading_status_id,
+                "notes": payload.notes,
+            },
+        )
+
+        db.execute(
+            text("""
+                UPDATE tbl_graphicnovel_details
+                SET title = :title,
+                    title_sort = :title_sort,
+                    description = :description,
+                    publisher_id = :publisher_id,
+                    format_type_id = :format_type_id,
+                    era_id = :era_id,
+                    series_name = :series_name,
+                    series_number = :series_number,
+                    series_sort = :series_sort,
+                    source_series_name = :source_series_name,
+                    start_issue = :start_issue,
+                    end_issue = :end_issue,
+                    issue_notes = :issue_notes,
+                    page_count = :page_count,
+                    published_date = :published_date,
+                    isbn_13 = :isbn_13,
+                    isbn_10 = :isbn_10,
+                    cover_image_url = :cover_image_url,
+                    edition_notes = :edition_notes,
+                    star_rating = :star_rating,
+                    review = :review,
+                    api_source = :api_source,
+                    external_work_id = :external_work_id
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "publisher_id": payload.publisher_id,
+                "format_type_id": payload.format_type_id,
+                "era_id": payload.era_id,
+                "series_name": payload.series_name,
+                "series_number": payload.series_number,
+                "series_sort": payload.series_number,
+                "source_series_name": payload.source_series_name,
+                "start_issue": payload.start_issue,
+                "end_issue": payload.end_issue,
+                "issue_notes": payload.issue_notes,
+                "page_count": payload.page_count,
+                "published_date": payload.published_date,
+                "isbn_13": payload.isbn_13,
+                "isbn_10": payload.isbn_10,
+                "cover_image_url": payload.cover_image_url,
+                "edition_notes": payload.edition_notes,
+                "star_rating": payload.star_rating,
+                "review": payload.review,
+                "api_source": payload.api_source,
+                "external_work_id": payload.external_work_id,
+            },
+        )
+
+        db.execute(text("DELETE FROM xref_graphicnovel_item_writers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_graphicnovel_item_artists WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_graphicnovel_item_tags WHERE item_id = :id"), {"id": item_id})
+        _insert_gn_relationships(db, item_id, payload)
+        db.commit()
+
+        gn = _get_gn_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "graphicnovel": gn}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        if "ux_graphicnovel_details_isbn13" in str(e):
+            raise HTTPException(status_code=409, detail="A graphic novel with that ISBN-13 already exists.")
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/graphicnovels/{item_id}")
+def delete_graphicnovel(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": GN_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Graphic novel not found.")
+
+        db.execute(text("DELETE FROM xref_graphicnovel_item_writers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_graphicnovel_item_artists WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_graphicnovel_item_tags WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_graphicnovel_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+        db.commit()
+
+        return {"item_id": item_id, "status": "deleted"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/graphicnovels/bulk")
+def bulk_update_graphicnovels(payload: GnBulkUpdatePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
+            {"ct": GN_COLLECTION_TYPE_ID},
+        ).fetchall()
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        f = payload.fields
+
+        item_updates = []
+        item_params = {}
+        if f.ownership_status_id is not None:
+            item_updates.append("ownership_status_id = :ownership_status_id")
+            item_params["ownership_status_id"] = f.ownership_status_id
+        if f.reading_status_id is not None:
+            item_updates.append("reading_status_id = :reading_status_id")
+            item_params["reading_status_id"] = f.reading_status_id
+        if f.top_level_category_id is not None:
+            item_updates.append("top_level_category_id = :top_level_category_id")
+            item_params["top_level_category_id"] = f.top_level_category_id
+
+        if item_updates:
+            item_updates.append("updated_at = CURRENT_TIMESTAMP")
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(item_updates)} WHERE item_id = :item_id"),
+                    {**item_params, "item_id": item_id},
+                )
+
+        detail_updates = []
+        detail_params = {}
+        if f.format_type_id is not None:
+            detail_updates.append("format_type_id = :format_type_id")
+            detail_params["format_type_id"] = f.format_type_id
+        if f.era_id is not None:
+            detail_updates.append("era_id = :era_id")
+            detail_params["era_id"] = f.era_id
+        if f.publisher_id is not None:
+            detail_updates.append("publisher_id = :publisher_id")
+            detail_params["publisher_id"] = f.publisher_id
+        if f.star_rating is not None:
+            detail_updates.append("star_rating = :star_rating")
+            detail_params["star_rating"] = f.star_rating
+
+        if detail_updates:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text(f"UPDATE tbl_graphicnovel_details SET {', '.join(detail_updates)} WHERE item_id = :item_id"),
+                    {**detail_params, "item_id": item_id},
+                )
+
+        db.commit()
+        return {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/graphicnovels/bulk-delete")
+def bulk_delete_graphicnovels(payload: BulkDeletePayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        found = db.execute(
+            text(f"SELECT item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND collection_type_id = :ct"),
+            {"ct": GN_COLLECTION_TYPE_ID},
+        ).fetchall()
+        if len(found) != len(payload.item_ids):
+            raise HTTPException(status_code=404, detail="One or more item_ids not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_graphicnovel_item_writers WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_graphicnovel_item_artists WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_graphicnovel_item_tags WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_graphicnovel_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ---------- Ingest endpoints ----------
+
+_ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+@app.get("/ingest/inbox")
+def list_inbox():
+    files = []
+    for f in INBOX_DIR.iterdir():
+        if f.is_file() and f.suffix.lower() in _ALLOWED_IMAGE_SUFFIXES:
+            stat = f.stat()
+            files.append({
+                "filename": f.name,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            })
+    return sorted(files, key=lambda x: x["mtime"])
+
+
+@app.delete("/ingest/inbox/{filename}")
+def delete_inbox_file(filename: str):
+    safe_name = Path(filename).name
+    file_path = INBOX_DIR / safe_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found in inbox")
+    file_path.unlink()
+    return {"deleted": safe_name}
+
+
+@app.post("/ingest/upload")
+async def upload_to_inbox(file: UploadFile = File(...)):
+    if Path(file.filename).suffix.lower() not in _ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+
+    dest = INBOX_DIR / file.filename
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    stat = dest.stat()
+    return {"filename": file.filename, "size": stat.st_size, "mtime": stat.st_mtime, "status": "uploaded"}
+
+
+class IngestFrontPayload(BaseModel):
+    inbox_filename: str
+    collection_type_id: int
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    group_id: int
+    source_origin_id: Optional[int] = None
+    version: Optional[str] = None
+    member_ids: List[int]
+
+
+@app.post("/ingest/front")
+def ingest_front(payload: IngestFrontPayload):
+    inbox_path = INBOX_DIR / payload.inbox_filename
+    if not inbox_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found in inbox: {payload.inbox_filename}")
+
+    db = SessionLocal()
+    try:
+        group_row = db.execute(
+            text("SELECT group_code FROM lkup_photocard_groups WHERE group_id = :gid"),
+            {"gid": payload.group_id},
+        ).fetchone()
+        if not group_row:
+            raise HTTPException(status_code=404, detail="Group not found.")
+        group_code = group_row[0]
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
+                VALUES (:collection_type_id, :top_level_category_id, :ownership_status_id, :notes)
+                RETURNING item_id
+            """),
+            {
+                "collection_type_id": payload.collection_type_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version)
+                VALUES (:item_id, :group_id, :source_origin_id, :version)
+            """),
+            {
+                "item_id": item_id,
+                "group_id": payload.group_id,
+                "source_origin_id": payload.source_origin_id,
+                "version": payload.version,
+            },
+        )
+
+        for member_id in payload.member_ids:
+            db.execute(
+                text("INSERT INTO xref_photocard_members (item_id, member_id) VALUES (:item_id, :member_id)"),
+                {"item_id": item_id, "member_id": member_id},
+            )
+
+        ext = inbox_path.suffix.lower()
+        library_filename = f"{group_code}_{item_id:06d}_f{ext}"
+        library_path = LIBRARY_DIR / library_filename
+
+        shutil.move(str(inbox_path), str(library_path))
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_attachments (item_id, attachment_type, file_path)
+                VALUES (:item_id, 'front', :file_path)
+            """),
+            {"item_id": item_id, "file_path": f"images/library/{library_filename}"},
+        )
+
+        db.commit()
+
+        return {"item_id": item_id, "filename": library_filename, "status": "ingested"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.get("/ingest/candidates")
+def get_ingest_candidates(
+    group_id: int,
+    category_id: int,
+    missing_back_only: bool = True,
+    member_ids: Optional[List[int]] = Query(default=None),
+):
+    db = SessionLocal()
+    try:
+        having_clause = ""
+        if missing_back_only:
+            having_clause = " HAVING MAX(CASE WHEN a.attachment_type = 'back' THEN 1 ELSE 0 END) = 0"
+
+        member_filter = ""
+        params: dict = {"group_id": group_id, "category_id": category_id}
+
+        if member_ids:
+            placeholders = ",".join(str(m) for m in member_ids)
+            member_filter = f"""
+                AND i.item_id IN (
+                    SELECT item_id FROM xref_photocard_members
+                    WHERE member_id IN ({placeholders})
+                )
+            """
+
+        result = db.execute(
+            text(
+                _PHOTOCARD_SELECT
+                + " AND p.group_id = :group_id AND i.top_level_category_id = :category_id"
+                + member_filter
+                + _PHOTOCARD_GROUP_BY
+                + having_clause
+                + " ORDER BY i.item_id DESC"
+            ),
+            params,
+        ).fetchall()
+
+        return [_photocard_row_to_dict(row) for row in result]
+    finally:
+        db.close()
+
+
+class IngestPairPayload(BaseModel):
+    front_filename: str
+    back_filename: str
+    collection_type_id: int
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    group_id: int
+    source_origin_id: Optional[int] = None
+    version: Optional[str] = None
+    member_ids: List[int]
+
+
+class AttachBackPayload(BaseModel):
+    inbox_filename: str
+    item_id: int
+
+
+@app.post("/ingest/pair")
+def ingest_pair(payload: IngestPairPayload):
+    front_path = INBOX_DIR / payload.front_filename
+    back_path = INBOX_DIR / payload.back_filename
+
+    if not front_path.exists():
+        raise HTTPException(status_code=404, detail=f"Front file not found in inbox: {payload.front_filename}")
+    if not back_path.exists():
+        raise HTTPException(status_code=404, detail=f"Back file not found in inbox: {payload.back_filename}")
+
+    db = SessionLocal()
+    try:
+        group_row = db.execute(
+            text("SELECT group_code FROM lkup_photocard_groups WHERE group_id = :gid"),
+            {"gid": payload.group_id},
+        ).fetchone()
+        if not group_row:
+            raise HTTPException(status_code=404, detail="Group not found.")
+        group_code = group_row[0]
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
+                VALUES (:collection_type_id, :top_level_category_id, :ownership_status_id, :notes)
+                RETURNING item_id
+            """),
+            {
+                "collection_type_id": payload.collection_type_id,
+                "top_level_category_id": payload.top_level_category_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version)
+                VALUES (:item_id, :group_id, :source_origin_id, :version)
+            """),
+            {
+                "item_id": item_id,
+                "group_id": payload.group_id,
+                "source_origin_id": payload.source_origin_id,
+                "version": payload.version,
+            },
+        )
+
+        for member_id in payload.member_ids:
+            db.execute(
+                text("INSERT INTO xref_photocard_members (item_id, member_id) VALUES (:item_id, :member_id)"),
+                {"item_id": item_id, "member_id": member_id},
+            )
+
+        front_ext = front_path.suffix.lower()
+        front_lib = f"{group_code}_{item_id:06d}_f{front_ext}"
+        shutil.move(str(front_path), str(LIBRARY_DIR / front_lib))
+        db.execute(
+            text("INSERT INTO tbl_attachments (item_id, attachment_type, file_path) VALUES (:item_id, 'front', :fp)"),
+            {"item_id": item_id, "fp": f"images/library/{front_lib}"},
+        )
+
+        back_ext = back_path.suffix.lower()
+        back_lib = f"{group_code}_{item_id:06d}_b{back_ext}"
+        shutil.move(str(back_path), str(LIBRARY_DIR / back_lib))
+        db.execute(
+            text("INSERT INTO tbl_attachments (item_id, attachment_type, file_path) VALUES (:item_id, 'back', :fp)"),
+            {"item_id": item_id, "fp": f"images/library/{back_lib}"},
+        )
+
+        db.commit()
+
+        return {
+            "item_id": item_id,
+            "front_filename": front_lib,
+            "back_filename": back_lib,
+            "status": "ingested",
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/ingest/attach-back")
+def attach_back(payload: AttachBackPayload):
+    inbox_path = INBOX_DIR / payload.inbox_filename
+    if not inbox_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found in inbox: {payload.inbox_filename}")
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("""
+                SELECT g.group_code
+                FROM tbl_items i
+                JOIN tbl_photocard_details p ON i.item_id = p.item_id
+                JOIN lkup_photocard_groups g ON p.group_id = g.group_id
+                WHERE i.item_id = :item_id AND i.collection_type_id = 1
+            """),
+            {"item_id": payload.item_id},
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        group_code = row[0]
+
+        existing_back = db.execute(
+            text("SELECT attachment_id, file_path FROM tbl_attachments WHERE item_id = :item_id AND attachment_type = 'back'"),
+            {"item_id": payload.item_id},
+        ).fetchone()
+
+        ext = inbox_path.suffix.lower()
+        library_filename = f"{group_code}_{payload.item_id:06d}_b{ext}"
+        library_path = LIBRARY_DIR / library_filename
+
+        shutil.move(str(inbox_path), str(library_path))
+
+        if existing_back:
+            old_path = APP_ROOT / existing_back[1]
+            if old_path.exists():
+                old_path.unlink()
+            db.execute(
+                text("UPDATE tbl_attachments SET file_path = :file_path WHERE item_id = :item_id AND attachment_type = 'back'"),
+                {"file_path": f"images/library/{library_filename}", "item_id": payload.item_id},
+            )
+        else:
+            db.execute(
+                text("INSERT INTO tbl_attachments (item_id, attachment_type, file_path) VALUES (:item_id, 'back', :file_path)"),
+                {"item_id": payload.item_id, "file_path": f"images/library/{library_filename}"},
+            )
+
+        db.commit()
+
+        return {"item_id": payload.item_id, "filename": library_filename, "status": "attached"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _replace_image(item_id: int, side: str, file: UploadFile):
+    """Shared logic for replace-front and replace-back."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("""
+                SELECT g.group_code
+                FROM tbl_items i
+                JOIN tbl_photocard_details p ON i.item_id = p.item_id
+                JOIN lkup_photocard_groups g ON p.group_id = g.group_id
+                WHERE i.item_id = :item_id AND i.collection_type_id = 1
+            """),
+            {"item_id": item_id},
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        group_code = row[0]
+        attachment_type = "front" if side == "f" else "back"
+
+        existing = db.execute(
+            text("SELECT file_path FROM tbl_attachments WHERE item_id = :item_id AND attachment_type = :atype"),
+            {"item_id": item_id, "atype": attachment_type},
+        ).fetchone()
+
+        ext = Path(file.filename).suffix.lower()
+        library_filename = f"{group_code}_{item_id:06d}_{side}{ext}"
+        library_path = LIBRARY_DIR / library_filename
+
+        with open(library_path, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+
+        if existing:
+            old_path = APP_ROOT / existing[0]
+            if old_path.exists() and old_path != library_path:
+                old_path.unlink()
+            db.execute(
+                text("UPDATE tbl_attachments SET file_path = :fp WHERE item_id = :item_id AND attachment_type = :atype"),
+                {"fp": f"images/library/{library_filename}", "item_id": item_id, "atype": attachment_type},
+            )
+        else:
+            db.execute(
+                text("INSERT INTO tbl_attachments (item_id, attachment_type, file_path) VALUES (:item_id, :atype, :fp)"),
+                {"item_id": item_id, "atype": attachment_type, "fp": f"images/library/{library_filename}"},
+            )
+
+        db.commit()
+
+        return {"item_id": item_id, "filename": library_filename, "status": "replaced"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/photocards/{item_id}/replace-front")
+async def replace_front(item_id: int, file: UploadFile = File(...)):
+    if Path(file.filename).suffix.lower() not in _ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+    return _replace_image(item_id, "f", file)
+
+
+@app.post("/photocards/{item_id}/replace-back")
+async def replace_back(item_id: int, file: UploadFile = File(...)):
+    if Path(file.filename).suffix.lower() not in _ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+    return _replace_image(item_id, "b", file)
+
+
+# ---------- Settings endpoints ----------
+
+
+class SettingUpdate(BaseModel):
+    value: str
+
+
+@app.get("/settings")
+def get_settings():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("SELECT key, value FROM tbl_app_settings")).fetchall()
+        return {row[0]: row[1] for row in rows}
+    finally:
+        db.close()
+
+
+@app.put("/settings/{key}")
+def put_setting(key: str, body: SettingUpdate):
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                "INSERT INTO tbl_app_settings (key, value) VALUES (:key, :value) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+            ),
+            {"key": key, "value": body.value},
+        )
+        db.commit()
+        row = db.execute(
+            text("SELECT key, value FROM tbl_app_settings WHERE key = :key"),
+            {"key": key},
+        ).fetchone()
+        return {"key": row[0], "value": row[1]}
+    finally:
+        db.close()
+
+
+# ---------- Export endpoints ----------
+
+class ExportPayload(BaseModel):
+    item_ids: List[int]
+    include_captions: bool = True
+    include_backs: bool = False
+
+
+def _build_caption(card: dict) -> str:
+    parts = []
+    if card.get("group_name"):
+        parts.append(card["group_name"])
+    if card.get("members"):
+        parts.append(", ".join(card["members"]))
+    if card.get("source_origin"):
+        parts.append(card["source_origin"])
+    if card.get("version"):
+        parts.append(card["version"])
+    return " • ".join(parts)
+
+
+def _generate_pdf(entries: list, include_captions: bool) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    page_w, page_h = A4  # 595.28 x 841.89 pts
+    margin = 20.0
+    cols = 4
+    gap = 6.0
+    caption_h = 16.0 if include_captions else 0.0
+
+    content_w = page_w - 2 * margin
+    cell_w = (content_w - gap * (cols - 1)) / cols
+    img_h = cell_w * 1.54  # standard photocard portrait ratio
+    cell_h = img_h + caption_h + gap
+
+    rows_per_page = max(1, int((page_h - 2 * margin + gap) / (cell_h + gap)))
+    per_page = cols * rows_per_page
+
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica", 7)
+
+    for idx, entry in enumerate(entries):
+        within_page = idx % per_page
+        row = within_page // cols
+        col = within_page % cols
+
+        if within_page == 0 and idx > 0:
+            c.showPage()
+            c.setFont("Helvetica", 7)
+
+        x = margin + col * (cell_w + gap)
+        y = page_h - margin - (row + 1) * (cell_h + gap) + gap
+
+        img_y = y + caption_h
+
+        if entry["exists"]:
+            try:
+                ir = ImageReader(str(entry["path"]))
+                iw, ih = ir.getSize()
+                scale = min(cell_w / iw, img_h / ih)
+                draw_w = iw * scale
+                draw_h = ih * scale
+                offset_x = (cell_w - draw_w) / 2
+                offset_y = (img_h - draw_h) / 2
+                c.drawImage(ir, x + offset_x, img_y + offset_y, draw_w, draw_h)
+            except Exception:
+                c.setFillColorRGB(0.85, 0.85, 0.85)
+                c.rect(x, img_y, cell_w, img_h, fill=1, stroke=0)
+                c.setFillColorRGB(0, 0, 0)
+        else:
+            c.setFillColorRGB(0.85, 0.85, 0.85)
+            c.rect(x, img_y, cell_w, img_h, fill=1, stroke=0)
+            c.setFillColorRGB(0, 0, 0)
+
+        if include_captions and entry["caption"]:
+            c.setFillColorRGB(0, 0, 0)
+            caption_text = entry["caption"]
+            # Truncate to fit cell width (rough: ~10 chars per 50pts)
+            max_chars = max(20, int(cell_w / 5.5))
+            if len(caption_text) > max_chars:
+                caption_text = caption_text[:max_chars - 1] + "…"
+            c.drawString(x, y + 3, caption_text)
+
+    c.save()
+    return buf.getvalue()
+
+
+@app.post("/export/photocards")
+def export_photocards(payload: ExportPayload):
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids cannot be empty.")
+
+    db = SessionLocal()
+    try:
+        placeholders = ",".join(str(i) for i in payload.item_ids)
+        rows = db.execute(
+            text(
+                _PHOTOCARD_SELECT
+                + f" AND i.item_id IN ({placeholders})"
+                + _PHOTOCARD_GROUP_BY
+            )
+        ).fetchall()
+    finally:
+        db.close()
+
+    order_map = {iid: idx for idx, iid in enumerate(payload.item_ids)}
+    cards = sorted(
+        [_photocard_row_to_dict(r) for r in rows],
+        key=lambda c: order_map.get(c["item_id"], 0),
+    )
+
+    entries = []
+    for card in cards:
+        caption = _build_caption(card) if payload.include_captions else ""
+        # Always include a front entry — use placeholder if no image so the card is never silently dropped
+        if card["front_image_path"]:
+            front_path = APP_ROOT / card["front_image_path"]
+            entries.append({"path": front_path, "caption": caption, "exists": front_path.exists()})
+        else:
+            entries.append({"path": None, "caption": caption, "exists": False})
+        if payload.include_backs and card["back_image_path"]:
+            back_path = APP_ROOT / card["back_image_path"]
+            back_caption = (caption + " [back]") if payload.include_captions else ""
+            entries.append({"path": back_path, "caption": back_caption, "exists": back_path.exists()})
+
+    pdf_bytes = _generate_pdf(entries, payload.include_captions)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=photocard_export.pdf"},
+    )
+
+
+# ---------- Admin: Backup & Restore ----------
+
+from db import DB_PATH
+
+
+@app.get("/admin/backup")
+def download_backup():
+    """
+    Create a backup ZIP containing the SQLite database and all library images.
+    This covers all current and future modules automatically — the DB dump is a
+    complete SQLite copy and the images directory is captured wholesale.
+    """
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="Database file not found.")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_filename = f"collectcore_backup_{timestamp}.zip"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # --- Database ---
+        # Use SQLite backup API for a consistent hot-backup (safe while DB is in use)
+        db_buf = io.BytesIO()
+        src_conn = sqlite3.connect(str(DB_PATH))
+        dst_conn = sqlite3.connect(":memory:")
+        src_conn.backup(dst_conn)
+        src_conn.close()
+        # Serialize the in-memory copy to bytes
+        tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp_db_path = Path(tmp_db.name)
+        tmp_db.close()
+        try:
+            mem_conn = dst_conn
+            disk_conn = sqlite3.connect(str(tmp_db_path))
+            mem_conn.backup(disk_conn)
+            disk_conn.close()
+            mem_conn.close()
+            zf.write(tmp_db_path, "collectcore.db")
+        finally:
+            tmp_db_path.unlink(missing_ok=True)
+
+        # --- Images ---
+        if LIBRARY_DIR.exists():
+            for img_path in LIBRARY_DIR.rglob("*"):
+                if img_path.is_file():
+                    arcname = "images/library/" + img_path.relative_to(LIBRARY_DIR).as_posix()
+                    zf.write(img_path, arcname)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
+    )
+
+
+@app.post("/admin/restore")
+async def upload_restore(file: UploadFile = File(...)):
+    """
+    Restore from a backup ZIP. Replaces the current database and library images.
+    The ZIP must contain 'collectcore.db' at the root. The 'images/library/'
+    folder inside the ZIP is optional — if present it replaces the current library.
+
+    WARNING: This is destructive. The caller (UI) is responsible for confirming
+    with the user before calling this endpoint.
+    """
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a .zip archive.")
+
+    content = await file.read()
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = zf.namelist()
+
+            if "collectcore.db" not in names:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid backup: 'collectcore.db' not found in ZIP.",
+                )
+
+            # Write DB to a temp file then move atomically
+            db_data = zf.read("collectcore.db")
+            tmp_db = tempfile.NamedTemporaryFile(
+                suffix=".db", dir=DB_PATH.parent, delete=False
+            )
+            tmp_db_path = Path(tmp_db.name)
+            try:
+                tmp_db.write(db_data)
+                tmp_db.close()
+                tmp_db_path.replace(DB_PATH)
+            except Exception:
+                tmp_db_path.unlink(missing_ok=True)
+                raise
+
+            # Restore library images if present
+            image_entries = [n for n in names if n.startswith("images/library/") and not n.endswith("/")]
+            if image_entries:
+                # Clear existing library images first
+                if LIBRARY_DIR.exists():
+                    shutil.rmtree(LIBRARY_DIR)
+                LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+
+                for entry in image_entries:
+                    relative = entry[len("images/library/"):]
+                    dest = LIBRARY_DIR / relative
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(zf.read(entry))
+
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
+
+    # Reinitialise the DB connection pool so SQLAlchemy picks up the restored file
+    from db import engine
+    engine.dispose()
+
+    return {
+        "status": "restored",
+        "db_restored": True,
+        "images_restored": bool(image_entries) if "image_entries" in dir() else False,
+    }

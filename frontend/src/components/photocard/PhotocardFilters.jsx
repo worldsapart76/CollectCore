@@ -7,6 +7,7 @@
  *   member        — { mode, include, exclude }  (member name as ID)
  *   category      — { mode, include, exclude }  (top_level_category_id)
  *   sourceOrigin  — { mode, include, exclude }  (source_origin_id)
+ *   version       — { mode, include, exclude }  (version string)
  *   ownership     — { mode, include, exclude }  (ownership_status_id)
  *   backImage     — { mode, include, exclude }  ("has_back" | "no_back")
  *
@@ -15,6 +16,7 @@
  *   members           — array of { member_id, member_name }
  *   categories        — array of { top_level_category_id, category_name }
  *   sourceOrigins     — array of { source_origin_id, source_origin_name }
+ *   versions          — array of { id, label }
  *   ownershipStatuses — array of { ownership_status_id, status_name }
  *   filters           — current filter state object
  *   onSectionChange   — callback(filterKey, value)
@@ -23,6 +25,7 @@
 import {
   FilterSidebarShell,
   TriStateFilterSection,
+  SearchableTriStateSection,
   sectionActive,
 } from "../library/FilterSidebar";
 
@@ -31,6 +34,7 @@ export default function PhotocardFilters({
   members,
   categories,
   sourceOrigins,
+  versions,
   ownershipStatuses,
   filters,
   onSectionChange,
@@ -42,6 +46,7 @@ export default function PhotocardFilters({
     sectionActive(filters.member) ||
     sectionActive(filters.category) ||
     sectionActive(filters.sourceOrigin) ||
+    sectionActive(filters.version) ||
     sectionActive(filters.ownership) ||
     sectionActive(filters.backImage);
 
@@ -65,6 +70,7 @@ export default function PhotocardFilters({
         items={members.map((m) => ({ id: m.member_id, label: m.member_name }))}
         section={filters.member}
         onChange={(s) => onSectionChange("member", s)}
+        defaultShown={10}
       />
 
       <TriStateFilterSection
@@ -78,7 +84,7 @@ export default function PhotocardFilters({
       />
 
       {sourceOrigins.length > 0 && (
-        <TriStateFilterSection
+        <SearchableTriStateSection
           title="Source Origin"
           items={sourceOrigins.map((o) => ({
             id: String(o.source_origin_id),
@@ -86,6 +92,17 @@ export default function PhotocardFilters({
           }))}
           section={filters.sourceOrigin}
           onChange={(s) => onSectionChange("sourceOrigin", s)}
+          selectedOnly
+        />
+      )}
+
+      {versions.length > 0 && (
+        <SearchableTriStateSection
+          title="Version"
+          items={versions}
+          section={filters.version}
+          onChange={(s) => onSectionChange("version", s)}
+          selectedOnly
         />
       )}
 
