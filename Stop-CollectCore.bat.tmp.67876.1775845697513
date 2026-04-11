@@ -1,4 +1,0 @@
-@echo off
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do taskkill /F /T /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5181 ^| findstr LISTENING') do taskkill /F /T /PID %%a >nul 2>&1
-exit

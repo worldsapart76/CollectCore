@@ -1,8 +1,0 @@
-@echo off
-powershell -Command "Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { taskkill /F /T /PID $_ 2>$null }"
-powershell -Command "Get-NetTCPConnection -LocalPort 5181 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { taskkill /F /T /PID $_ 2>$null }"
-timeout /t 2 /nobreak >nul
-start "CollectCore Backend" powershell -NoExit -Command "Set-Location -Path 'F:\Dropbox\Apps\CollectCore\backend'; & '.\.venv\Scripts\python.exe' -m uvicorn main:app --reload --port 8001"
-start "CollectCore Frontend" powershell -NoExit -Command "Set-Location -Path 'F:\Dropbox\Apps\CollectCore\frontend'; npm run dev -- --port 5181"
-timeout /t 6 /nobreak >nul
-start "" "http://localhost:5181"
