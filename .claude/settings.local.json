@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//f/Dropbox/Apps/CollectCore/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/backend/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/frontend/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/backend/.venv/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/images/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/images/inbox/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/images/library/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/backend/sql/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/assets/**)",
+      "Read(//f/Dropbox/Apps/CollectCore/backend/.venv/Lib/site-packages/**)",
+      "Bash(grep -l \"fastapi\\\\|uvicorn\\\\|sqlalchemy\" *.dist-info/METADATA)"
+    ]
+  }
+}

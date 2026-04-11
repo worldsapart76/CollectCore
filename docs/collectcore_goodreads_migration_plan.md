@@ -224,8 +224,14 @@ python migrate_goodreads.py [CSV_PATH] [--db DB_PATH] [--dry-run] [--verbose]
 
 1. ~~`python migrate_goodreads.py --dry-run` — review tag inventory~~ ✓ complete
 2. ~~Update genre mapping dict in script based on dry-run output~~ ✓ complete
-3. `python migrate_goodreads.py ../docs/goodreads_library_export.csv` — full import
-4. Run verification queries (see below)
+3. ~~`python migrate_goodreads.py ../docs/goodreads_library_export.csv` — full import~~ ✓ complete
+4. ~~Run verification queries (see below)~~ ✓ complete
+
+### Final migration result (2026-04-09)
+- **4,724 books** imported; 5 true duplicates skipped; 0 errors
+- Format: Paperback 2,913 | Kindle 1,292 | Other Audio 321 | Audible 207 | Other Ebook 139 | Kobo 3
+- Read status: Want to Read 3,185 | Read 878 | DNF 57
+- 181 books flagged `read_without_library_tag` (read on Goodreads without a library-* shelf — no copy record; pending API enrichment)
 
 ### Summary output (full run)
 ```

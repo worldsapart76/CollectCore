@@ -1,4 +1,4 @@
-const API = "http://127.0.0.1:8001";
+const API = "";
 
 async function handleJsonResponse(res, fallbackMessage) {
   if (!res.ok) {
@@ -15,10 +15,11 @@ export async function fetchHealth() {
   return handleJsonResponse(res, "Failed to fetch health status");
 }
 
-export async function fetchTopLevelCategories(collectionTypeId) {
-  const res = await fetch(
-    `${API}/categories?collection_type_id=${encodeURIComponent(collectionTypeId)}`
-  );
+export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
+  const param = typeof collectionTypeIdOrCode === "string"
+    ? `collection_type_code=${encodeURIComponent(collectionTypeIdOrCode)}`
+    : `collection_type_id=${encodeURIComponent(collectionTypeIdOrCode)}`;
+  const res = await fetch(`${API}/categories?${param}`);
   return handleJsonResponse(res, "Failed to fetch top-level categories");
 }
 

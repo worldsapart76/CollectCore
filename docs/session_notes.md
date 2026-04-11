@@ -6,6 +6,34 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-11 — Seed data complete; fresh installs fully functional
+
+**Completed:**
+- Added full seed data to `schema.sql` for all three modules — fresh installs now produce a working app without any migration scripts:
+  - **Shared:** `lkup_ownership_statuses` — Owned, Wanted, Trade, Formerly Owned, Pending, Borrowed
+  - **Photocards:** collection type (id=1) + top-level categories Album (id=1), Non-Album (id=2)
+  - **Books:** collection type (id=2) + top-level categories Fiction (id=3), Non-Fiction (id=4); read statuses (4), format details (8), age levels (5), genres (11), subgenres (33)
+  - **Graphic Novels:** collection type (id=3) — was already seeded; categories/publishers/format types/eras unchanged
+  - All IDs on fresh installs match dev machine (hardcoded IDs in main.py are safe)
+  - All inserts are `INSERT OR IGNORE` / subquery-based — idempotent, no hardcoded integer IDs
+  - Validated against in-memory SQLite: schema + seed runs clean
+- Resolved deferred item 18 (collection type seed data)
+
+### 2026-04-11 — Build & release pipeline finalized
+
+**Completed:**
+- Fixed Inno Setup installer: changed Desktop shortcut from `{commondesktop}` to `{userdesktop}` to resolve access denied error on machines without admin rights (`PrivilegesRequired=lowest` conflict)
+- Replaced `launcher.vbs` and `stop.vbs` with `launcher.ps1` and `stop.ps1` — VBScript is deprecated/disabled on Windows 11; PowerShell is always available
+- Fixed `build-release.bat` step 3: PowerShell version-update command used `^` line continuation inside a double-quoted string (works in cmd but breaks when run from PowerShell terminal); collapsed to a single line
+- Added backend startup logging to `launcher.ps1`: stdout → `%APPDATA%\CollectCore\backend-out.log`, stderr → `backend-err.log`; error dialog now shows log paths
+- Fixed `schema.sql` FK crash on fresh installs: GN seed data hardcoded `collection_type_id = 3` for top-level categories, but on a fresh DB `graphicnovels` gets AUTOINCREMENT ID=1 (only collection type seeded in schema). Replaced hardcoded IDs with subquery lookups by `collection_type_code`
+- Added Build & Release section to `CLAUDE.md` covering build steps, installer decisions, launcher behavior, and troubleshooting log locations
+- Added deferred item 18: photocards and books collection types not seeded in schema.sql (only exist on dev machine via old migration scripts) — fresh installs won't have them; must fix before next distributed build
+
+**Next:**
+- API enrichment pass (cover art, bibliographic data for the 181 Goodreads-imported books flagged `read_without_library_tag`)
+- Books library UI verification with real data
+
 ### 2026-04-10 — GN module: image support (grid view, thumbnails, ISBN image picker)
 
 **Completed:**

@@ -366,73 +366,32 @@ differences when the scanner UI is built.
 
 ---
 
-## 16. Open Design Items — Requires Decision Before Implementation
+## 16. Open Design Items — All Resolved (Implementation Complete)
 
-The following items have been identified as necessary for the Books module
-but have not yet been designed or decided. Claude Code should raise these
-explicitly and must not proceed with any schema or UI that depends on
-them until each is resolved. See also CLAUDE.md Books Module Prerequisites.
+All items listed here were resolved during the Books module implementation sessions (2026-04-09). See `collectcore_books_module_plan.md` and `session_notes.md` for full detail.
 
-### Book format (sub-format detail and multi-format handling)
-Partially resolved.
+### Book format (sub-format detail and multi-format handling) — RESOLVED
+- Format lives in the **books module only** (not on `tbl_items`); rationale: photocards have no format concept
+- `lkup_book_format_details` — Hardcover, Paperback, Mass Market Paperback, Kindle, Kobo, Other Ebook, Audible, Other Audio (each has `top_level_format`: Physical/Digital/Audio)
+- Multi-format: one `tbl_items` + `tbl_book_details` row per work, one `tbl_book_copies` row per format owned
+- ISBN is edition-specific, lives on `tbl_book_copies`
 
-**Decided:**
-- Format top-level values: Physical, Digital, Audio
-- Format belongs on `tbl_items`, not `tbl_book_details`
-- Goodreads library-* shelf tag mapping to top-level format is defined
-  (see Section 13)
+### Reading status — RESOLVED
+- Lives on `tbl_items.reading_status_id` (shared, NULL for photocards)
+- Values: Read, Currently Reading, Want to Read, DNF (seeded in `lkup_book_read_statuses`)
+- `tbl_items.date_read TEXT` column added for read date
 
-**Still open:**
-- How platform detail is captured (Kindle, Audible, Kobo, etc.) —
-  options are a sub-format lookup field, a free-text field, or folded
-  into tags. Decide before implementing tbl_book_details.
-- How to handle books owned in multiple formats — one record per
-  format, or one record with multiple formats captured. This affects
-  whether format is a simple field or requires a more flexible
-  structure. Decide before implementing tbl_book_details.
+### Tags architecture — RESOLVED (for books; cross-collection still open)
+- Book-specific tags implemented: `lkup_book_tags`, `xref_book_item_tags`
+- Cross-collection tags architecture explicitly deferred; book-specific accepted as tech debt
 
-### Reading status
-Not decided.
+### API category handling — RESOLVED
+- Raw API categories stored in `tbl_book_details.api_categories_raw` (TEXT)
+- Surfaced as suggestions in the UI when assigning genre — not auto-assigned
 
-**Known requirements:**
-- Goodreads data includes: to-read, currently-reading, dnf-permanent,
-  dnf-read-later, and read
-- First read date and read count are available from Goodreads export
-- Reading status may be relevant to future non-book collection types
-  (e.g., "currently watching" for movies)
-
-**Questions to resolve:**
-- Does reading status belong on tbl_items (shared) or tbl_book_details
-  (book-only)?
-- Should first_read_date and read_count be captured in v1?
-- How are DNF states handled — single status or separate flag?
-
-### Tags architecture
-Unresolved cross-collection decision. Affects all modules, not just books.
-
-**Questions to resolve:**
-- Are tags global across all collection types, or module-specific?
-- Controlled vocabulary or fully freeform?
-- Until decided: do not implement tags for any module
-
-### API category handling
-Whether to store, ignore, or convert Google Books / Open Library
-categories to tags is not decided.
-
-**Questions to resolve:**
-- Should API-returned categories be stored on the book record?
-- If stored, do they map to the CollectCore genre system or a
-  separate field?
-- If converted to tags, does this depend on the tags architecture
-  decision above?
-
-### Duplicate detection UX
-Soft warning vs. hard block on ISBN duplicates is not decided.
-
-**Questions to resolve:**
-- Should the app allow duplicate ISBNs (e.g., two owned copies)?
-- If duplicates are allowed, should the user receive a warning?
-- Hard block at the DB level or application-level soft warning?
+### Duplicate detection UX — RESOLVED
+- Soft warning (application-level) on title + primary author duplicate
+- Hard block (DB UNIQUE constraint) on `isbn_13`: `ux_book_copies_isbn13 UNIQUE ON isbn_13 WHERE NOT NULL`
 
 ---
 
@@ -540,31 +499,20 @@ Goodreads shelf data once the tags architecture decision is made.
 
 ## 18. Current Implementation Status
 
-### Implemented
-- Nothing yet in code
+### Fully Implemented (as of 2026-04-09)
+All phases of the books module are complete. See `collectcore_books_module_plan.md` for the authoritative implementation record.
 
-### Designed / agreed
-- Shared architecture usage
-- Field philosophy
-- API-first approach for new books
-- Goodreads CSV as initial migration source
-- Avoid over-normalization
-- Genre/subgenre system (Section 17)
-- Age level field
-- Format top-level values (Physical/Digital/Audio) on tbl_items
-- Goodreads shelf tag → ownership/format mapping
-- Barcode scan backend endpoint as first-class target
+- **Schema**: Three-layer architecture (`tbl_items` → `tbl_book_details` → `tbl_book_copies`); all lookup, xref, and core tables created and seeded
+- **Backend**: Full CRUD + lookup endpoints + external search (Google Books / Open Library fallback) + bulk delete/update
+- **Frontend (BooksIngestPage)**: Manual Entry, ISBN Lookup, External Search tabs; soft dupe warning; genre picker; author/series autocomplete
+- **Frontend (BooksLibraryPage)**: Full filter sidebar (all planned filters), table + grid views, bulk select/edit/delete, format badges, genre/age level columns, thumbnail toggle
+- **Goodreads migration**: 4,724 books imported via `backend/migrate_goodreads.py`
+- **All prerequisites** from Section 16 resolved before implementation began
 
-### Not finalized
-- Exact schema for `tbl_book_details`
-- API endpoints for book lookup
-- UI workflow for search/selection
-- Image storage strategy
-- Format sub-format detail and multi-format handling
-- Reading status
-- Tags architecture
-- API category handling
-- Duplicate detection UX
+### Still deferred
+- Genre/subgenre admin UI (add new genres from within app)
+- Tags cross-collection architecture (book-specific tags are tech debt)
+- API enrichment pass for 181 books imported without copy records (`read_without_library_tag` flag)
 
 ---
 

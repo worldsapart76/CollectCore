@@ -21,7 +21,7 @@ One row per work. "The Wizard of Oz" is one item record regardless of how many f
 
 This means tbl_book_works as a separate entity is not needed — tbl_items IS the work.
 
-> **Note:** Implementation used `tbl_book_copies` instead of `xref_book_item_formats`. Functionally similar but with a different name and structure. Review for any behavioral differences before finalizing.
+> **Note:** Implementation used `tbl_book_copies` (not `xref_book_item_formats` as originally planned). `tbl_book_copies` holds edition metadata (publisher, page_count, dates, cover URL) per format entry in addition to ISBNs. This is the authoritative structure.
 
 ### Format
 Format lives entirely in the books module (not on tbl_items). The CLAUDE.md decision to put Physical/Digital/Audio on tbl_items is overridden. Rationale: photocards have no format concept; format is book-specific.
@@ -70,7 +70,7 @@ Book-specific for now (`lkup_book_tags`, `xref_book_item_tags`). Accepted techni
 Store raw API categories as a text field on `tbl_book_details.api_categories_raw`. Surface as suggestions in the UI when assigning genre — do not auto-assign.
 
 ### Star rating
-On `tbl_book_details.star_rating` (INTEGER 1–5, nullable). Book-specific, not shared.
+On `tbl_book_details.star_rating` (REAL 0.5–5.0, nullable). Book-specific, not shared. Half-star values supported (1, 1.5, 2 … 5).
 
 ### Ingest priority
 Goodreads CSV migration first, then API-assisted new book entry.
@@ -305,62 +305,41 @@ Import via API pathway (POST /books) to exercise the same validation and xref cr
 |---|---|---|
 | Phase 1 | Schema migration | ✓ Done |
 | Phase 2 | Backend CRUD + lookups | ✓ Done |
-| Phase 3 | Goodreads migration script | ✗ Not started |
-| Phase 4 | Frontend library view | Partially done — see gaps below |
+| Phase 3 | Goodreads migration script | ✓ Done — 4,724 books imported |
+| Phase 4 | Frontend library view | ✓ Done |
 | Phase 5 | API-assisted book entry | ✓ Done (merged into Phase 4 frontend) |
 
 ---
 
-## Known Gaps vs. Plan (as of 2026-04-09)
+## Known Gaps vs. Plan — All Resolved
 
-### Goodreads migration — not built
-- `backend/migrate_goodreads.py` does not exist
-- Full Phase 3 from the original plan; highest priority remaining item
+All items from the original gaps list were resolved in subsequent sessions (see session_notes.md for detail):
 
-### Backend — missing bulk endpoints
-- `POST /books/bulk-delete` — not implemented
-- `PATCH /books/bulk` — not implemented
-
-### Library grid — missing columns
-Plan specifies: Title + series info | Author(s) | Format badges | Genre / Age level | Read status | Ownership status | Star rating
-
-Built has: Title | Author | Category | Ownership | Read Status | Rating | ISBN-13
-
-Missing: Format badges column, Genre/Age level column
-
-### Filter sidebar — missing filters
-Plan specifies: Author | Genre + Subgenre | Format | Age level | Read status | Ownership status | Series | Tags
-
-Built has: Text search | Category | Genre (top-level only) | Ownership | Read Status | Age Level
-
-Missing: Author filter, Format filter, Subgenre filter (only top-level genre shown), Series filter, Tags filter
-
-Also: Genre filter is non-functional — genres are not included in the GET /books list response, so client-side filtering has no data to work with. Needs genres added to list response or server-side filtering.
-
-### Bulk edit UI — not built
-- No bulk selection in the library grid
-- No BookBulkEdit component
+- **Goodreads migration** — `backend/migrate_goodreads.py` built and run; 4,724 books imported, 0 errors
+- **Bulk endpoints** — `POST /books/bulk-delete` and `PATCH /books/bulk` implemented
+- **Library grid columns** — Format badges, Genre/Age level columns added; GET /books rebuilt with correlated subqueries to include genres, formats, tags
+- **Filter sidebar** — All planned filters implemented: Author, Genre+Subgenre, Format (grouped Physical/Digital/Audio), Age Level, Read Status, Ownership, Series, Tags; all use tri-state toggle with AND/OR pill
+- **Bulk edit UI** — Checkbox column, select-all, `BookBulkEdit` panel (ownership + read status bulk update, bulk delete with confirm)
 
 ---
 
 ## Verification Checklist
 
-- [ ] Goodreads migration script runs clean against dev DB, counts match export
-- [ ] GET /books returns full display model including genres, formats, tags in list response
-- [ ] Hard block fires on duplicate isbn_13+format or title+author
-- [ ] Grid displays all specified columns with format badges
-- [ ] Filter sidebar reduces results correctly across all dimensions (including genre/subgenre, format, author, series, tags)
-- [ ] Genre filter works (requires genres in list response)
-- [ ] Detail modal shows + allows editing all fields
-- [ ] Bulk ownership/read status update works
-- [ ] Bulk delete works
-- [ ] Shared lookups (ownership statuses, top-level categories) reused correctly
+- [x] Goodreads migration script runs clean against dev DB, counts match export
+- [x] GET /books returns full display model including genres, formats, tags in list response
+- [x] Hard block fires on duplicate isbn_13 (DB constraint); soft warning on title+author duplicate
+- [x] Grid displays all specified columns with format badges
+- [x] Filter sidebar reduces results correctly across all dimensions
+- [x] Detail modal shows + allows editing all fields
+- [x] Bulk ownership/read status update works
+- [x] Bulk delete works
+- [x] Shared lookups (ownership statuses, top-level categories) reused correctly
 
 ---
 
 ## Open Items / Deferred
 
-- Tags cross-collection architecture (book-specific accepted as tech debt for now)
-- Star rating scale confirmation (assumed 1–5 integer; half-stars deferred)
-- Cover images (deferred — URL stored, not displayed in grid)
-- Genre/subgenre admin UI (seed list only for v1)
+- Tags cross-collection architecture (book-specific tags implemented as tech debt; cross-collection decision still open)
+- Star rating: implemented as REAL (half-stars, 0.5–5.0) — resolved
+- Cover images: URL stored, thumbnail column in library with toggle — resolved
+- Genre/subgenre admin UI: seed list only; adding new genres requires direct DB edit or code change

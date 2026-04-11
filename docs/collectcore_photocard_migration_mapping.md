@@ -416,21 +416,18 @@ This is not a raw row dump of the new schema. Validation checks after migration 
 
 ---
 
-## 10. Fields not yet clearly mapped in CollectCore
+## 10. Image storage fields — RESOLVED
 
-## Image storage fields
-The original photocard tracker had image-path-oriented fields such as:
-- `front_image_path`
-- `back_image_path`
+The original photocard tracker had `front_image_path` and `back_image_path` directly on the card record.
 
-### Current state
-Those image-ingest and image-library workflow pieces have **not** been rebuilt/finalized in the new CollectCore schema discussed so far.
+### Current state (CollectCore)
+Images are stored in a shared `tbl_attachments` table:
+- `item_id` FK, `attachment_type` ('front' / 'back'), `file_path`, timestamps
+- The library query pivots this into `front_image_path` and `back_image_path` via LEFT JOIN
+- Filename structure preserved: `{group_code}_{id:06d}_{side}.{ext}` (e.g. `skz_000123_f.jpg`)
 
-### Migration implication
-These fields do **not** yet have a finalized new destination in the current documented CollectCore photocard schema.
-
-### Recommendation
-Treat image-related migration as a separate pass or deferred schema decision unless newer work outside this summary has already defined the destination.
+### Migration outcome
+The migration script (`backend/migrate_from_original.py`) copied images from `PhotocardTracker/images/library/` to `CollectCore/images/library/` and created `tbl_attachments` rows for each front and back. 1,891 attachment rows created for 1,036 migrated cards.
 
 ---
 

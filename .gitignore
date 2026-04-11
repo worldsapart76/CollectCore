@@ -17,3 +17,10 @@ backend/.env
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Dropbox sync artifacts
+*.tmp
+*.tmp.*
+.dropbox
+.dropbox.cache/
+*(conflicted copy *)

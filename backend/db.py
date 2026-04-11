@@ -1,9 +1,17 @@
+import os
 from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 APP_ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = APP_ROOT / "data" / "collectcore.db"
+
+# Allow the launcher to redirect user data to a separate directory (e.g. AppData)
+# so that app updates don't overwrite the database or images.
+# In development this variable is not set, so APP_ROOT is used as before.
+_data_root_env = os.environ.get("COLLECTCORE_DATA_DIR")
+DATA_ROOT = Path(_data_root_env) if _data_root_env else APP_ROOT
+
+DB_PATH = DATA_ROOT / "data" / "collectcore.db"
 print("USING DB PATH:", DB_PATH)
 SCHEMA_PATH = APP_ROOT / "backend" / "sql" / "schema.sql"
 

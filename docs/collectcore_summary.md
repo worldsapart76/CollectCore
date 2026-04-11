@@ -112,29 +112,32 @@ Three-layer architecture: `tbl_items` (work) → `tbl_book_details` (work metada
 
 ## 3. Implemented so far
 
-### Backend
-- POST /photocards
-- GET /photocards
-- GET /photocards/groups
-- GET /photocards/groups/{group_id}/members
-- GET /photocards/source-origins
-- POST /photocards/source-origins
-- GET /categories
-- GET /health
+All three collection modules are fully implemented.
 
-### Frontend
-- InboxManager tester UI
-- Group/category/member/source origin selection
-- Multi-member support
-- Create photocard
-- List photocards
-- Dynamic source origin creation (inline)
+### Photocards (v1 complete)
+- Full library with filter sidebar, grid view (S/M/L), bulk select/edit/delete
+- Two-phase image ingest workflow (inbox → front ingest → back candidate matching)
+- Export page (filtered + sorted PDF via reportlab)
+- Tri-state filter sidebar with searchable chips; shared `FilterSidebar.jsx` system
 
-### Fixes completed
-- DB mismatch resolved
-- Ownership status seeding
-- LEFT JOIN fix for nullable source_origin
-- Port standardization
+### Books (v1 complete, 4,724 Goodreads books migrated)
+- Three-tab ingest: Manual Entry, ISBN Lookup, External Search (Google Books / Open Library fallback)
+- Library with full filter sidebar, table and grid views, bulk select/edit/delete
+- Goodreads CSV migration complete (`backend/migrate_goodreads.py`)
+
+### Graphic Novels (v1 complete)
+- ISBN lookup with multi-result picker (up to 5 editions)
+- Library with resizable columns, table and grid views, cover thumbnails
+- Multiple source series per item (xref table)
+
+### Admin
+- Backup (hot-copy ZIP of DB + images) and Restore with confirm step
+- Module enable/disable settings (`tbl_app_settings`)
+
+### Shared UI
+- CollectCore brand + module-switching dropdown nav
+- Dark/light mode with CSS variable system
+- Shared `FilterSidebar.jsx` components used across all modules
 
 ---
 
@@ -144,46 +147,94 @@ Three-layer architecture: `tbl_items` (work) → `tbl_book_details` (work metada
 - subcategory removed
 - source_origin scoped by group + category
 - source_origin_id nullable
-- collection_type_id now required
-- ownership_status currently hardcoded (temporary)
+- collection_type_id required
 - API responses are joined display models, not raw DB rows
 
 ---
 
 ## 5. Endpoints
 
-### Active
+### Shared / Utility
 - GET /health
+- GET /categories
+- GET /ownership-statuses
+- GET /settings
+- PUT /settings/{key}
+
+### Photocards
 - GET /photocards
 - POST /photocards
+- GET /photocards/{id}
+- PUT /photocards/{id}
+- DELETE /photocards/{id}
+- PATCH /photocards/bulk
+- POST /photocards/bulk-delete
 - GET /photocards/groups
 - GET /photocards/groups/{group_id}/members
 - GET /photocards/source-origins
 - POST /photocards/source-origins
-- GET /categories
 
-### Legacy (not implemented)
-- fetchInbox
-- fetchSubcategoryOptions
-- fetchSourceOptions
-- ingestFront
-- fetchCardCandidates
-- attachBack
+### Ingest (photocards)
+- GET /ingest/inbox
+- POST /ingest/upload
+- POST /ingest/front
+- GET /ingest/candidates
+- POST /ingest/attach-back
+- POST /ingest/pair
+- DELETE /ingest/inbox/{filename}
+- POST /photocards/{id}/replace-front
+- POST /photocards/{id}/replace-back
+
+### Export
+- POST /export/photocards
+
+### Books
+- GET /books
+- POST /books
+- GET /books/{id}
+- PUT /books/{id}
+- DELETE /books/{id}
+- POST /books/bulk-delete
+- PATCH /books/bulk
+- GET /books/genres
+- GET /books/format-details
+- GET /books/age-levels
+- GET /books/read-statuses
+- GET /books/authors
+- GET /books/series
+- GET /books/tags
+- GET /books/search-external
+- GET /books/lookup-isbn
+
+### Graphic Novels
+- GET /graphicnovels
+- POST /graphicnovels
+- GET /graphicnovels/{id}
+- PUT /graphicnovels/{id}
+- DELETE /graphicnovels/{id}
+- GET /graphicnovels/publishers
+- GET /graphicnovels/format-types
+- GET /graphicnovels/eras
+- GET /graphicnovels/lookup-isbn
+
+### Admin
+- GET /admin/backup
+- POST /admin/restore
 
 ---
 
-## 6. Unresolved / deferred
+## 6. Still deferred
 
-- Ownership status dropdown (lookup-driven UI)
-- Books module schema
-- Lookup admin management
-- Validation improvements
-- Return full object on create endpoints
-- Rebuild image ingest workflow
-- Final UI (binder, filtering, editing, bulk actions)
+- Ownership status dropdown — move to lookup-driven UI (currently hardcoded options in some places)
+- Lookup admin/management UI (genres, source origins, members, etc.)
+- Consistent validation rules and response shapes across all endpoints
+- Return full object on create endpoints (currently returns minimal response for some)
+- Image field schema finalization and image ingest rebuild (photocards use tbl_attachments; other modules deferred)
+- Tags cross-collection architecture decision
+- Photocard library filter sidebar spacing/style update to match books sidebar
 
 ---
 
 ## 7. Current state summary
 
-CollectCore has transitioned to a multi-collection architecture using a shared item table with collection-specific detail tables. The photocard module supports creation, listing, lookup-driven relationships, nullable source origins, and inline source origin creation. Future modules are planned but not implemented.
+CollectCore is a fully functional three-module collection tracker (photocards, books, graphic novels). All three modules have complete CRUD, library browsing with filter sidebars and table/grid views, bulk edit/delete, and ingest workflows. The books module includes 4,724 Goodreads-migrated records. A release pipeline (Inno Setup installer, PowerShell launcher) distributes the app to household users on Windows.

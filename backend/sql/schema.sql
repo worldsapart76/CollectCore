@@ -442,6 +442,357 @@ WHERE isbn_13 IS NOT NULL;
 
 
 -- ============================================================
+-- SHARED SEED DATA
+-- ============================================================
+
+-- ownership statuses (shared across all modules)
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('owned',          'Owned',          1);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('wanted',         'Wanted',         2);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('trade',          'Trade',          3);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('formerly_owned', 'Formerly Owned', 4);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending',        'Pending',        5);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('borrowed',       'Borrowed',       6);
+
+
+-- ============================================================
+-- PHOTOCARDS SEED DATA
+-- ============================================================
+
+-- collection type
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('photocards', 'Photocards', 1);
+
+-- top-level categories (scoped to photocards collection type)
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'photocards'), 'Album', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'photocards' AND ltc.category_name = 'Album'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'photocards'), 'Non-Album', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'photocards' AND ltc.category_name = 'Non-Album'
+);
+
+
+-- ============================================================
+-- BOOKS SEED DATA
+-- ============================================================
+
+-- collection type
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('books', 'Books', 2);
+
+-- top-level categories (scoped to books collection type)
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'books'), 'Fiction', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'books'), 'Non-Fiction', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction'
+);
+
+-- read statuses
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Read',              1);
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Currently Reading', 2);
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Want to Read',      3);
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('DNF',               4);
+
+-- format details
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Hardcover',             'Physical', 1);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Paperback',             'Physical', 2);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Mass Market Paperback', 'Physical', 3);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Kindle',                'Digital',  4);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Kobo',                  'Digital',  5);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Other Ebook',           'Digital',  6);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Audible',               'Audio',    7);
+INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Other Audio',           'Audio',    8);
+
+-- age levels
+INSERT OR IGNORE INTO lkup_book_age_levels (age_level_name, sort_order) VALUES ('Children''s',  1);
+INSERT OR IGNORE INTO lkup_book_age_levels (age_level_name, sort_order) VALUES ('Middle Grade', 2);
+INSERT OR IGNORE INTO lkup_book_age_levels (age_level_name, sort_order) VALUES ('Young Adult',  3);
+INSERT OR IGNORE INTO lkup_book_age_levels (age_level_name, sort_order) VALUES ('New Adult',    4);
+INSERT OR IGNORE INTO lkup_book_age_levels (age_level_name, sort_order) VALUES ('Adult',        5);
+
+-- top-level genres (category_scope_id resolved by code+name lookup — no hardcoded IDs)
+-- Fiction genres
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Fantasy', 1
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Science Fiction', 2
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Romance', 3
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Crime', 4
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Horror', 5
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Other', 6
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction';
+
+-- Non-Fiction genres
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Biography', 1
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'History', 2
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Learning', 3
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'True Crime', 4
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction';
+
+INSERT OR IGNORE INTO lkup_book_top_level_genres (category_scope_id, genre_name, sort_order)
+SELECT ltc.top_level_category_id, 'Other', 5
+FROM lkup_top_level_categories ltc JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction';
+
+-- subgenres (top_level_genre_id resolved by scope+name lookup)
+-- Fantasy subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Epic Fantasy', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Fantasy';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Urban Fantasy', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Fantasy';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Fairy Tale', 3 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Fantasy';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Mythology', 4 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Fantasy';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Magical Realism', 5 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Fantasy';
+
+-- Science Fiction subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Hard SF', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Soft SF', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Space Opera', 3 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Dystopian', 4 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Steampunk', 5 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Time Travel', 6 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Science Fiction';
+
+-- Romance subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Contemporary', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Historical', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Paranormal', 3 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Romantic Suspense', 4 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Fantasy', 5 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Dark', 6 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Sci-Fi', 7 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Romance';
+
+-- Crime subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Mystery', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Crime';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Suspense/Thriller', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Crime';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Police Procedural', 3 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Crime';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Historical', 4 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Crime';
+
+-- Horror subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Paranormal', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Horror';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Gothic', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Horror';
+
+-- Fiction Other subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Contemporary', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Other';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Historical Fiction', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Fiction' AND g.genre_name = 'Other';
+
+-- Learning subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Writing', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Learning';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Filmmaking', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Learning';
+
+-- Non-Fiction Other subgenres
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Cookbook', 1 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Other';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Art/Photography', 2 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Other';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Religion', 3 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Other';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Humor', 4 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Other';
+
+INSERT OR IGNORE INTO lkup_book_sub_genres (top_level_genre_id, sub_genre_name, sort_order)
+SELECT g.top_level_genre_id, 'Reference', 5 FROM lkup_book_top_level_genres g
+JOIN lkup_top_level_categories ltc ON g.category_scope_id = ltc.top_level_category_id
+JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction' AND g.genre_name = 'Other';
+
+
+-- ============================================================
 -- GRAPHIC NOVELS SEED DATA
 -- ============================================================
 
@@ -449,24 +800,27 @@ WHERE isbn_13 IS NOT NULL;
 INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
 VALUES ('graphicnovels', 'Graphic Novels', 3);
 
--- top-level categories (scoped to collection_type_id = 3)
+-- top-level categories (scoped to graphicnovels collection type — looked up by code, not hardcoded ID)
 INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
-SELECT 3, 'Marvel', 10
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'graphicnovels'), 'Marvel', 10
 WHERE NOT EXISTS (
-    SELECT 1 FROM lkup_top_level_categories
-    WHERE collection_type_id = 3 AND category_name = 'Marvel'
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'graphicnovels' AND ltc.category_name = 'Marvel'
 );
 INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
-SELECT 3, 'DC', 20
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'graphicnovels'), 'DC', 20
 WHERE NOT EXISTS (
-    SELECT 1 FROM lkup_top_level_categories
-    WHERE collection_type_id = 3 AND category_name = 'DC'
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'graphicnovels' AND ltc.category_name = 'DC'
 );
 INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
-SELECT 3, 'Other', 30
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'graphicnovels'), 'Other', 30
 WHERE NOT EXISTS (
-    SELECT 1 FROM lkup_top_level_categories
-    WHERE collection_type_id = 3 AND category_name = 'Other'
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'graphicnovels' AND ltc.category_name = 'Other'
 );
 
 -- publishers

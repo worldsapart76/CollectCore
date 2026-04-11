@@ -203,6 +203,7 @@ These are intentionally not yet built. Do not implement without instruction:
 15. Pagination — not designed or implemented for any module
 16. Consistent validation rules and response shapes across all endpoints
 17. Photocard library filter sidebar — update font size, spacing, and padding to match the books library sidebar style (user-preferred reference)
+18. ~~Collection type seed data~~ — DONE. All three collection types, top-level categories, ownership statuses, and all books lookup tables (read statuses, format details, age levels, genres, subgenres) are now seeded in schema.sql. Fresh installs produce correct IDs matching the dev machine (photocards=1, books=2, graphicnovels=3).
 
 ---
 
@@ -212,6 +213,7 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 
 | File | Purpose |
 |---|---|
+| `docs/release-guide.md` | Build process, distribution, installer decisions, troubleshooting |
 | `docs/collectcore_summary.md` | Schema changes, active endpoints, current implementation state |
 | `docs/collectcore_photocard_migration_mapping.md` | Field-level migration mapping from original to new schema |
 | `docs/collectcore_books_module_design.md` | Books module design decisions, philosophy, and open items |
@@ -245,6 +247,14 @@ up wholesale.
 module-specific file assets stored outside `images/library/` are covered
 by the backup. If a new module stores files in a different directory,
 update `GET /admin/backup` to include that directory in the ZIP.
+
+---
+
+## Build & Release
+
+See `docs/release-guide.md` for the full build process, distribution
+instructions, installer decisions, and troubleshooting guide (including
+log file locations for diagnosing launch failures).
 
 ---
 

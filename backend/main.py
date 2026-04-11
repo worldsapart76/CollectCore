@@ -37,7 +37,13 @@ print("LOADED BACKEND FILE:", __file__)
 
 # ---------- Paths ----------
 APP_ROOT = Path(__file__).resolve().parents[1]
-IMAGES_DIR = APP_ROOT / "images"
+
+# Allow the launcher to redirect user data (DB + images) to a separate directory
+# so app-file updates don't overwrite user data. Unset in development.
+_data_root_env = os.environ.get("COLLECTCORE_DATA_DIR")
+DATA_ROOT = Path(_data_root_env) if _data_root_env else APP_ROOT
+
+IMAGES_DIR = DATA_ROOT / "images"
 INBOX_DIR = IMAGES_DIR / "inbox"
 LIBRARY_DIR = IMAGES_DIR / "library"
 
@@ -60,6 +66,21 @@ app.add_middleware(
 
 # ---------- DB init ----------
 init_db()
+
+
+def _resolve_collection_type_id(code: str, fallback: int) -> int:
+    """Look up a collection_type_id by code at startup. Falls back to the
+    hardcoded value if the code is not found (should never happen on a
+    properly seeded DB, but guards against edge cases)."""
+    _db = SessionLocal()
+    try:
+        row = _db.execute(
+            text("SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = :code"),
+            {"code": code},
+        ).fetchone()
+        return row[0] if row else fallback
+    finally:
+        _db.close()
 
 # ---------- Static files ----------
 if IMAGES_DIR.exists():
@@ -179,18 +200,30 @@ def get_ownership_statuses():
 
 
 @app.get("/categories")
-def get_top_level_categories(collection_type_id: int):
+def get_top_level_categories(collection_type_id: Optional[int] = None, collection_type_code: Optional[str] = None):
     db = SessionLocal()
     try:
-        result = db.execute(
-            text("""
-                SELECT top_level_category_id, category_name
-                FROM lkup_top_level_categories
-                WHERE collection_type_id = :collection_type_id
-                ORDER BY sort_order
-            """),
-            {"collection_type_id": collection_type_id},
-        ).fetchall()
+        if collection_type_code:
+            result = db.execute(
+                text("""
+                    SELECT ltc.top_level_category_id, ltc.category_name
+                    FROM lkup_top_level_categories ltc
+                    JOIN lkup_collection_types ct ON ltc.collection_type_id = ct.collection_type_id
+                    WHERE ct.collection_type_code = :code
+                    ORDER BY ltc.sort_order
+                """),
+                {"code": collection_type_code},
+            ).fetchall()
+        else:
+            result = db.execute(
+                text("""
+                    SELECT top_level_category_id, category_name
+                    FROM lkup_top_level_categories
+                    WHERE collection_type_id = :collection_type_id
+                    ORDER BY sort_order
+                """),
+                {"collection_type_id": collection_type_id},
+            ).fetchall()
         return [
             {
                 "top_level_category_id": row[0],
@@ -752,7 +785,7 @@ def bulk_delete_photocards(payload: BulkDeletePayload):
 
 # ---------- Books ----------
 
-BOOK_COLLECTION_TYPE_ID = 2
+BOOK_COLLECTION_TYPE_ID = _resolve_collection_type_id("book", 2)
 
 
 # --- Books Pydantic models ---
@@ -1801,7 +1834,7 @@ def bulk_delete_books(payload: BulkDeletePayload):
 
 # ---------- Graphic Novels ----------
 
-GN_COLLECTION_TYPE_ID = 3
+GN_COLLECTION_TYPE_ID = _resolve_collection_type_id("graphicnovels", 3)
 
 
 # --- Graphic Novels Pydantic models ---
@@ -3896,3 +3929,23 @@ async def upload_restore(file: UploadFile = File(...)):
         "db_restored": True,
         "images_restored": bool(image_entries) if "image_entries" in dir() else False,
     }
+
+
+# ---------- Frontend static files (production) ----------
+# Serve the pre-built React app so the frontend dev server is not needed.
+# The /assets mount and /vite.svg route must be registered before the catch-all
+# SPA route, and all API routes above must be registered first so they take priority.
+from fastapi.responses import FileResponse as _FileResponse
+
+FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/vite.svg", include_in_schema=False)
+    async def _serve_favicon():
+        return _FileResponse(str(FRONTEND_DIST / "vite.svg"))
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str):
+        return _FileResponse(str(FRONTEND_DIST / "index.html"))

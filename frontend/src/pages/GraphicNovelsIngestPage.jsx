@@ -34,7 +34,7 @@ function coverUrl(url) {
 }
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
-const GN_COLLECTION_TYPE_ID = 3;
+const GN_COLLECTION_TYPE_CODE = "graphicnovels";
 
 // Options hidden from this module (not deleted from DB)
 const HIDDEN_OWNERSHIP_NAMES = new Set(["Trade", "Formerly Owned", "Pending", "Borrowed"]);
@@ -871,7 +871,7 @@ export default function GraphicNovelsIngestPage() {
       fetchGnEras().then(setEras),
       fetchOwnershipStatuses().then(setOwnershipStatuses),
       fetchBookReadStatuses().then(setReadStatuses),
-      fetchTopLevelCategories(GN_COLLECTION_TYPE_ID).then(setCategories),
+      fetchTopLevelCategories(GN_COLLECTION_TYPE_CODE).then(setCategories),
     ]).catch(() => {});
   }, []);
 

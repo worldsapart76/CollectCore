@@ -1,3 +1,8 @@
+# Clean up Dropbox-generated temp files
+Get-ChildItem -Path $PSScriptRoot -Recurse -File |
+    Where-Object { $_.Name -match '\.tmp(\.\d+)+$' } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 # Kill all uvicorn processes for CollectCore (reloaders AND spawned workers)
 $allPython = Get-WmiObject Win32_Process -Filter "Name = 'python.exe'"
 
