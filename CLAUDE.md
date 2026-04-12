@@ -4,9 +4,17 @@
 
 CollectCore is a multi-collection tracker application rebuilt from a
 completed, fully functional photocard tracker. The goal is a generalized
-system that supports multiple collection types (photocards, books, and
-future types such as movies, music, and graphic novels) while preserving
-the core UI patterns and workflows from the original app.
+system that supports multiple collection types while preserving the core
+UI patterns and workflows from the original app.
+
+**Implemented modules:** Photocards, Books, Graphic Novels
+
+**Planned future modules:**
+- Music
+- Video (TV series, movies, miniseries, music videos)
+- Video Games
+- TTRPG
+- Board Games
 
 The original photocard tracker was built with ChatGPT and is complete.
 CollectCore is an active rebuild/generalization — not a from-scratch app.
@@ -27,7 +35,8 @@ CollectCore uses a shared item table + collection-specific detail tables:
 
 - `tbl_items` — shared record for all collection types
 - `tbl_photocard_details` — photocard-specific fields
-- `tbl_book_details` — book-specific fields (not yet implemented)
+- `tbl_book_details` + `tbl_book_copies` — book-specific fields (implemented)
+- `tbl_graphicnovel_details` — graphic novel-specific fields (implemented)
 - `xref_photocard_members` — many-to-many member relationships
 - Shared lookup tables for collection types, categories, and ownership
 - Collection-specific lookup tables for groups, members, source origins
@@ -38,15 +47,17 @@ CollectCore uses a shared item table + collection-specific detail tables:
 
 ## Active Modules
 
+All three implemented modules are v1-complete with full CRUD, library
+(filter sidebar + table/grid views), bulk edit/delete, and ingest.
+
 ### Photocards
-- Fully implemented for version 1.0
+- v1 complete — image ingest, library, export
 
 ### Books
-- Backend: not yet implemented
-- Frontend: not yet implemented
-- Design partially specified — see docs below
-- ⚠️ Prerequisites must be resolved before development begins —
-  see Books Module Prerequisites section below
+- v1 complete — manual entry, ISBN lookup, external search, Goodreads migration (4,724 records)
+
+### Graphic Novels
+- v1 complete — ISBN lookup with multi-result picker, library, cover image management
 
 ---
 
@@ -125,53 +136,14 @@ Do not "fix" these unless explicitly instructed:
 - `member` is no longer a scalar field — stored in `xref_photocard_members`
 - Categories and ownership resolve through shared lookup tables
 - Source origins are scoped by `group_id` + `top_level_category_id`
-- `format` field belongs on `tbl_items` (shared across all collection
-  types, not module-specific) — placement decided, not yet implemented
-- Tags scope (global vs. module-specific) is an unresolved
-  cross-collection architecture decision — do not implement tags
-  for any module until this is decided
+- `format` field: decided to be module-specific (not on `tbl_items`).
+  Each module handles format via its own copy/edition sub-table or field.
+- Tags: book-specific tags implemented (`lkup_book_tags`). Cross-collection
+  tag architecture remains deferred — do not add tags to new modules
+  without explicit decision.
 
 ---
 
-## Books Module — Prerequisites Before Development
-
-The following items MUST be discussed and decided before any Books
-module schema, backend, or frontend work begins. Claude Code should
-raise these explicitly at the start of any session where Books
-development is requested, and should not proceed until each item
-is resolved or explicitly deferred by the user.
-
-### 1. Tags architecture (global vs. module-specific)
-Unresolved cross-collection decision. Affects tbl_book_details schema
-and all future modules. Do not implement tags for any module until
-decided. See deferred item 12.
-
-### 2. Format field implementation
-Top-level values (Physical, Digital, Audio) are decided and belong on
-tbl_items. Sub-format detail (Kindle, Audible, Kobo, etc.) and
-multi-format handling are not yet decided. Affects tbl_items schema
-and Goodreads migration. See deferred items 9 and 11.
-
-### 3. Reading status
-Not decided. May belong on tbl_items (shared) or tbl_book_details
-(book-only). Affects schema and Goodreads migration.
-See collectcore_books_module_design.md Section 16.
-
-### 4. API category handling
-Whether to store, ignore, or convert Google Books / Open Library
-categories to tags is not decided. Affects the API normalization
-layer. Must be decided before building external search endpoints.
-
-### 5. Duplicate detection UX
-Soft warning vs. hard block on ISBN duplicates not decided.
-Must be decided before POST /books is finalized.
-
-### 6. Genre/subgenre lookup admin UI
-Genre system is designed but the UI for adding new genres and
-subgenres from within the app must be scoped before frontend work
-begins. See collectcore_books_module_design.md Section 17.
-
----
 
 ## Deferred Items (Prioritized)
 
@@ -179,31 +151,73 @@ These are intentionally not yet built. Do not implement without instruction:
 
 1. Image field schema finalization and image ingest rebuild
 2. Ownership status dropdown — move to lookup-driven UI
-3. Books module — full backend and frontend implementation
-   ⚠️ See Books Module Prerequisites above before starting
-4. Return full object on create endpoints (currently returns minimal response)
-5. Lookup admin/management UI
-6. Validation improvements and consistent error handling across endpoints
-7. Full Library UI (binder view, filtering, editing, bulk actions)
-8. Books module — genre/subgenre lookup admin UI
-9. Books module — book format sub-format detail and multi-format
-   handling (top-level Physical/Digital/Audio decided; platform detail
-   and multi-format record strategy still open — decide before
-   implementing tbl_book_details)
-10. Books module — reading status field design and implementation
-    (open question: shared tbl_items vs. book-specific;
-    see collectcore_books_module_design.md Section 16)
-11. Format field implementation on tbl_items (placement decided,
-    sub-format detail and multi-format handling still open)
-12. Tags architecture — global vs. module-specific decision required
-    before implementing tags for any module
-13. API category handling — decide whether to store, ignore, or
-    convert to tags before building API normalization layer
-14. Duplicate detection UX — soft warning vs. hard block on ISBN
-15. Pagination — not designed or implemented for any module
-16. Consistent validation rules and response shapes across all endpoints
-17. Photocard library filter sidebar — update font size, spacing, and padding to match the books library sidebar style (user-preferred reference)
-18. ~~Collection type seed data~~ — DONE. All three collection types, top-level categories, ownership statuses, and all books lookup tables (read statuses, format details, age levels, genres, subgenres) are now seeded in schema.sql. Fresh installs produce correct IDs matching the dev machine (photocards=1, books=2, graphicnovels=3).
+3. Return full object on create endpoints (currently returns minimal response for some)
+4. Lookup admin/management UI
+5. Validation improvements and consistent error handling across endpoints
+6. Pagination — not designed or implemented for any module
+7. Photocard library filter sidebar — update font size, spacing, and padding to match the books library sidebar style (user-preferred reference)
+8. Future modules — see Future Modules section below (implement one at a time, recommended order: Video Games → Music → Video → Board Games → TTRPG)
+9. `lkup_book_read_statuses` rename to `lkup_consumption_statuses` — when Video module is built, this table gains video/game watch statuses; rename at that point
+10. External API integrations for deferred modules: Music (MusicBrainz/Discogs/Spotify TBD), Video Games (IGDB/RAWG TBD), TTRPG (TBD)
+
+---
+
+## Future Modules
+
+Schema decisions are finalized for all five planned modules. Full details
+in `C:\Users\world\.claude\plans\pure-inventing-whisper.md`.
+
+### Shared patterns for all new modules
+- Add row to `lkup_collection_types` + `lkup_top_level_categories`
+- `tbl_{module}_details` (1:1 with tbl_items) as the core detail table
+- Module-specific lookup tables + xref tables for M:N relationships
+- Backend: `_resolve_collection_type_id()`, `_get_{module}_detail()`, `_insert_{module}_relationships()`
+- Frontend: `{Module}IngestPage.jsx` + `{Module}LibraryPage.jsx` (GN module is the template)
+- `tbl_items.reading_status_id` = NULL for modules that don't use a consumption status
+
+### Music (code: `music`)
+- **Top-level categories**: Album, EP, Single, Compilation, Live, Soundtrack
+- **3-layer**: Release (work) → Songs (per-release) → Editions (copies/versions)
+- **Editions**: format_type, version_name (K-pop variant name), label, catalog_number, barcode, per-edition `ownership_status_id`
+- **Artists**: M:N lookup (`lkup_music_artists` / `xref_music_release_artists`)
+- **Genre**: 2-level (`lkup_music_top_genres` + `lkup_music_sub_genres`)
+- **Track listings**: release-level base (`xref_release_track_list`) + edition-level overrides (`xref_edition_track_list`)
+- **No**: listening status, tags, rating/review
+- **API**: Deferred (schema has api_source + external_work_id slots)
+
+### Video (code: `video`)
+- **Top-level categories**: Movie, TV Series, Miniseries, Concert/Live
+- **TV Series**: seasons sub-table (`tbl_video_seasons`) with episode_count, format, per-season ownership
+- **Movie/Miniseries/Concert**: copies sub-table (`tbl_video_copies`) for multi-format ownership
+- **Watch status**: reuses `tbl_items.reading_status_id`; add Watched/Currently Watching/Want to Watch/Abandoned to status table
+- **Talent**: Director + Cast, both M:N lookups; Cast = Performers for Concert/Live
+- **Genre**: 2-level. No rating/review.
+- **API**: TMDB (decided)
+
+### Video Games (code: `videogames`)
+- **Top-level category**: Single "Video Games" catch-all (not surfaced in UI)
+- **Platform model**: Copy sub-table `tbl_game_copies` (1:many) — one game record, N platform copies, each with platform (lookup) + edition (text) + ownership_status. Mirrors `tbl_book_copies`.
+- **Platform lookup**: `lkup_game_platforms` — seeded with common platforms (Xbox, PS5, Switch, PC storefronts, etc.)
+- **Play status**: reuses `tbl_items.reading_status_id`; add Played/Playing/Want to Play/Abandoned
+- **Developer/Publisher**: M:N free-form lookups
+- **Genre**: 2-level. No rating/review, no tags.
+- **API**: Deferred
+
+### TTRPG (code: `ttrpg`)
+- **Top-level categories**: Game systems (D&D, Pathfinder, etc.) — user-extensible via admin; seeded with common systems
+- **System editions + lines**: scoped sub-lookups keyed to `top_level_category_id`, mirroring photocards' members/source_origins hierarchy
+- **Book type**: `lkup_ttrpg_book_types` (Core Rulebook, Adventure Module, Sourcebook, Supplement, Campaign Setting, Other)
+- **Format**: copy sub-table (`tbl_ttrpg_copies`) with per-copy ISBN + ownership_status
+- **Authors**: M:N lookup with order
+- **No**: read status (ownership only), tags, rating/review
+- **API**: Deferred
+
+### Board Games (code: `boardgames`)
+- **Top-level categories**: Solo (1 player), 2-Player, Small Group (3–4), Large Group (5+)
+- **Expansions**: sub-table (`tbl_boardgame_expansions`) with title, year, ownership_status_id, BGG expansion ID
+- **Designer**: M:N free-form lookup with order; Publisher: single lookup
+- **No**: genre/mechanic, play log, rating/review
+- **API**: BoardGameGeek XML API (no key required)
 
 ---
 
@@ -216,20 +230,21 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 | `docs/release-guide.md` | Build process, distribution, installer decisions, troubleshooting |
 | `docs/collectcore_summary.md` | Schema changes, active endpoints, current implementation state |
 | `docs/collectcore_photocard_migration_mapping.md` | Field-level migration mapping from original to new schema |
-| `docs/collectcore_books_module_design.md` | Books module design decisions, philosophy, and open items |
-| `docs/collectcore_books_module_plan.md` | **Authoritative books implementation plan** — finalized decisions, schema, phases, known gaps vs. what was built |
-| `docs/collectcore_books_v1_schema_proposal.md` | Books module v1 schema, SQL, API endpoints, request/response shapes |
+| `docs/collectcore_books_module_design.md` | Books module design decisions and history |
+| `docs/collectcore_books_module_plan.md` | Books implementation plan — finalized decisions, schema, phases, known gaps |
+| `docs/collectcore_books_v1_schema_proposal.md` | Books module v1 schema reference |
+| `C:\Users\world\.claude\plans\pure-inventing-whisper.md` | **Future modules plan** — full schema decisions for Music, Video, Video Games, TTRPG, Board Games |
 | `docs/session_notes.md` | Working session history — completed work and next steps |
 
 ---
 
 ## Implementation Status Notes
 
-- `docs/collectcore_books_module_design.md` and
-  `docs/collectcore_books_v1_schema_proposal.md` are **design documents
-  only** — nothing in the Books module has been implemented yet.
+- All three current modules (Photocards, Books, Graphic Novels) are v1-complete.
 - The active endpoint list in `docs/collectcore_summary.md` is the
   authoritative source for what is currently built and working.
+- Future module schemas are fully designed — see Future Modules section above
+  and the plan file for full detail.
 
 ---
 

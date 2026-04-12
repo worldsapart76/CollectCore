@@ -6,6 +6,52 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-11 — Video Games: testing fixes + RAWG API integration
+
+**Completed:**
+- **Fix: Edit modal background** — modal used `var(--surface)` (gray, matches grid background); changed to `var(--bg-surface)` to match GN modal pattern
+- **Platform datalist** — Platform field (both ingest and edit modal) now uses `<input list=...>` + `<datalist>` populated from existing records; allows free typing but offers dropdown of existing platforms. Backend: added `GET /videogames/platforms` endpoint (distinct values from `tbl_game_details`). `api.js`: added `fetchGamePlatforms()`
+- **RAWG API integration** — Added RAWG game search:
+  - Backend: `RAWG_API_KEY` env var (optional; RAWG works with rate limits without a key); `GET /videogames/rawg-search?q=...` proxy endpoint returns title, released, cover_image_url, platforms array per result
+  - Frontend `api.js`: added `rawgSearchGames(q)`
+  - `VideoGamesIngestPage.jsx`: "Search RAWG" panel above the form — search field + Search button; results show title, year, platforms, cover thumbnail; clicking a result populates title, release date, and cover image URL
+
+**Next:**
+- Get RAWG API key (free, improves rate limits): rawg.io — add to `.env` as `RAWG_API_KEY=...` then restart backend
+- Music module (next in build order)
+
+### 2026-04-11 — Video Games module v1 complete
+
+**Completed:**
+- **Schema:** Added `lkup_game_developers`, `lkup_game_publishers`, `lkup_game_top_genres`, `lkup_game_sub_genres`, `tbl_game_details`, `xref_game_developers`, `xref_game_publishers`, `xref_game_genres` to `schema.sql` with indexes and seed data
+- **Seed data:** Collection type `videogames` (id=94 on live DB); single catch-all category "Video Games" (not surfaced in UI); play statuses Played/Playing/Want to Play/Abandoned added to `lkup_book_read_statuses`; 9 top genres seeded
+- **Migration script:** `backend/migrate_videogames_schema.py` — idempotent, updates `modules_enabled` to include `videogames`
+- **Backend (`main.py`):** `VIDEOGAMES_COLLECTION_TYPE_ID` constant; Pydantic models (`VideoGameCreate`, `VideoGameUpdate`, `GameBulkUpdatePayload`); helpers (`_upsert_game_developer`, `_upsert_game_publisher`, `_insert_game_relationships`, `_get_game_detail`); endpoints: `GET /videogames/genres`, `/developers`, `/publishers`, `/play-statuses`, `GET /videogames`, `GET /videogames/{id}`, `POST /videogames`, `PUT /videogames/{id}`, `DELETE /videogames/{id}`, `PATCH /videogames/bulk`, `POST /videogames/bulk-delete`
+- **Frontend:** `api.js` — all video games API functions; `modules.js` + `App.jsx` wired; `VideoGamesIngestPage.jsx` (add game form: title, platform, edition, ownership, play status, release date, developers, publishers, genres, cover URL, description, notes); `VideoGamesLibraryPage.jsx` (filter sidebar, table view, thumbnails toggle, edit modal, bulk edit/delete)
+- Architecture note: `top_level_category_id` is auto-resolved from the single catch-all category at create time — not a user-facing field
+
+**Next:**
+- Test Video Games module end-to-end
+- Music module (next in build order)
+
+### 2026-04-11 — Future module schemas designed (Music, Video, Video Games, TTRPG, Board Games)
+
+**Completed:**
+- Gathered requirements for all five planned future modules via Q&A session
+- Finalized schema decisions for each module — full detail in `C:\Users\world\.claude\plans\pure-inventing-whisper.md`
+- Updated `CLAUDE.md`: added Future Modules section with per-module schema summaries, cleaned up stale Books prerequisites, updated Active Modules, updated Deferred Items list
+- Key decisions per module:
+  - **Music**: 3-layer (Release → Songs → Editions); release type as top-level category (Album/EP/Single/etc.); artists M:N; 2-level genre; edition-level ownership_status alongside release-level; track listings at both release and edition level
+  - **Video**: Movie/TV Series/Miniseries/Concert/Live as top-level categories; TV gets seasons sub-table; movies/miniseries/concerts get copies sub-table; Director + Cast M:N; watch status via existing `reading_status_id` slot; TMDB API decided
+  - **Video Games**: single catch-all top-level category (not shown in UI); platform + edition as free-form text; developer/publisher M:N; 2-level genre; play status via `reading_status_id`; API deferred
+  - **TTRPG**: game system as top-level category (user-extensible); system editions + lines as scoped sub-lookups (mirrors photocards group→member hierarchy); copy sub-table for format + per-copy ISBN; authors M:N; book type lookup
+  - **Board Games**: player count as top-level category; expansions sub-table with per-expansion ownership; designer M:N; BGG XML API (no key needed)
+- Recommended build order: Video Games → Music → Video → Board Games → TTRPG
+
+**Next:**
+- API enrichment pass (cover art, bibliographic data for the 181 Goodreads books flagged `read_without_library_tag`)
+- Begin first future module implementation (Video Games recommended as simplest)
+
 ### 2026-04-11 — Seed data complete; fresh installs fully functional
 
 **Completed:**

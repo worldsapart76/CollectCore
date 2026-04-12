@@ -14,6 +14,8 @@ export default defineConfig({
       '/photocards': 'http://localhost:8001',
       '/books': 'http://localhost:8001',
       '/graphicnovels': 'http://localhost:8001',
+      '/videogames': 'http://localhost:8001',
+      '/export': 'http://localhost:8001',
       '/admin': 'http://localhost:8001',
       '/images': 'http://localhost:8001',
     },

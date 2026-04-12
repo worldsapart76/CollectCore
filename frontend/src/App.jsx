@@ -9,6 +9,8 @@ import BooksIngestPage from "./pages/BooksIngestPage";
 import BooksLibraryPage from "./pages/BooksLibraryPage";
 import GraphicNovelsIngestPage from "./pages/GraphicNovelsIngestPage";
 import GraphicNovelsLibraryPage from "./pages/GraphicNovelsLibraryPage";
+import VideoGamesIngestPage from "./pages/VideoGamesIngestPage";
+import VideoGamesLibraryPage from "./pages/VideoGamesLibraryPage";
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
         <Route path="/books/library" element={<BooksLibraryPage />} />
         <Route path="/graphicnovels/add" element={<GraphicNovelsIngestPage />} />
         <Route path="/graphicnovels/library" element={<GraphicNovelsLibraryPage />} />
+        <Route path="/videogames/add" element={<VideoGamesIngestPage />} />
+        <Route path="/videogames/library" element={<VideoGamesLibraryPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

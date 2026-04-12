@@ -545,6 +545,93 @@ export async function restoreBackup(file) {
   return handleJsonResponse(res, "Restore failed.");
 }
 
+// --- Video Games ---
+
+export async function fetchGameGenres() {
+  const res = await fetch(`${API}/videogames/genres`);
+  return handleJsonResponse(res, "Failed to fetch game genres");
+}
+
+export async function fetchGameDevelopers(q) {
+  const url = q ? `${API}/videogames/developers?q=${encodeURIComponent(q)}` : `${API}/videogames/developers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch game developers");
+}
+
+export async function fetchGamePublishers(q) {
+  const url = q ? `${API}/videogames/publishers?q=${encodeURIComponent(q)}` : `${API}/videogames/publishers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch game publishers");
+}
+
+export async function fetchGamePlatforms() {
+  const res = await fetch(`${API}/videogames/platforms`);
+  return handleJsonResponse(res, "Failed to fetch game platforms");
+}
+
+export async function rawgSearchGames(q) {
+  const res = await fetch(`${API}/videogames/rawg-search?q=${encodeURIComponent(q)}`);
+  return handleJsonResponse(res, "Failed to search RAWG");
+}
+
+export async function fetchGamePlayStatuses() {
+  const res = await fetch(`${API}/videogames/play-statuses`);
+  return handleJsonResponse(res, "Failed to fetch play statuses");
+}
+
+export async function listVideoGames() {
+  const res = await fetch(`${API}/videogames`);
+  return handleJsonResponse(res, "Failed to fetch video games");
+}
+
+export async function getVideoGame(itemId) {
+  const res = await fetch(`${API}/videogames/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to fetch video game");
+}
+
+export async function createVideoGame(payload) {
+  const res = await fetch(`${API}/videogames`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to create video game");
+}
+
+export async function updateVideoGame(itemId, payload) {
+  const res = await fetch(`${API}/videogames/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to update video game");
+}
+
+export async function deleteVideoGame(itemId) {
+  const res = await fetch(`${API}/videogames/${encodeURIComponent(itemId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete video game");
+}
+
+export async function bulkUpdateVideoGames(itemIds, fields) {
+  const res = await fetch(`${API}/videogames/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  return handleJsonResponse(res, "Failed to bulk update video games");
+}
+
+export async function bulkDeleteVideoGames(itemIds) {
+  const res = await fetch(`${API}/videogames/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete video games");
+}
+
 // --- Export ---
 
 export async function exportPhotocards({ itemIds, includeCaptions, includeBacks }) {
