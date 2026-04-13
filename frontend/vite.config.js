@@ -1,23 +1,39 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
+// ─── Backend proxy paths ───────────────────────────────────────────────────────
+// Every path prefix that the backend handles must be listed here.
+// Omitting a path causes requests to return HTML (index.html) instead of JSON,
+// which produces the error: Unexpected token '<', "<!doctype "... is not valid JSON
+//
+// When adding a new module, add its route prefix to this list.
+// ──────────────────────────────────────────────────────────────────────────────
+const BACKEND = 'http://localhost:8001'
+const PROXY_PATHS = [
+  '/health',
+  '/categories',
+  '/ownership-statuses',
+  '/ingest',
+  '/photocards',
+  '/books',
+  '/graphicnovels',
+  '/videogames',
+  '/music',
+  '/video',
+  '/boardgames',
+  '/ttrpg',
+  '/export',
+  '/admin',
+  '/settings',
+  '/images',
+]
+
+const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, BACKEND]))
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5181,
-    proxy: {
-      '/health': 'http://localhost:8001',
-      '/categories': 'http://localhost:8001',
-      '/ownership-statuses': 'http://localhost:8001',
-      '/ingest': 'http://localhost:8001',
-      '/photocards': 'http://localhost:8001',
-      '/books': 'http://localhost:8001',
-      '/graphicnovels': 'http://localhost:8001',
-      '/videogames': 'http://localhost:8001',
-      '/export': 'http://localhost:8001',
-      '/admin': 'http://localhost:8001',
-      '/images': 'http://localhost:8001',
-    },
+    proxy,
   },
 })

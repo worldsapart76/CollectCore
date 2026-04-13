@@ -3,7 +3,6 @@ import {
   fetchPhotocardMembers,
   fetchPhotocardSourceOrigins,
   fetchOwnershipStatuses,
-  fetchTopLevelCategories,
   createPhotocardSourceOrigin,
   updatePhotocard,
   deletePhotocard,
@@ -17,39 +16,48 @@ const API_BASE = "http://127.0.0.1:8001";
  * PhotocardDetailModal — view and edit a single photocard.
  *
  * Props:
- *   card           — photocard object (from list)
+ *   card           — initial photocard object (from list)
+ *   allCards       — optional sorted array; enables Prev/Next navigation
  *   groups         — all groups array
  *   categories     — all categories array
- *   onClose        — callback()
- *   onSaved        — callback(updatedCard) — called after successful save
+ *   onClose        — callback() — close the modal
+ *   onSaved        — callback() — cards updated; parent should reload (does NOT close)
  *   onDeleted      — callback(item_id) — called after successful delete
  */
 export default function PhotocardDetailModal({
   card,
+  allCards,
   groups,
   categories,
   onClose,
   onSaved,
   onDeleted,
 }) {
+  // Navigation — track position in the sorted cards array
+  const effectiveAllCards = allCards ?? [card];
+  const [currentIndex, setCurrentIndex] = useState(
+    () => Math.max(0, effectiveAllCards.findIndex((c) => c.item_id === card.item_id))
+  );
+  const currentCard = effectiveAllCards[currentIndex] ?? card;
+
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
   const [members, setMembers] = useState([]);
   const [sourceOrigins, setSourceOrigins] = useState([]);
 
+  // Form state — reset to currentCard values when card changes
   const [topLevelCategoryId, setTopLevelCategoryId] = useState(
-    String(card.top_level_category_id)
+    String(currentCard.top_level_category_id)
   );
   const [ownershipStatusId, setOwnershipStatusId] = useState(
-    String(card.ownership_status_id)
+    String(currentCard.ownership_status_id)
   );
   const [sourceOriginId, setSourceOriginId] = useState(
-    card.source_origin_id ? String(card.source_origin_id) : ""
+    currentCard.source_origin_id ? String(currentCard.source_origin_id) : ""
   );
-  const [version, setVersion] = useState(card.version || "");
-  const [notes, setNotes] = useState(card.notes || "");
-  const [selectedMemberIds, setSelectedMemberIds] = useState(
-    [] // loaded after members fetch
-  );
+  const [version, setVersion] = useState(currentCard.version || "");
+  const [notes, setNotes] = useState(currentCard.notes || "");
+  const [isSpecial, setIsSpecial] = useState(currentCard.is_special ?? true);
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
 
   const [showAddSourceOrigin, setShowAddSourceOrigin] = useState(false);
   const [newSourceOriginName, setNewSourceOriginName] = useState("");
@@ -60,30 +68,55 @@ export default function PhotocardDetailModal({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
-  // Image state (tracks current paths, updated after replace)
-  const [frontImagePath, setFrontImagePath] = useState(card.front_image_path || null);
-  const [backImagePath, setBackImagePath] = useState(card.back_image_path || null);
+  // Dirty state — true when any form field has been changed since last save/navigation
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Image state
+  const [frontImagePath, setFrontImagePath] = useState(currentCard.front_image_path || null);
+  const [backImagePath, setBackImagePath] = useState(currentCard.back_image_path || null);
   const [replacingFront, setReplacingFront] = useState(false);
   const [replacingBack, setReplacingBack] = useState(false);
   const [imageError, setImageError] = useState("");
   const frontFileRef = useRef(null);
   const backFileRef = useRef(null);
 
-  // Load ownership statuses + members + source origins
+  // Load ownership statuses once on mount
   useEffect(() => {
-    async function load() {
+    const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
+    fetchOwnershipStatuses()
+      .then(all => setOwnershipStatuses(all.filter(s => !HIDDEN.has(s.status_name))))
+      .catch(() => {});
+  }, []);
+
+  // Reset form and reload per-card data whenever the current card changes
+  useEffect(() => {
+    setTopLevelCategoryId(String(currentCard.top_level_category_id));
+    setOwnershipStatusId(String(currentCard.ownership_status_id));
+    setSourceOriginId(currentCard.source_origin_id ? String(currentCard.source_origin_id) : "");
+    setVersion(currentCard.version || "");
+    setNotes(currentCard.notes || "");
+    setIsSpecial(currentCard.is_special ?? true);
+    setSelectedMemberIds([]);
+    setFrontImagePath(currentCard.front_image_path || null);
+    setBackImagePath(currentCard.back_image_path || null);
+    setIsDirty(false);
+    setError("");
+    setImageError("");
+    setConfirmDelete(false);
+    setShowAddSourceOrigin(false);
+    setNewSourceOriginName("");
+    setSourceOriginError("");
+
+    async function loadCardData() {
       try {
-        const [statusData, memberData, soData] = await Promise.all([
-          fetchOwnershipStatuses(),
-          fetchPhotocardMembers(card.group_id),
-          fetchPhotocardSourceOrigins(card.group_id, card.top_level_category_id),
+        const [memberData, soData] = await Promise.all([
+          fetchPhotocardMembers(currentCard.group_id),
+          fetchPhotocardSourceOrigins(currentCard.group_id, currentCard.top_level_category_id),
         ]);
-        setOwnershipStatuses(statusData);
         setMembers(memberData);
         setSourceOrigins(soData);
 
-        // Set selected members using current card data (member names → ids)
-        const memberNameSet = new Set(card.members || []);
+        const memberNameSet = new Set(currentCard.members || []);
         const matched = memberData
           .filter((m) => memberNameSet.has(m.member_name))
           .map((m) => String(m.member_id));
@@ -92,40 +125,31 @@ export default function PhotocardDetailModal({
         setError(err.message || "Failed to load form data");
       }
     }
-    load();
-  }, [card.item_id]);
-
-  // Reload source origins when category changes
-  useEffect(() => {
-    async function reloadSourceOrigins() {
-      if (!topLevelCategoryId) return;
-      try {
-        const soData = await fetchPhotocardSourceOrigins(
-          card.group_id,
-          topLevelCategoryId
-        );
-        setSourceOrigins(soData);
-        // Reset source origin if the current one isn't in the new list
-        if (soData.length > 0) {
-          const ids = soData.map((o) => String(o.source_origin_id));
-          if (sourceOriginId && !ids.includes(sourceOriginId)) {
-            setSourceOriginId("");
-          }
-        } else {
-          setSourceOriginId("");
-        }
-      } catch {
-        // silently ignore
-      }
-    }
-    reloadSourceOrigins();
-  }, [topLevelCategoryId]);
+    loadCardData();
+  }, [currentCard.item_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleMember(memberId) {
     const id = String(memberId);
     setSelectedMemberIds((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
     );
+    setIsDirty(true);
+  }
+
+  // Explicit handler for category change — reloads source origins without a useEffect
+  async function handleCategoryChange(newCatId) {
+    setTopLevelCategoryId(newCatId);
+    setIsDirty(true);
+    try {
+      const soData = await fetchPhotocardSourceOrigins(currentCard.group_id, newCatId);
+      setSourceOrigins(soData);
+      setSourceOriginId((prev) => {
+        const ids = soData.map((o) => String(o.source_origin_id));
+        return ids.includes(prev) ? prev : (soData.length ? String(soData[0].source_origin_id) : "");
+      });
+    } catch {
+      // silently ignore
+    }
   }
 
   async function handleCreateSourceOrigin() {
@@ -137,18 +161,19 @@ export default function PhotocardDetailModal({
     }
     try {
       const created = await createPhotocardSourceOrigin({
-        groupId: card.group_id,
+        groupId: currentCard.group_id,
         categoryId: Number(topLevelCategoryId),
         sourceOriginName: trimmed,
       });
       const refreshed = await fetchPhotocardSourceOrigins(
-        card.group_id,
+        currentCard.group_id,
         topLevelCategoryId
       );
       setSourceOrigins(refreshed);
       setSourceOriginId(String(created.source_origin_id));
       setNewSourceOriginName("");
       setShowAddSourceOrigin(false);
+      setIsDirty(true);
     } catch (err) {
       setSourceOriginError(err.message || "Failed to create source origin");
     }
@@ -159,8 +184,9 @@ export default function PhotocardDetailModal({
     if (side === "front") {
       setReplacingFront(true);
       try {
-        const result = await replaceFrontImage(card.item_id, file);
+        const result = await replaceFrontImage(currentCard.item_id, file);
         setFrontImagePath(`images/library/${result.filename}`);
+        setIsDirty(true);
       } catch (err) {
         setImageError(err.message || "Failed to replace front image");
       } finally {
@@ -169,8 +195,9 @@ export default function PhotocardDetailModal({
     } else {
       setReplacingBack(true);
       try {
-        const result = await replaceBackImage(card.item_id, file);
+        const result = await replaceBackImage(currentCard.item_id, file);
         setBackImagePath(`images/library/${result.filename}`);
+        setIsDirty(true);
       } catch (err) {
         setImageError(err.message || "Failed to replace back image");
       } finally {
@@ -179,28 +206,64 @@ export default function PhotocardDetailModal({
     }
   }
 
-  async function handleSave() {
+  // Pure save — does not close modal; returns true on success, false on failure
+  async function doSave() {
     setError("");
     if (selectedMemberIds.length === 0) {
       setError("Select at least one member.");
-      return;
+      return false;
     }
     setSaving(true);
     try {
-      await updatePhotocard(card.item_id, {
+      await updatePhotocard(currentCard.item_id, {
         topLevelCategoryId: Number(topLevelCategoryId),
         ownershipStatusId: Number(ownershipStatusId),
         notes: notes.trim() || null,
         sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
         version: version.trim() || null,
         memberIds: selectedMemberIds.map(Number),
+        isSpecial,
       });
-      onSaved();
+      setIsDirty(false);
+      onSaved(); // notify parent to reload cards
+      return true;
     } catch (err) {
       setError(err.message || "Failed to save");
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  // Auto-close: save if dirty, then close. Used by X button and overlay click.
+  async function handleAutoClose() {
+    if (isDirty) {
+      const ok = await doSave();
+      if (!ok) return; // save failed — keep modal open with error shown
+    }
+    onClose();
+  }
+
+  // Explicit Save button: save and close
+  async function handleSaveAndClose() {
+    const ok = await doSave();
+    if (ok) onClose();
+  }
+
+  // Cancel button: discard unsaved changes and close
+  function handleCancel() {
+    onClose();
+  }
+
+  // Navigate to prev/next card — auto-saves if dirty
+  async function handleNavigate(delta) {
+    const target = currentIndex + delta;
+    if (target < 0 || target >= effectiveAllCards.length) return;
+    if (isDirty) {
+      const ok = await doSave();
+      if (!ok) return; // save failed — stay on current card
+    }
+    setCurrentIndex(target);
   }
 
   async function handleDelete() {
@@ -210,8 +273,8 @@ export default function PhotocardDetailModal({
     }
     setDeleting(true);
     try {
-      await deletePhotocard(card.item_id);
-      onDeleted(card.item_id);
+      await deletePhotocard(currentCard.item_id);
+      onDeleted(currentCard.item_id);
     } catch (err) {
       setError(err.message || "Failed to delete");
       setDeleting(false);
@@ -219,18 +282,46 @@ export default function PhotocardDetailModal({
     }
   }
 
-  // Find the group name
   const groupName =
-    groups.find((g) => g.group_id === card.group_id)?.group_name || "—";
+    groups.find((g) => g.group_id === currentCard.group_id)?.group_name || "—";
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < effectiveAllCards.length - 1;
+  const showNav = effectiveAllCards.length > 1;
 
   return (
-    <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && handleAutoClose()}>
       <div style={styles.modal}>
         <div style={styles.modalHeader}>
-          <span style={styles.modalTitle}>
-            #{card.item_id} — {groupName}
-          </span>
-          <button style={styles.closeBtn} onClick={onClose}>✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {showNav && (
+              <button
+                style={{ ...styles.navBtn, opacity: hasPrev ? 1 : 0.3 }}
+                onClick={() => handleNavigate(-1)}
+                disabled={!hasPrev || saving}
+                title="Previous card"
+              >
+                ‹
+              </button>
+            )}
+            <span style={styles.modalTitle}>
+              #{currentCard.item_id} — {groupName}
+              {showNav && (
+                <span style={styles.navCounter}> {currentIndex + 1}/{effectiveAllCards.length}</span>
+              )}
+            </span>
+            {showNav && (
+              <button
+                style={{ ...styles.navBtn, opacity: hasNext ? 1 : 0.3 }}
+                onClick={() => handleNavigate(1)}
+                disabled={!hasNext || saving}
+                title="Next card"
+              >
+                ›
+              </button>
+            )}
+          </div>
+          <button style={styles.closeBtn} onClick={handleAutoClose}>✕</button>
         </div>
 
         {(error || imageError) && (
@@ -258,16 +349,49 @@ export default function PhotocardDetailModal({
 
           {/* Right: form */}
           <div style={styles.form}>
-            {/* Group — read only */}
+            {/* Group — read only, with card type toggle on right */}
             <FormRow label="Group">
-              <span style={styles.readOnly}>{groupName}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={styles.readOnly}>{groupName}</span>
+                <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setIsSpecial(false); setIsDirty(true); }}
+                    style={{
+                      padding: "3px 9px",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      border: "none",
+                      borderRight: "1px solid #ccc",
+                      background: !isSpecial ? "#1565c0" : "#f5f5f5",
+                      color: !isSpecial ? "#fff" : "#333",
+                    }}
+                  >
+                    Regular
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsSpecial(true); setIsDirty(true); }}
+                    style={{
+                      padding: "3px 9px",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      border: "none",
+                      background: isSpecial ? "#1565c0" : "#f5f5f5",
+                      color: isSpecial ? "#fff" : "#333",
+                    }}
+                  >
+                    ★ Special
+                  </button>
+                </div>
+              </div>
             </FormRow>
 
             {/* Category */}
             <FormRow label="Category">
               <select
                 value={topLevelCategoryId}
-                onChange={(e) => setTopLevelCategoryId(e.target.value)}
+                onChange={(e) => handleCategoryChange(e.target.value)}
                 style={styles.select}
               >
                 {categories.map((c) => (
@@ -282,7 +406,7 @@ export default function PhotocardDetailModal({
             <FormRow label="Ownership">
               <select
                 value={ownershipStatusId}
-                onChange={(e) => setOwnershipStatusId(e.target.value)}
+                onChange={(e) => { setOwnershipStatusId(e.target.value); setIsDirty(true); }}
                 style={styles.select}
               >
                 {ownershipStatuses.map((s) => (
@@ -298,7 +422,7 @@ export default function PhotocardDetailModal({
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <select
                   value={sourceOriginId}
-                  onChange={(e) => setSourceOriginId(e.target.value)}
+                  onChange={(e) => { setSourceOriginId(e.target.value); setIsDirty(true); }}
                   style={{ ...styles.select, flex: 1 }}
                 >
                   <option value="">— None —</option>
@@ -339,7 +463,7 @@ export default function PhotocardDetailModal({
             <FormRow label="Version">
               <input
                 value={version}
-                onChange={(e) => setVersion(e.target.value)}
+                onChange={(e) => { setVersion(e.target.value); setIsDirty(true); }}
                 placeholder="e.g. Soundwave POB"
                 style={styles.input}
               />
@@ -366,7 +490,7 @@ export default function PhotocardDetailModal({
             <FormRow label="Notes">
               <textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => { setNotes(e.target.value); setIsDirty(true); }}
                 rows={3}
                 style={styles.textarea}
               />
@@ -393,10 +517,10 @@ export default function PhotocardDetailModal({
             )}
           </div>
           <div style={styles.actionsRight}>
-            <button style={styles.cancelBtn} onClick={onClose}>
+            <button style={styles.cancelBtn} onClick={handleCancel}>
               Cancel
             </button>
-            <button style={styles.saveBtn} onClick={handleSave} disabled={saving}>
+            <button style={styles.saveBtn} onClick={handleSaveAndClose} disabled={saving}>
               {saving ? "Saving..." : "Save"}
             </button>
           </div>
@@ -507,12 +631,27 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "12px 16px",
+    padding: "10px 14px",
     borderBottom: "1px solid #e0e0e0",
   },
   modalTitle: {
     fontWeight: "bold",
     fontSize: 15,
+  },
+  navBtn: {
+    padding: "1px 7px",
+    fontSize: 18,
+    lineHeight: 1,
+    cursor: "pointer",
+    border: "1px solid #ccc",
+    borderRadius: 3,
+    background: "#f5f5f5",
+  },
+  navCounter: {
+    fontSize: 12,
+    color: "#888",
+    fontWeight: "normal",
+    marginLeft: 4,
   },
   closeBtn: {
     background: "none",

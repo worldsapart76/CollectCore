@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { inboxState } from "../photocardPageState";
 import {
   attachBack,
   createPhotocardSourceOrigin,
@@ -33,7 +34,7 @@ function libraryImageUrl(path) {
 const labelStyle = { display: "block", fontSize: 12, fontWeight: "bold", marginBottom: 3, color: "#444" };
 const selectStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc" };
 const inputStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc", width: "100%", boxSizing: "border-box" };
-const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "#1976d2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
+const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "#377e00", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
 const btnSecondary = { fontSize: 13, padding: "5px 12px", background: "#f5f5f5", color: "#333", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" };
 const btnSm = { fontSize: 11, padding: "2px 7px", background: "#f5f5f5", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" };
 const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid #c62828", background: "#ffebee", fontSize: 13, borderRadius: 3 };
@@ -70,12 +71,12 @@ function UploadZone({ onUploaded }) {
       onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(Array.from(e.dataTransfer.files)); }}
       onClick={() => inputRef.current?.click()}
       style={{
-        border: `2px dashed ${dragging ? "#1976d2" : "#bbb"}`,
+        border: `2px dashed ${dragging ? "#377e00" : "#bbb"}`,
         borderRadius: 6,
         padding: "22px 20px",
         textAlign: "center",
         cursor: "pointer",
-        background: dragging ? "#e3f2fd" : "#fafafa",
+        background: dragging ? "#f2fde8" : "#fafafa",
         marginBottom: 12,
         fontSize: 13,
         color: "#666",
@@ -116,8 +117,8 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
               gap: 6,
               padding: "4px 6px",
               borderRadius: 4,
-              background: isSelected ? "#e3f2fd" : "transparent",
-              border: `1px solid ${isSelected ? "#90caf9" : "transparent"}`,
+              background: isSelected ? "#f2fde8" : "transparent",
+              border: `1px solid ${isSelected ? "#a5d6a7" : "transparent"}`,
             }}
           >
             {/* Side toggle */}
@@ -263,10 +264,10 @@ function CandidateGrid({ candidates, selectedId, onSelect }) {
           style={{
             width: 80,
             cursor: "pointer",
-            border: `2px solid ${selectedId === card.item_id ? "#1976d2" : "#ddd"}`,
+            border: `2px solid ${selectedId === card.item_id ? "#377e00" : "#ddd"}`,
             borderRadius: 4,
             overflow: "hidden",
-            background: selectedId === card.item_id ? "#e3f2fd" : "#fff",
+            background: selectedId === card.item_id ? "#f2fde8" : "#fff",
           }}
         >
           {card.front_image_path ? (
@@ -312,16 +313,17 @@ export default function InboxPage() {
   const [loadingLookups, setLoadingLookups] = useState(true);
   const [lookupError, setLookupError] = useState("");
 
-  // Persistent metadata form — survives file changes
-  const [groupId, setGroupId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [ownershipStatusId, setOwnershipStatusId] = useState("");
+  // Persistent metadata form — initialized from module store, survives tab navigation
+  const [groupId, setGroupId] = useState(inboxState.groupId);
+  const [categoryId, setCategoryId] = useState(inboxState.categoryId);
+  const [ownershipStatusId, setOwnershipStatusId] = useState(inboxState.ownershipStatusId);
   const [members, setMembers] = useState([]);
-  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState(inboxState.selectedMemberIds);
   const [sourceOrigins, setSourceOrigins] = useState([]);
-  const [sourceOriginId, setSourceOriginId] = useState("");
-  const [version, setVersion] = useState("");
-  const [notes, setNotes] = useState("");
+  const [sourceOriginId, setSourceOriginId] = useState(inboxState.sourceOriginId);
+  const [isSpecial, setIsSpecial] = useState(inboxState.isSpecial);
+  const [version, setVersion] = useState(inboxState.version);
+  const [notes, setNotes] = useState(inboxState.notes);
 
   // Candidate state (back mode)
   const [candidates, setCandidates] = useState([]);
@@ -335,7 +337,7 @@ export default function InboxPage() {
   const [actionSuccess, setActionSuccess] = useState("");
 
   // Preview thumbnail size
-  const [previewLarge, setPreviewLarge] = useState(false);
+  const [previewLarge, setPreviewLarge] = useState(true);
 
   // ── Initial load ──
   useEffect(() => {
@@ -348,11 +350,19 @@ export default function InboxPage() {
       .then(([g, c, os, inbox]) => {
         setGroups(g);
         setCategories(c);
-        setOwnershipStatuses(os);
+        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
+        setOwnershipStatuses(os.filter(s => !HIDDEN.has(s.status_name)));
         setInboxFiles(inbox);
-        if (g.length) setGroupId(String(g[0].group_id));
-        if (c.length) setCategoryId(String(c[0].top_level_category_id));
-        if (os.length) setOwnershipStatusId(String(os[0].ownership_status_id));
+        // Preserve stored value if still valid; otherwise default to first item
+        setGroupId((prev) =>
+          g.some((x) => String(x.group_id) === prev) ? prev : (g.length ? String(g[0].group_id) : "")
+        );
+        setCategoryId((prev) =>
+          c.some((x) => String(x.top_level_category_id) === prev) ? prev : (c.length ? String(c[0].top_level_category_id) : "")
+        );
+        setOwnershipStatusId((prev) =>
+          os.some((x) => String(x.ownership_status_id) === prev) ? prev : (os.length ? String(os[0].ownership_status_id) : "")
+        );
         if (inbox.length) setSelectedFilenames([inbox[0].filename]);
       })
       .catch((err) => setLookupError(err.message || "Failed to load data"))
@@ -373,10 +383,28 @@ export default function InboxPage() {
     fetchPhotocardSourceOrigins(groupId, categoryId)
       .then((data) => {
         setSourceOrigins(data);
-        setSourceOriginId(data.length ? String(data[0].source_origin_id) : "");
+        // Preserve current value if still valid for this group+category; else default to first
+        setSourceOriginId((prev) =>
+          data.some((o) => String(o.source_origin_id) === prev)
+            ? prev
+            : (data.length ? String(data[0].source_origin_id) : "")
+        );
       })
       .catch(() => {});
   }, [groupId, categoryId]);
+
+  // ── Sync form state back to module store for cross-tab persistence ──
+  useEffect(() => {
+    inboxState.groupId           = groupId;
+    inboxState.categoryId        = categoryId;
+    inboxState.ownershipStatusId = ownershipStatusId;
+    inboxState.selectedMemberIds = selectedMemberIds;
+    inboxState.sourceOriginId    = sourceOriginId;
+    inboxState.isSpecial         = isSpecial;
+    inboxState.version           = version;
+    inboxState.notes             = notes;
+  }, [groupId, categoryId, ownershipStatusId, selectedMemberIds,
+      sourceOriginId, isSpecial, version, notes]);
 
   // ── Derive selected file objects from filenames ──
   const selectedFiles = selectedFilenames
@@ -508,6 +536,7 @@ export default function InboxPage() {
         sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
         version: version.trim() || null,
         memberIds: selectedMemberIds.map(Number),
+        isSpecial,
       });
       setActionSuccess(`Created item #${result.item_id} — ${result.filename}`);
       removeFromInbox(singleFile.filename);
@@ -559,6 +588,7 @@ export default function InboxPage() {
         sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
         version: version.trim() || null,
         memberIds: selectedMemberIds.map(Number),
+        isSpecial,
       });
       setActionSuccess(`Created item #${result.item_id} with front + back`);
       removeFromInbox([pairFront.filename, pairBack.filename]);
@@ -590,12 +620,12 @@ export default function InboxPage() {
 
   return (
     <PageContainer>
-      <div style={{ padding: 16, maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ padding: 16, width: "fit-content", margin: "0 auto" }}>
         <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>Inbox</h2>
 
         <UploadZone onUploaded={handleUploaded} />
 
-        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "220px auto", gap: 16, alignItems: "start" }}>
 
           {/* Left: inbox queue */}
           <div>
@@ -615,140 +645,177 @@ export default function InboxPage() {
           {/* Right: metadata form + action */}
           <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 16, background: "#fff" }}>
 
-            {/* Selected file preview */}
-            {panelMode === "none" && (
-              <div style={{ color: "#999", fontSize: 13, marginBottom: 14 }}>
-                Select a file from the inbox queue.
+            {/* ── Top section: 3-column layout ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: 16, marginBottom: 14, alignItems: "start" }}>
+
+              {/* Col 1: Thumbnail */}
+              <div style={{ flexShrink: 0 }}>
+                {(panelMode === "front" || panelMode === "back") && singleFile && (
+                  <div style={{ position: "relative" }}>
+                    <img
+                      src={inboxImageUrl(singleFile.filename, singleFile.mtime)}
+                      alt={singleFile.filename}
+                      style={{
+                        maxHeight: previewLarge ? 220 : 80,
+                        maxWidth: previewLarge ? 180 : 70,
+                        objectFit: "contain",
+                        borderRadius: 4,
+                        border: "1px solid #ddd",
+                        display: "block",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      title={previewLarge ? "Shrink preview" : "Enlarge preview"}
+                      onClick={() => setPreviewLarge((p) => !p)}
+                      style={{
+                        position: "absolute", bottom: 3, right: 3,
+                        fontSize: 9, padding: "1px 4px", lineHeight: 1.4,
+                        border: "1px solid #bbb", borderRadius: 2, cursor: "pointer",
+                        background: "rgba(255,255,255,0.85)", color: "#555",
+                      }}
+                    >
+                      {previewLarge ? "−" : "+"}
+                    </button>
+                  </div>
+                )}
+                {(panelMode === "pair" || panelMode === "invalid-pair") && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {selectedFiles.map((f) => {
+                      const side = fileSides[f.filename] ?? "front";
+                      return (
+                        <div key={f.filename} style={{ textAlign: "center" }}>
+                          <img
+                            src={inboxImageUrl(f.filename, f.mtime)}
+                            alt={f.filename}
+                            style={{ maxHeight: 80, maxWidth: 70, objectFit: "contain", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
+                          />
+                          <div style={{ fontSize: 10, fontWeight: "bold", marginTop: 2, color: side === "front" ? "#2e7d32" : "#e65100" }}>
+                            {side.toUpperCase()}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-            {panelMode !== "none" && panelMode !== "pair" && singleFile && (
-              <div style={{ marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <img
-                    src={inboxImageUrl(singleFile.filename, singleFile.mtime)}
-                    alt={singleFile.filename}
-                    style={{
-                      maxHeight: previewLarge ? 220 : 80,
-                      maxWidth: previewLarge ? 180 : 70,
-                      objectFit: "contain",
-                      borderRadius: 4,
-                      border: "1px solid #ddd",
-                      display: "block",
-                    }}
-                  />
-                  <button
-                    type="button"
-                    title={previewLarge ? "Shrink preview" : "Enlarge preview"}
-                    onClick={() => setPreviewLarge((p) => !p)}
-                    style={{
-                      position: "absolute", bottom: 3, right: 3,
-                      fontSize: 9, padding: "1px 4px", lineHeight: 1.4,
-                      border: "1px solid #bbb", borderRadius: 2, cursor: "pointer",
-                      background: "rgba(255,255,255,0.85)", color: "#555",
-                    }}
-                  >
-                    {previewLarge ? "−" : "+"}
-                  </button>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>{singleFile.filename}</div>
+
+              {/* Col 2: filename, badge, Card Type, Ownership */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {panelMode === "none" && (
+                  <div style={{ color: "#999", fontSize: 13 }}>Select a file from the inbox queue.</div>
+                )}
+                {(panelMode === "front" || panelMode === "back") && singleFile && (
+                  <>
+                    <div style={{ fontSize: 12, color: "#555" }}>{singleFile.filename}</div>
+                    <div style={{
+                      display: "inline-block", padding: "2px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
+                      background: panelMode === "back" ? "#fff3e0" : "#e8f5e9",
+                      color: panelMode === "back" ? "#e65100" : "#2e7d32",
+                      border: `1px solid ${panelMode === "back" ? "#ffcc80" : "#a5d6a7"}`,
+                      width: "fit-content",
+                    }}>
+                      {panelMode === "back" ? "Back" : "Front"}
+                    </div>
+                  </>
+                )}
+                {panelMode === "pair" && (
                   <div style={{
-                    display: "inline-block", padding: "2px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                    background: panelMode === "back" ? "#fff3e0" : "#e8f5e9",
-                    color: panelMode === "back" ? "#e65100" : "#2e7d32",
-                    border: `1px solid ${panelMode === "back" ? "#ffcc80" : "#a5d6a7"}`,
+                    display: "inline-block", padding: "3px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
+                    background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #ce93d8", width: "fit-content",
                   }}>
-                    {panelMode === "back" ? "Back" : "Front"}
+                    Pair
+                  </div>
+                )}
+                {panelMode === "invalid-pair" && (
+                  <div style={{ ...alertError, marginBottom: 0 }}>
+                    Both selected files are marked as the same side. Toggle one to F and one to B to ingest as a pair.
+                  </div>
+                )}
+                <div>
+                  <label style={labelStyle}>Card Type</label>
+                  <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", width: "fit-content" }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsSpecial(false)}
+                      style={{
+                        padding: "3px 10px", fontSize: 12, cursor: "pointer",
+                        border: "none", borderRight: "1px solid #ccc",
+                        background: !isSpecial ? "#377e00" : "#f5f5f5",
+                        color: !isSpecial ? "#fff" : "#333",
+                      }}
+                    >
+                      Regular
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSpecial(true)}
+                      style={{
+                        padding: "3px 10px", fontSize: 12, cursor: "pointer",
+                        border: "none",
+                        background: isSpecial ? "#377e00" : "#f5f5f5",
+                        color: isSpecial ? "#fff" : "#333",
+                      }}
+                    >
+                      ★ Special
+                    </button>
                   </div>
                 </div>
-              </div>
-            )}
-            {panelMode === "pair" && (
-              <div style={{ marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[pairFront, pairBack].map((f, i) => (
-                    <div key={f.filename} style={{ textAlign: "center" }}>
-                      <img
-                        src={inboxImageUrl(f.filename, f.mtime)}
-                        alt={f.filename}
-                        style={{ maxHeight: 80, maxWidth: 70, objectFit: "contain", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
-                      />
-                      <div style={{
-                        fontSize: 10, fontWeight: "bold", marginTop: 2,
-                        color: i === 0 ? "#2e7d32" : "#e65100",
-                      }}>
-                        {i === 0 ? "FRONT" : "BACK"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{
-                  alignSelf: "center", padding: "3px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                  background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #ce93d8",
-                }}>
-                  Pair
+                <div>
+                  <label style={labelStyle}>Ownership</label>
+                  <select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map((s) => (
+                      <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
-            {panelMode === "invalid-pair" && (
-              <div style={{ ...alertError, marginBottom: 14 }}>
-                Both selected files are marked as the same side. Toggle one to F and one to B to ingest as a pair.
+
+              {/* Col 3: Group, Category, Source Origin */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  <label style={labelStyle}>Group</label>
+                  <select value={groupId} onChange={(e) => setGroupId(e.target.value)} style={selectStyle}>
+                    {groups.map((g) => (
+                      <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Category</label>
+                  <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={selectStyle}>
+                    {categories.map((c) => (
+                      <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Source Origin</label>
+                  <SourceOriginSelector
+                    sourceOrigins={sourceOrigins}
+                    sourceOriginId={sourceOriginId}
+                    onChange={setSourceOriginId}
+                    groupId={groupId}
+                    categoryId={categoryId}
+                    onCreated={(created) => {
+                      setSourceOrigins((prev) => [...prev, created]);
+                      setSourceOriginId(String(created.source_origin_id));
+                    }}
+                  />
+                </div>
               </div>
-            )}
+            </div>
 
             {actionError && <div style={alertError}>{actionError}</div>}
             {actionSuccess && <div style={alertSuccess}>{actionSuccess}</div>}
 
-            {/* ── Metadata form (always visible, persists) ── */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginBottom: 14 }}>
-              <div>
-                <label style={labelStyle}>Group</label>
-                <select value={groupId} onChange={(e) => setGroupId(e.target.value)} style={selectStyle}>
-                  {groups.map((g) => (
-                    <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Category</label>
-                <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={selectStyle}>
-                  {categories.map((c) => (
-                    <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Ownership</label>
-                <select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={selectStyle}>
-                  {ownershipStatuses.map((s) => (
-                    <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Source Origin</label>
-                <SourceOriginSelector
-                  sourceOrigins={sourceOrigins}
-                  sourceOriginId={sourceOriginId}
-                  onChange={setSourceOriginId}
-                  groupId={groupId}
-                  categoryId={categoryId}
-                  onCreated={(created) => {
-                    setSourceOrigins((prev) => [...prev, created]);
-                    setSourceOriginId(String(created.source_origin_id));
-                  }}
-                />
-              </div>
-
+            {/* ── Bottom section ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
               <div>
                 <label style={labelStyle}>Version</label>
                 <input value={version} onChange={(e) => setVersion(e.target.value)}
                   style={inputStyle} placeholder="e.g. Soundwave POB" />
               </div>
-
               <div>
                 <label style={labelStyle}>Notes</label>
                 <input value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />

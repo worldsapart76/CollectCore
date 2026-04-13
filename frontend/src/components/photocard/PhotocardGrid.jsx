@@ -21,11 +21,14 @@ const BADGE_LETTER_COLORS = {
   F: "#ff3131",  // For Trade / For Sale — neon red
   T: "#00ffff",  // Trading — neon cyan
   S: "#bf00ff",  // Sold / Selling — neon purple
+  P: "#ff9900",  // Pending - Outgoing — neon orange
+  I: "#00bfff",  // Pending - Incoming — neon sky blue
 };
 
 function getOwnershipBadge(statusName) {
   if (!statusName) return null;
-  const letter = statusName[0].toUpperCase();
+  // "Pending - Incoming" starts with "P" like Pending - Outgoing, so handle explicitly
+  const letter = statusName === "Pending - Incoming" ? "I" : statusName[0].toUpperCase();
   const neonColor = BADGE_LETTER_COLORS[letter] || "#ffffff";
   return { label: letter, neonColor };
 }
@@ -151,6 +154,7 @@ function CardCell({
           width={cellWidth}
           height={imageHeight}
           badge={badge}
+          isSpecial={card.is_special}
         />
 
         {/* Back image (fronts+backs mode) */}
@@ -169,10 +173,11 @@ function CardCell({
           <span style={styles.captionText}>
             {card.members?.join(", ") || "—"}
           </span>
-          {(card.source_origin || card.version) && (
-            <span style={styles.captionSub}>
-              {[card.source_origin, card.version].filter(Boolean).join(" · ")}
-            </span>
+          {card.source_origin && (
+            <span style={styles.captionSub}>{card.source_origin}</span>
+          )}
+          {card.version && (
+            <span style={styles.captionSub}>{card.version}</span>
           )}
         </div>
       )}
@@ -184,7 +189,7 @@ function CardCell({
   );
 }
 
-function ImageSlot({ path, side, width, height, badge }) {
+function ImageSlot({ path, side, width, height, badge, isSpecial }) {
   const API_BASE = "http://127.0.0.1:8001";
 
   return (
@@ -211,6 +216,10 @@ function ImageSlot({ path, side, width, height, badge }) {
         <div style={{ ...styles.ownershipBadge, color: badge.neonColor }}>
           {badge.label}
         </div>
+      )}
+
+      {isSpecial && side === "front" && (
+        <div style={styles.specialBadge}>★</div>
       )}
     </div>
   );
@@ -255,6 +264,15 @@ const styles = {
     justifyContent: "center",
     borderRadius: 3,
     lineHeight: 1,
+  },
+  specialBadge: {
+    position: "absolute",
+    bottom: 4,
+    right: 4,
+    color: "#f5c518",
+    fontSize: 26,
+    lineHeight: 1,
+    textShadow: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000",
   },
   caption: {
     padding: "3px 4px",

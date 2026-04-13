@@ -7,6 +7,7 @@
  *   member        — { mode, include, exclude }  (member name as ID)
  *   category      — { mode, include, exclude }  (top_level_category_id)
  *   sourceOrigin  — { mode, include, exclude }  (source_origin_id)
+ *   cardType      — { mode, include, exclude }  ("special" | "regular")
  *   version       — { mode, include, exclude }  (version string)
  *   ownership     — { mode, include, exclude }  (ownership_status_id)
  *   backImage     — { mode, include, exclude }  ("has_back" | "no_back")
@@ -46,6 +47,7 @@ export default function PhotocardFilters({
     sectionActive(filters.member) ||
     sectionActive(filters.category) ||
     sectionActive(filters.sourceOrigin) ||
+    sectionActive(filters.cardType) ||
     sectionActive(filters.version) ||
     sectionActive(filters.ownership) ||
     sectionActive(filters.backImage);
@@ -95,6 +97,16 @@ export default function PhotocardFilters({
           selectedOnly
         />
       )}
+
+      <TriStateFilterSection
+        title="Card Type"
+        items={[
+          { id: "special", label: "★ Special" },
+          { id: "regular", label: "Regular" },
+        ]}
+        section={filters.cardType}
+        onChange={(s) => onSectionChange("cardType", s)}
+      />
 
       {versions.length > 0 && (
         <SearchableTriStateSection

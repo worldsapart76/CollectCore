@@ -108,6 +108,7 @@ export async function updatePhotocard(itemId, {
   sourceOriginId = null,
   version = null,
   memberIds,
+  isSpecial = false,
 }) {
   const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}`, {
     method: "PUT",
@@ -119,6 +120,7 @@ export async function updatePhotocard(itemId, {
       source_origin_id: sourceOriginId,
       version,
       member_ids: memberIds,
+      is_special: isSpecial,
     }),
   });
   return handleJsonResponse(res, "Failed to update photocard");
@@ -180,6 +182,7 @@ export async function ingestFront({
   sourceOriginId = null,
   version = null,
   memberIds,
+  isSpecial = false,
 }) {
   const res = await fetch(`${API}/ingest/front`, {
     method: "POST",
@@ -194,6 +197,7 @@ export async function ingestFront({
       source_origin_id: sourceOriginId,
       version,
       member_ids: memberIds,
+      is_special: isSpecial,
     }),
   });
   return handleJsonResponse(res, "Failed to ingest front image");
@@ -223,6 +227,7 @@ export async function ingestPair({
   sourceOriginId = null,
   version = null,
   memberIds,
+  isSpecial = false,
 }) {
   const res = await fetch(`${API}/ingest/pair`, {
     method: "POST",
@@ -238,6 +243,7 @@ export async function ingestPair({
       source_origin_id: sourceOriginId,
       version,
       member_ids: memberIds,
+      is_special: isSpecial,
     }),
   });
   return handleJsonResponse(res, "Failed to ingest pair");
@@ -630,6 +636,361 @@ export async function bulkDeleteVideoGames(itemIds) {
     body: JSON.stringify({ item_ids: itemIds }),
   });
   return handleJsonResponse(res, "Failed to bulk delete video games");
+}
+
+// --- Music ---
+
+export async function fetchMusicReleaseTypes() {
+  const res = await fetch(`${API}/music/release-types`);
+  return handleJsonResponse(res, "Failed to fetch music release types");
+}
+
+export async function fetchMusicFormatTypes() {
+  const res = await fetch(`${API}/music/format-types`);
+  return handleJsonResponse(res, "Failed to fetch music format types");
+}
+
+export async function fetchMusicGenres() {
+  const res = await fetch(`${API}/music/genres`);
+  return handleJsonResponse(res, "Failed to fetch music genres");
+}
+
+export async function searchMusicArtists(q) {
+  const params = q ? `?q=${encodeURIComponent(q)}` : "";
+  const res = await fetch(`${API}/music/artists${params}`);
+  return handleJsonResponse(res, "Failed to search music artists");
+}
+
+export async function listMusicReleases(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.release_type_id) qs.set("release_type_id", params.release_type_id);
+  if (params.ownership_status_id) qs.set("ownership_status_id", params.ownership_status_id);
+  const res = await fetch(`${API}/music?${qs}`);
+  return handleJsonResponse(res, "Failed to list music releases");
+}
+
+export async function getMusicRelease(itemId) {
+  const res = await fetch(`${API}/music/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to get music release");
+}
+
+export async function createMusicRelease(payload) {
+  const res = await fetch(`${API}/music`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to create music release");
+}
+
+export async function updateMusicRelease(itemId, payload) {
+  const res = await fetch(`${API}/music/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to update music release");
+}
+
+export async function deleteMusicRelease(itemId) {
+  const res = await fetch(`${API}/music/${encodeURIComponent(itemId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete music release");
+}
+
+export async function bulkUpdateMusic(itemIds, fields) {
+  const res = await fetch(`${API}/music/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  return handleJsonResponse(res, "Failed to bulk update music releases");
+}
+
+export async function bulkDeleteMusic(itemIds) {
+  const res = await fetch(`${API}/music/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete music releases");
+}
+
+export async function discogsSearchMusic(q) {
+  const params = new URLSearchParams({ q });
+  const res = await fetch(`${API}/music/discogs-search?${params}`);
+  return handleJsonResponse(res, "Discogs search failed");
+}
+
+export async function discogsFetchMaster(masterId) {
+  const res = await fetch(`${API}/music/discogs-master/${encodeURIComponent(masterId)}`);
+  return handleJsonResponse(res, "Failed to fetch Discogs master");
+}
+
+// --- Video ---
+
+export async function fetchVideoCategories() {
+  const res = await fetch(`${API}/video/categories`);
+  return handleJsonResponse(res, "Failed to fetch video categories");
+}
+
+export async function fetchVideoFormatTypes() {
+  const res = await fetch(`${API}/video/format-types`);
+  return handleJsonResponse(res, "Failed to fetch video format types");
+}
+
+export async function fetchVideoGenres() {
+  const res = await fetch(`${API}/video/genres`);
+  return handleJsonResponse(res, "Failed to fetch video genres");
+}
+
+export async function fetchVideoWatchStatuses() {
+  const res = await fetch(`${API}/video/watch-statuses`);
+  return handleJsonResponse(res, "Failed to fetch watch statuses");
+}
+
+export async function tmdbSearch(q, mediaType = "movie") {
+  const params = new URLSearchParams({ q, media_type: mediaType });
+  const res = await fetch(`${API}/video/tmdb-search?${params}`);
+  return handleJsonResponse(res, "TMDB search failed");
+}
+
+export async function tmdbDetail(tmdbId, mediaType = "movie") {
+  const params = new URLSearchParams({ media_type: mediaType });
+  const res = await fetch(`${API}/video/tmdb-detail/${encodeURIComponent(tmdbId)}?${params}`);
+  return handleJsonResponse(res, "Failed to fetch TMDB detail");
+}
+
+export async function listVideo(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.video_type_id) qs.set("video_type_id", params.video_type_id);
+  if (params.ownership_status_id) qs.set("ownership_status_id", params.ownership_status_id);
+  if (params.reading_status_id) qs.set("reading_status_id", params.reading_status_id);
+  const res = await fetch(`${API}/video?${qs}`);
+  return handleJsonResponse(res, "Failed to list video");
+}
+
+export async function getVideo(itemId) {
+  const res = await fetch(`${API}/video/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to get video");
+}
+
+export async function createVideo(payload) {
+  const res = await fetch(`${API}/video`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to create video");
+}
+
+export async function updateVideo(itemId, payload) {
+  const res = await fetch(`${API}/video/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to update video");
+}
+
+export async function deleteVideo(itemId) {
+  const res = await fetch(`${API}/video/${encodeURIComponent(itemId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete video");
+}
+
+export async function bulkUpdateVideo(itemIds, fields) {
+  const res = await fetch(`${API}/video/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  return handleJsonResponse(res, "Failed to bulk update video");
+}
+
+export async function bulkDeleteVideo(itemIds) {
+  const res = await fetch(`${API}/video/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete video");
+}
+
+// --- Board Games ---
+
+export async function fetchBoardgameCategories() {
+  const res = await fetch(`${API}/boardgames/categories`);
+  return handleJsonResponse(res, "Failed to fetch board game categories");
+}
+
+export async function fetchBoardgameDesigners(q) {
+  const url = q ? `${API}/boardgames/designers?q=${encodeURIComponent(q)}` : `${API}/boardgames/designers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch board game designers");
+}
+
+export async function fetchBoardgamePublishers(q) {
+  const url = q ? `${API}/boardgames/publishers?q=${encodeURIComponent(q)}` : `${API}/boardgames/publishers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch board game publishers");
+}
+
+export async function bggSearchGames(q) {
+  const res = await fetch(`${API}/boardgames/bgg-search?q=${encodeURIComponent(q)}`);
+  return handleJsonResponse(res, "Failed to search BGG");
+}
+
+export async function bggGetDetail(bggId) {
+  const res = await fetch(`${API}/boardgames/bgg-detail/${encodeURIComponent(bggId)}`);
+  return handleJsonResponse(res, "Failed to fetch BGG detail");
+}
+
+export async function listBoardgames() {
+  const res = await fetch(`${API}/boardgames`);
+  return handleJsonResponse(res, "Failed to fetch board games");
+}
+
+export async function getBoardgame(itemId) {
+  const res = await fetch(`${API}/boardgames/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to fetch board game");
+}
+
+export async function createBoardgame(data) {
+  const res = await fetch(`${API}/boardgames`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return handleJsonResponse(res, "Failed to create board game");
+}
+
+export async function updateBoardgame(itemId, data) {
+  const res = await fetch(`${API}/boardgames/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return handleJsonResponse(res, "Failed to update board game");
+}
+
+export async function deleteBoardgame(itemId) {
+  const res = await fetch(`${API}/boardgames/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+  return handleJsonResponse(res, "Failed to delete board game");
+}
+
+export async function bulkUpdateBoardgames(itemIds, fields) {
+  const res = await fetch(`${API}/boardgames/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds, fields }),
+  });
+  return handleJsonResponse(res, "Failed to bulk update board games");
+}
+
+export async function bulkDeleteBoardgames(itemIds) {
+  const res = await fetch(`${API}/boardgames/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete board games");
+}
+
+// --- TTRPG ---
+
+export async function fetchTtrpgSystems() {
+  const res = await fetch(`${API}/ttrpg/systems`);
+  return handleJsonResponse(res, "Failed to fetch TTRPG systems");
+}
+
+export async function fetchTtrpgSystemEditions(systemId) {
+  const url = systemId ? `${API}/ttrpg/system-editions?system_id=${systemId}` : `${API}/ttrpg/system-editions`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch TTRPG system editions");
+}
+
+export async function fetchTtrpgLines(systemId) {
+  const url = systemId ? `${API}/ttrpg/lines?system_id=${systemId}` : `${API}/ttrpg/lines`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch TTRPG lines");
+}
+
+export async function fetchTtrpgBookTypes() {
+  const res = await fetch(`${API}/ttrpg/book-types`);
+  return handleJsonResponse(res, "Failed to fetch TTRPG book types");
+}
+
+export async function fetchTtrpgFormatTypes() {
+  const res = await fetch(`${API}/ttrpg/format-types`);
+  return handleJsonResponse(res, "Failed to fetch TTRPG format types");
+}
+
+export async function fetchTtrpgPublishers(q) {
+  const url = q ? `${API}/ttrpg/publishers?q=${encodeURIComponent(q)}` : `${API}/ttrpg/publishers`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch TTRPG publishers");
+}
+
+export async function fetchTtrpgAuthors(q) {
+  const url = q ? `${API}/ttrpg/authors?q=${encodeURIComponent(q)}` : `${API}/ttrpg/authors`;
+  const res = await fetch(url);
+  return handleJsonResponse(res, "Failed to fetch TTRPG authors");
+}
+
+export async function listTtrpg() {
+  const res = await fetch(`${API}/ttrpg`);
+  return handleJsonResponse(res, "Failed to fetch TTRPG books");
+}
+
+export async function getTtrpg(itemId) {
+  const res = await fetch(`${API}/ttrpg/${encodeURIComponent(itemId)}`);
+  return handleJsonResponse(res, "Failed to fetch TTRPG book");
+}
+
+export async function createTtrpg(data) {
+  const res = await fetch(`${API}/ttrpg`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return handleJsonResponse(res, "Failed to create TTRPG book");
+}
+
+export async function updateTtrpg(itemId, data) {
+  const res = await fetch(`${API}/ttrpg/${encodeURIComponent(itemId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return handleJsonResponse(res, "Failed to update TTRPG book");
+}
+
+export async function deleteTtrpg(itemId) {
+  const res = await fetch(`${API}/ttrpg/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+  return handleJsonResponse(res, "Failed to delete TTRPG book");
+}
+
+export async function bulkUpdateTtrpg(payload) {
+  const res = await fetch(`${API}/ttrpg/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to bulk update TTRPG");
+}
+
+export async function bulkDeleteTtrpg(payload) {
+  const res = await fetch(`${API}/ttrpg/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, "Failed to bulk delete TTRPG");
 }
 
 // --- Export ---

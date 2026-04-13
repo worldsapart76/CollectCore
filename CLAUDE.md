@@ -159,6 +159,11 @@ These are intentionally not yet built. Do not implement without instruction:
 8. Future modules — see Future Modules section below (implement one at a time, recommended order: Video Games → Music → Video → Board Games → TTRPG)
 9. `lkup_book_read_statuses` rename to `lkup_consumption_statuses` — when Video module is built, this table gains video/game watch statuses; rename at that point
 10. External API integrations for deferred modules: Music (MusicBrainz/Discogs/Spotify TBD), Video Games (IGDB/RAWG TBD), TTRPG (TBD)
+11. Dark mode — needs full design revision; current implementation is not usable
+12. Distributed launcher — PowerShell window should be hidden on launch; add a "CollectCore is starting up…" popup (e.g., Windows Toast or a small splash) so the app doesn't appear unresponsive while backend initializes
+13. Photocard filter/input state persistence — when navigating between Inbox, Library, and Export tabs, the filter selections and form inputs should be preserved (currently reset on each navigation)
+14. Library pop-up modals — always offer an "Update image" option regardless of whether an image exists
+15. Board Games BGG search — BGG XML API requires an approved API key; search panel is built but non-functional until key is obtained and added to `.env` as `BGG_API_KEY`. The `/boardgames/bgg-search` and `/boardgames/bgg-detail/{id}` endpoints need to be updated to send the key once available.
 
 ---
 
@@ -258,10 +263,25 @@ complete hot-copy of the entire database, so any tables added by future
 modules are captured automatically. The images directory is also backed
 up wholesale.
 
-**Checklist item when building a new module:** Verify that any
-module-specific file assets stored outside `images/library/` are covered
-by the backup. If a new module stores files in a different directory,
-update `GET /admin/backup` to include that directory in the ZIP.
+**Checklist items when building a new module:**
+1. Add the module's route prefix to `PROXY_PATHS` in `frontend/vite.config.js`.
+   Omitting this causes all API calls to return HTML instead of JSON, producing:
+   `Unexpected token '<', "<!doctype "... is not valid JSON`
+2. Verify that any module-specific file assets stored outside `images/library/`
+   are covered by the backup. If a new module stores files in a different
+   directory, update `GET /admin/backup` to include that directory in the ZIP.
+
+---
+
+## Cloud Hosting Future Features
+
+Features deferred until CollectCore moves to cloud hosting. Do not implement
+in the local/desktop version.
+
+- **Collection sharing** — ability to share a specific collection (e.g. Graphic Novels) with
+  another user in read-only view. The viewer sees the shared collection alongside their own;
+  the shared collection does not override or merge with the viewer's own records for the same
+  module. Each user retains full independent ownership of their own data.
 
 ---
 

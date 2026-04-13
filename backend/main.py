@@ -25,6 +25,9 @@ if _env_file.exists():
 COMIC_VINE_API_KEY = os.environ.get("COMIC_VINE_API_KEY", "")
 GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "")
 RAWG_API_KEY = os.environ.get("RAWG_API_KEY", "")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+DISCOGS_CONSUMER_KEY = os.environ.get("DISCOGS_CONSUMER_KEY", "")
+DISCOGS_CONSUMER_SECRET = os.environ.get("DISCOGS_CONSUMER_SECRET", "")
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -109,6 +112,7 @@ def _photocard_row_to_dict(row):
         "members": list(dict.fromkeys(row[11].split(", "))) if row[11] else [],
         "front_image_path": row[12],
         "back_image_path": row[13],
+        "is_special": bool(row[14]),
     }
 
 
@@ -136,7 +140,8 @@ _PHOTOCARD_SELECT = """
             ''
         ) AS members,
         MAX(CASE WHEN a.attachment_type = 'front' THEN a.file_path END) AS front_image_path,
-        MAX(CASE WHEN a.attachment_type = 'back' THEN a.file_path END) AS back_image_path
+        MAX(CASE WHEN a.attachment_type = 'back' THEN a.file_path END) AS back_image_path,
+        p.is_special
     FROM tbl_items i
     JOIN tbl_photocard_details p
         ON i.item_id = p.item_id
@@ -165,7 +170,8 @@ _PHOTOCARD_GROUP_BY = """
         i.notes,
         p.source_origin_id,
         so.source_origin_name,
-        p.version
+        p.version,
+        p.is_special
 """
 
 
@@ -327,6 +333,7 @@ class PhotocardCreate(BaseModel):
     source_origin_id: Optional[int] = None
     version: Optional[str] = None
     member_ids: List[int]
+    is_special: bool = False
 
 
 class PhotocardUpdate(BaseModel):
@@ -336,6 +343,7 @@ class PhotocardUpdate(BaseModel):
     source_origin_id: Optional[int] = None
     version: Optional[str] = None
     member_ids: List[int]
+    is_special: bool = False
 
 
 class BulkUpdateFields(BaseModel):
@@ -346,6 +354,7 @@ class BulkUpdateFields(BaseModel):
     version: Optional[str] = None
     member_ids: Optional[List[int]] = None
     top_level_category_id: Optional[int] = None
+    is_special: Optional[bool] = None
 
 
 class BulkUpdatePayload(BaseModel):
@@ -500,13 +509,15 @@ def create_photocard(payload: PhotocardCreate):
                     item_id,
                     group_id,
                     source_origin_id,
-                    version
+                    version,
+                    is_special
                 )
                 VALUES (
                     :item_id,
                     :group_id,
                     :source_origin_id,
-                    :version
+                    :version,
+                    :is_special
                 )
             """),
             {
@@ -514,6 +525,7 @@ def create_photocard(payload: PhotocardCreate):
                 "group_id": payload.group_id,
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
+                "is_special": 1 if payload.is_special else 0,
             },
         )
 
@@ -569,13 +581,15 @@ def update_photocard(item_id: int, payload: PhotocardUpdate):
             text("""
                 UPDATE tbl_photocard_details
                 SET source_origin_id = :source_origin_id,
-                    version = :version
+                    version = :version,
+                    is_special = :is_special
                 WHERE item_id = :item_id
             """),
             {
                 "item_id": item_id,
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
+                "is_special": 1 if payload.is_special else 0,
             },
         )
 
@@ -705,11 +719,15 @@ def bulk_update_photocards(payload: BulkUpdatePayload):
 
         if f.source_origin_id is not None:
             details_updates.append("source_origin_id = :source_origin_id")
-            details_params["source_origin_id"] = f.source_origin_id
+            details_params["source_origin_id"] = f.source_origin_id if f.source_origin_id > 0 else None
 
         if f.version is not None:
             details_updates.append("version = :version")
             details_params["version"] = f.version
+
+        if f.is_special is not None:
+            details_updates.append("is_special = :is_special")
+            details_params["is_special"] = 1 if f.is_special else 0
 
         if details_updates:
             for item_id in payload.item_ids:
@@ -1837,6 +1855,7 @@ def bulk_delete_books(payload: BulkDeletePayload):
 
 GN_COLLECTION_TYPE_ID = _resolve_collection_type_id("graphicnovels", 3)
 VIDEOGAMES_COLLECTION_TYPE_ID = _resolve_collection_type_id("videogames", 4)
+MUSIC_COLLECTION_TYPE_ID = _resolve_collection_type_id("music", 5)
 
 
 # --- Graphic Novels Pydantic models ---
@@ -3924,6 +3943,2498 @@ def bulk_delete_videogames(payload: BulkDeletePayload):
         db.close()
 
 
+# ---------- Music ----------
+
+# --- Music Pydantic models ---
+
+class MusicSongEntry(BaseModel):
+    song_id: Optional[int] = None  # present on update
+    title: str
+    duration_seconds: Optional[int] = None
+    track_number: Optional[int] = None
+    disc_number: int = 1
+
+
+class MusicEditionEntry(BaseModel):
+    edition_id: Optional[int] = None  # present on update
+    format_type_id: Optional[int] = None
+    version_name: Optional[str] = None
+    label: Optional[str] = None
+    catalog_number: Optional[str] = None
+    barcode: Optional[str] = None
+    notes: Optional[str] = None
+    ownership_status_id: Optional[int] = None
+
+
+class MusicReleaseCreate(BaseModel):
+    title: str
+    top_level_category_id: int  # release type (Album, EP, Single, etc.)
+    ownership_status_id: int
+    release_date: Optional[str] = None
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    notes: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+    artist_names: List[str] = []
+    genres: List[dict] = []
+    songs: List[MusicSongEntry] = []
+    editions: List[MusicEditionEntry] = []
+
+
+class MusicReleaseUpdate(BaseModel):
+    title: Optional[str] = None
+    top_level_category_id: Optional[int] = None
+    ownership_status_id: Optional[int] = None
+    release_date: Optional[str] = None
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    notes: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+    artist_names: Optional[List[str]] = None
+    genres: Optional[List[dict]] = None
+    songs: Optional[List[MusicSongEntry]] = None
+    editions: Optional[List[MusicEditionEntry]] = None
+
+
+class MusicBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+
+
+class MusicBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: MusicBulkUpdateFields
+
+
+# --- Music helpers ---
+
+def _make_title_sort_music(title: str) -> str:
+    for prefix in ("The ", "A ", "An "):
+        if title.startswith(prefix):
+            return title[len(prefix):] + ", " + prefix.strip()
+    return title
+
+
+def _upsert_music_artist(db, name: str) -> int:
+    name = name.strip()
+    row = db.execute(
+        text("SELECT artist_id FROM lkup_music_artists WHERE artist_name = :name"),
+        {"name": name},
+    ).fetchone()
+    if row:
+        return row[0]
+    result = db.execute(
+        text("INSERT INTO lkup_music_artists (artist_name, artist_sort) VALUES (:name, :sort)"),
+        {"name": name, "sort": _make_title_sort_music(name)},
+    )
+    return result.lastrowid
+
+
+def _insert_music_relationships(db, item_id: int, payload):
+    # Artists
+    for order, name in enumerate(payload.artist_names or []):
+        name = name.strip()
+        if not name:
+            continue
+        artist_id = _upsert_music_artist(db, name)
+        db.execute(
+            text("INSERT OR IGNORE INTO xref_music_release_artists (item_id, artist_id, artist_order) VALUES (:iid, :aid, :ord)"),
+            {"iid": item_id, "aid": artist_id, "ord": order},
+        )
+
+    # Genres
+    for g in (payload.genres or []):
+        top_id = g.get("top_genre_id")
+        sub_id = g.get("sub_genre_id")
+        if not top_id:
+            continue
+        db.execute(
+            text("INSERT OR IGNORE INTO xref_music_release_genres (item_id, top_genre_id, sub_genre_id) VALUES (:iid, :tg, :sg)"),
+            {"iid": item_id, "tg": top_id, "sg": sub_id},
+        )
+
+
+def _insert_music_songs(db, item_id: int, songs: list):
+    for s in songs:
+        db.execute(
+            text("""
+                INSERT INTO tbl_music_songs (item_id, title, duration_seconds, track_number, disc_number)
+                VALUES (:iid, :title, :dur, :track, :disc)
+            """),
+            {
+                "iid": item_id,
+                "title": s.title.strip(),
+                "dur": s.duration_seconds,
+                "track": s.track_number,
+                "disc": s.disc_number,
+            },
+        )
+
+
+def _insert_music_editions(db, item_id: int, editions: list):
+    for e in editions:
+        db.execute(
+            text("""
+                INSERT INTO tbl_music_editions
+                    (item_id, format_type_id, version_name, label, catalog_number, barcode, notes, ownership_status_id)
+                VALUES (:iid, :fmt, :ver, :lbl, :cat, :bar, :notes, :own)
+            """),
+            {
+                "iid": item_id,
+                "fmt": e.format_type_id,
+                "ver": e.version_name or None,
+                "lbl": e.label or None,
+                "cat": e.catalog_number or None,
+                "bar": e.barcode or None,
+                "notes": e.notes or None,
+                "own": e.ownership_status_id,
+            },
+        )
+
+
+def _get_music_detail(db, item_id: int):
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.ownership_status_id,
+                os.status_name AS ownership_status,
+                i.top_level_category_id,
+                tlc.category_name AS release_type,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                rd.title,
+                rd.title_sort,
+                rd.description,
+                rd.release_date,
+                rd.cover_image_url,
+                rd.api_source,
+                rd.external_work_id
+            FROM tbl_items i
+            JOIN tbl_music_release_details rd ON i.item_id = rd.item_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": MUSIC_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    artists = db.execute(
+        text("""
+            SELECT a.artist_id, a.artist_name
+            FROM xref_music_release_artists xa
+            JOIN lkup_music_artists a ON xa.artist_id = a.artist_id
+            WHERE xa.item_id = :item_id
+            ORDER BY xa.artist_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    genres = db.execute(
+        text("""
+            SELECT xg.xref_id, xg.top_genre_id, tg.genre_name, xg.sub_genre_id, sg.sub_genre_name
+            FROM xref_music_release_genres xg
+            JOIN lkup_music_top_genres tg ON xg.top_genre_id = tg.top_genre_id
+            LEFT JOIN lkup_music_sub_genres sg ON xg.sub_genre_id = sg.sub_genre_id
+            WHERE xg.item_id = :item_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    songs = db.execute(
+        text("""
+            SELECT song_id, title, duration_seconds, track_number, disc_number
+            FROM tbl_music_songs
+            WHERE item_id = :item_id
+            ORDER BY disc_number, track_number NULLS LAST, song_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    editions = db.execute(
+        text("""
+            SELECT e.edition_id, e.format_type_id, ft.format_name, e.version_name,
+                   e.label, e.catalog_number, e.barcode, e.notes, e.ownership_status_id,
+                   os.status_name AS ownership_status
+            FROM tbl_music_editions e
+            LEFT JOIN lkup_music_format_types ft ON e.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_ownership_statuses os ON e.ownership_status_id = os.ownership_status_id
+            WHERE e.item_id = :item_id
+            ORDER BY e.edition_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "ownership_status_id": row[1],
+        "ownership_status": row[2],
+        "top_level_category_id": row[3],
+        "release_type": row[4],
+        "notes": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
+        "title": row[8],
+        "title_sort": row[9],
+        "description": row[10],
+        "release_date": row[11],
+        "cover_image_url": row[12],
+        "api_source": row[13],
+        "external_work_id": row[14],
+        "artists": [{"artist_id": a[0], "artist_name": a[1]} for a in artists],
+        "artist_names": [a[1] for a in artists],
+        "genres": [
+            {
+                "top_genre_id": g[1],
+                "genre_name": g[2],
+                "sub_genre_id": g[3],
+                "sub_genre_name": g[4],
+            }
+            for g in genres
+        ],
+        "genre_labels": [
+            g[2] + (" — " + g[4] if g[4] else "") for g in genres
+        ],
+        "songs": [
+            {
+                "song_id": s[0],
+                "title": s[1],
+                "duration_seconds": s[2],
+                "track_number": s[3],
+                "disc_number": s[4],
+            }
+            for s in songs
+        ],
+        "editions": [
+            {
+                "edition_id": e[0],
+                "format_type_id": e[1],
+                "format_name": e[2],
+                "version_name": e[3],
+                "label": e[4],
+                "catalog_number": e[5],
+                "barcode": e[6],
+                "notes": e[7],
+                "ownership_status_id": e[8],
+                "ownership_status": e[9],
+            }
+            for e in editions
+        ],
+    }
+
+
+# --- Music lookup endpoints ---
+
+@app.get("/music/release-types")
+def get_music_release_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT tlc.top_level_category_id, tlc.category_name
+                FROM lkup_top_level_categories tlc
+                JOIN lkup_collection_types lct ON tlc.collection_type_id = lct.collection_type_id
+                WHERE lct.collection_type_code = 'music'
+                ORDER BY tlc.sort_order
+            """)
+        ).fetchall()
+        return [{"top_level_category_id": r[0], "category_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/music/format-types")
+def get_music_format_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("SELECT format_type_id, format_name FROM lkup_music_format_types WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        return [{"format_type_id": r[0], "format_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/music/genres")
+def get_music_genres():
+    db = SessionLocal()
+    try:
+        top = db.execute(
+            text("SELECT top_genre_id, genre_name FROM lkup_music_top_genres WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        sub = db.execute(
+            text("SELECT sub_genre_id, top_genre_id, sub_genre_name FROM lkup_music_sub_genres WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        sub_map = {}
+        for s in sub:
+            sub_map.setdefault(s[1], []).append({"sub_genre_id": s[0], "sub_genre_name": s[2]})
+        return [
+            {"top_genre_id": t[0], "genre_name": t[1], "sub_genres": sub_map.get(t[0], [])}
+            for t in top
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/music/artists")
+def search_music_artists(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT artist_id, artist_name FROM lkup_music_artists WHERE artist_name LIKE :q ORDER BY artist_sort LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text("SELECT artist_id, artist_name FROM lkup_music_artists ORDER BY artist_sort")
+            ).fetchall()
+        return [{"artist_id": r[0], "artist_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+# --- Discogs API helpers ---
+
+def _discogs_request(url: str) -> dict:
+    headers = {
+        "User-Agent": "CollectCore/1.0",
+        "Authorization": f"Discogs key={DISCOGS_CONSUMER_KEY}, secret={DISCOGS_CONSUMER_SECRET}",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _parse_discogs_position(pos: str):
+    """Return (track_number, disc_number) from a Discogs position string."""
+    if not pos:
+        return None, 1
+    pos = pos.strip()
+    # Multi-disc CD: "1-1", "2-3"
+    m = re.match(r'^(\d+)-(\d+)$', pos)
+    if m:
+        return int(m.group(2)), int(m.group(1))
+    # Vinyl: "A1", "B2" — each letter is a disc side
+    m = re.match(r'^([A-Za-z])(\d+)$', pos)
+    if m:
+        disc = ord(m.group(1).upper()) - ord('A') + 1
+        return int(m.group(2)), disc
+    # Simple number
+    m = re.match(r'^(\d+)$', pos)
+    if m:
+        return int(m.group(1)), 1
+    return None, 1
+
+
+def _parse_discogs_duration(dur: str):
+    """Parse Discogs 'm:ss' duration string to seconds."""
+    if not dur:
+        return None
+    m = re.match(r'^(\d+):(\d{2})$', dur.strip())
+    if m:
+        return int(m.group(1)) * 60 + int(m.group(2))
+    return None
+
+
+def _clean_discogs_artist(name: str) -> str:
+    """Strip Discogs disambiguation suffix like ' (2)'."""
+    return re.sub(r'\s*\(\d+\)\s*$', '', name).strip()
+
+
+# --- Discogs lookup endpoints ---
+
+@app.get("/music/discogs-search")
+def discogs_search_music(q: str):
+    """Search Discogs master releases. Returns lightweight list for release picker."""
+    if not q or not q.strip():
+        return []
+    if not DISCOGS_CONSUMER_KEY:
+        raise HTTPException(status_code=503, detail="Discogs API not configured")
+    encoded = urllib.parse.quote(q.strip())
+    url = f"https://api.discogs.com/database/search?q={encoded}&type=master&per_page=15"
+    try:
+        data = _discogs_request(url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discogs search failed: {exc}")
+
+    results = []
+    for r in data.get("results", []):
+        raw_title = r.get("title", "")
+        # Discogs formats master titles as "Artist - Album"; split if present
+        if " - " in raw_title:
+            parts = raw_title.split(" - ", 1)
+            artist_guess = [parts[0].strip()]
+            title_clean = parts[1].strip()
+        else:
+            artist_guess = []
+            title_clean = raw_title
+
+        results.append({
+            "discogs_id": r.get("master_id") or r.get("id"),
+            "title": title_clean,
+            "artists": artist_guess,
+            "year": r.get("year"),
+            "thumb_url": r.get("thumb"),
+            "cover_image_url": r.get("cover_image"),
+        })
+    return results
+
+
+@app.get("/music/discogs-master/{master_id}")
+def discogs_master_detail(master_id: int):
+    """Fetch full detail for a Discogs master release (title, artists, tracklist, cover)."""
+    if not DISCOGS_CONSUMER_KEY:
+        raise HTTPException(status_code=503, detail="Discogs API not configured")
+    try:
+        data = _discogs_request(f"https://api.discogs.com/masters/{master_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discogs fetch failed: {exc}")
+
+    # Artists — skip "Various" and clean disambiguation suffixes
+    artists = [
+        _clean_discogs_artist(a.get("name", ""))
+        for a in data.get("artists", [])
+        if a.get("name") and a.get("name") not in ("Various", "Various Artists")
+    ]
+
+    # Cover image — prefer primary, fall back to first
+    cover = None
+    images = data.get("images", [])
+    primary = next((img for img in images if img.get("type") == "primary"), None)
+    if primary:
+        cover = primary.get("uri") or primary.get("uri150")
+    elif images:
+        cover = images[0].get("uri") or images[0].get("uri150")
+
+    # Tracklist — skip heading entries
+    tracklist = []
+    for t in data.get("tracklist", []):
+        if t.get("type_") == "heading":
+            continue
+        track_num, disc_num = _parse_discogs_position(t.get("position", ""))
+        tracklist.append({
+            "title": t.get("title", ""),
+            "track_number": track_num,
+            "disc_number": disc_num,
+            "duration_seconds": _parse_discogs_duration(t.get("duration")),
+        })
+
+    return {
+        "discogs_id": data.get("id"),
+        "title": data.get("title", ""),
+        "artists": artists,
+        "year": data.get("year"),
+        "genres": data.get("genres", []),
+        "styles": data.get("styles", []),
+        "cover_image_url": cover,
+        "tracklist": tracklist,
+    }
+
+
+# --- Music CRUD endpoints ---
+
+@app.get("/music")
+def list_music(
+    search: Optional[str] = None,
+    release_type_id: Optional[int] = None,
+    ownership_status_id: Optional[int] = None,
+):
+    db = SessionLocal()
+    try:
+        where = ["i.collection_type_id = :ct"]
+        params: dict = {"ct": MUSIC_COLLECTION_TYPE_ID}
+
+        if search:
+            where.append("rd.title LIKE :search")
+            params["search"] = f"%{search}%"
+        if release_type_id is not None:
+            where.append("i.top_level_category_id = :rt")
+            params["rt"] = release_type_id
+        if ownership_status_id is not None:
+            where.append("i.ownership_status_id = :own")
+            params["own"] = ownership_status_id
+
+        where_clause = " AND ".join(where)
+
+        rows = db.execute(
+            text(f"""
+                SELECT
+                    i.item_id,
+                    i.ownership_status_id,
+                    os.status_name AS ownership_status,
+                    i.top_level_category_id,
+                    tlc.category_name AS release_type,
+                    i.notes,
+                    rd.title,
+                    rd.title_sort,
+                    rd.release_date,
+                    rd.cover_image_url,
+                    (
+                        SELECT GROUP_CONCAT(a.artist_name, ', ')
+                        FROM xref_music_release_artists xa
+                        JOIN lkup_music_artists a ON xa.artist_id = a.artist_id
+                        WHERE xa.item_id = i.item_id
+                        ORDER BY xa.artist_order
+                    ) AS artists,
+                    (
+                        SELECT GROUP_CONCAT(ft.format_name, ', ')
+                        FROM tbl_music_editions e
+                        LEFT JOIN lkup_music_format_types ft ON e.format_type_id = ft.format_type_id
+                        WHERE e.item_id = i.item_id
+                    ) AS formats,
+                    (
+                        SELECT GROUP_CONCAT(tg.genre_name, ', ')
+                        FROM xref_music_release_genres xg
+                        JOIN lkup_music_top_genres tg ON xg.top_genre_id = tg.top_genre_id
+                        WHERE xg.item_id = i.item_id
+                    ) AS genres,
+                    (
+                        SELECT GROUP_CONCAT(
+                            CASE
+                                WHEN e.version_name IS NOT NULL AND e.version_name != ''
+                                THEN e.version_name || ' (' || COALESCE(ft.format_name, '?') || ', ' || COALESCE(os.status_name, '?') || ')'
+                                ELSE '(' || COALESCE(ft.format_name, '?') || ', ' || COALESCE(os.status_name, '?') || ')'
+                            END,
+                            ', '
+                        )
+                        FROM tbl_music_editions e
+                        LEFT JOIN lkup_music_format_types ft ON e.format_type_id = ft.format_type_id
+                        LEFT JOIN lkup_ownership_statuses os ON e.ownership_status_id = os.ownership_status_id
+                        WHERE e.item_id = i.item_id
+                    ) AS editions_summary
+                FROM tbl_items i
+                JOIN tbl_music_release_details rd ON i.item_id = rd.item_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
+                WHERE {where_clause}
+                ORDER BY rd.title_sort, rd.title
+            """),
+            params,
+        ).fetchall()
+
+        return [
+            {
+                "item_id": r[0],
+                "ownership_status_id": r[1],
+                "ownership_status": r[2],
+                "top_level_category_id": r[3],
+                "release_type": r[4],
+                "notes": r[5],
+                "title": r[6],
+                "title_sort": r[7],
+                "release_date": r[8],
+                "cover_image_url": r[9],
+                "artists": r[10].split(", ") if r[10] else [],
+                "formats": list(dict.fromkeys(r[11].split(", "))) if r[11] else [],
+                "genres": r[12].split(", ") if r[12] else [],
+                "editions_summary": r[13] or "",
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/music/{item_id}")
+def get_music_release(item_id: int):
+    db = SessionLocal()
+    try:
+        detail = _get_music_detail(db, item_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Music release not found.")
+        return detail
+    finally:
+        db.close()
+
+
+@app.post("/music")
+def create_music_release(payload: MusicReleaseCreate):
+    db = SessionLocal()
+    try:
+        title_sort = _make_title_sort_music(payload.title)
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
+                VALUES (:ct, :tlc, :own, :notes)
+            """),
+            {
+                "ct": MUSIC_COLLECTION_TYPE_ID,
+                "tlc": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        )
+        item_id = item_result.lastrowid
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_music_release_details
+                    (item_id, title, title_sort, description, release_date, cover_image_url, api_source, external_work_id)
+                VALUES (:iid, :title, :sort, :desc, :date, :cover, :api_src, :ext_id)
+            """),
+            {
+                "iid": item_id,
+                "title": payload.title,
+                "sort": title_sort,
+                "desc": payload.description,
+                "date": payload.release_date,
+                "cover": payload.cover_image_url,
+                "api_src": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        _insert_music_relationships(db, item_id, payload)
+        _insert_music_songs(db, item_id, payload.songs)
+        _insert_music_editions(db, item_id, payload.editions)
+
+        db.commit()
+        release = _get_music_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "release": release}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/music/{item_id}")
+def update_music_release(item_id: int, payload: MusicReleaseUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": MUSIC_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Music release not found.")
+
+        # Update tbl_items
+        item_updates = []
+        item_params: dict = {"id": item_id}
+        if payload.top_level_category_id is not None:
+            item_updates.append("top_level_category_id = :tlc")
+            item_params["tlc"] = payload.top_level_category_id
+        if payload.ownership_status_id is not None:
+            item_updates.append("ownership_status_id = :own")
+            item_params["own"] = payload.ownership_status_id
+        if payload.notes is not None:
+            item_updates.append("notes = :notes")
+            item_params["notes"] = payload.notes
+        if item_updates:
+            item_updates.append("updated_at = CURRENT_TIMESTAMP")
+            db.execute(
+                text(f"UPDATE tbl_items SET {', '.join(item_updates)} WHERE item_id = :id"),
+                item_params,
+            )
+
+        # Update release details
+        detail_updates = []
+        detail_params: dict = {"id": item_id}
+        if payload.title is not None:
+            detail_updates.append("title = :title")
+            detail_updates.append("title_sort = :sort")
+            detail_params["title"] = payload.title
+            detail_params["sort"] = _make_title_sort_music(payload.title)
+        if payload.description is not None:
+            detail_updates.append("description = :desc")
+            detail_params["desc"] = payload.description
+        if payload.release_date is not None:
+            detail_updates.append("release_date = :date")
+            detail_params["date"] = payload.release_date
+        if payload.cover_image_url is not None:
+            detail_updates.append("cover_image_url = :cover")
+            detail_params["cover"] = payload.cover_image_url
+        if payload.api_source is not None:
+            detail_updates.append("api_source = :api_src")
+            detail_params["api_src"] = payload.api_source
+        if payload.external_work_id is not None:
+            detail_updates.append("external_work_id = :ext_id")
+            detail_params["ext_id"] = payload.external_work_id
+        if detail_updates:
+            db.execute(
+                text(f"UPDATE tbl_music_release_details SET {', '.join(detail_updates)} WHERE item_id = :id"),
+                detail_params,
+            )
+
+        # Replace relationships
+        if payload.artist_names is not None:
+            db.execute(text("DELETE FROM xref_music_release_artists WHERE item_id = :id"), {"id": item_id})
+            for order, name in enumerate(payload.artist_names):
+                name = name.strip()
+                if not name:
+                    continue
+                artist_id = _upsert_music_artist(db, name)
+                db.execute(
+                    text("INSERT OR IGNORE INTO xref_music_release_artists (item_id, artist_id, artist_order) VALUES (:iid, :aid, :ord)"),
+                    {"iid": item_id, "aid": artist_id, "ord": order},
+                )
+
+        if payload.genres is not None:
+            db.execute(text("DELETE FROM xref_music_release_genres WHERE item_id = :id"), {"id": item_id})
+            for g in payload.genres:
+                top_id = g.get("top_genre_id")
+                sub_id = g.get("sub_genre_id")
+                if not top_id:
+                    continue
+                db.execute(
+                    text("INSERT OR IGNORE INTO xref_music_release_genres (item_id, top_genre_id, sub_genre_id) VALUES (:iid, :tg, :sg)"),
+                    {"iid": item_id, "tg": top_id, "sg": sub_id},
+                )
+
+        if payload.songs is not None:
+            db.execute(text("DELETE FROM tbl_music_songs WHERE item_id = :id"), {"id": item_id})
+            _insert_music_songs(db, item_id, payload.songs)
+
+        if payload.editions is not None:
+            db.execute(text("DELETE FROM tbl_music_editions WHERE item_id = :id"), {"id": item_id})
+            _insert_music_editions(db, item_id, payload.editions)
+
+        db.commit()
+        release = _get_music_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "release": release}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/music/{item_id}")
+def delete_music_release(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": MUSIC_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Music release not found.")
+
+        db.execute(text("DELETE FROM xref_music_release_artists WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_music_release_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_music_songs WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_music_editions WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_music_release_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": item_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/music/bulk")
+def bulk_update_music(payload: MusicBulkUpdatePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": MUSIC_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+            updates = []
+            params = {"id": item_id}
+            if payload.fields.ownership_status_id is not None:
+                updates.append("ownership_status_id = :own")
+                params["own"] = payload.fields.ownership_status_id
+            if payload.fields.top_level_category_id is not None:
+                updates.append("top_level_category_id = :tlc")
+                params["tlc"] = payload.fields.top_level_category_id
+
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :id"),
+                    params,
+                )
+
+        db.commit()
+        return {"updated": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/music/bulk-delete")
+def bulk_delete_music(payload: BulkDeletePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": MUSIC_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_music_release_artists WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_music_release_genres WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_music_songs WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_music_editions WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_music_release_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ---------- Video module ----------
+
+VIDEO_COLLECTION_TYPE_ID = _resolve_collection_type_id("video", 6)
+
+# Category names that use seasons sub-table (vs copies)
+_VIDEO_SEASONS_CATEGORIES = {"TV Series"}
+
+
+class VideoCopyEntry(BaseModel):
+    copy_id: Optional[int] = None
+    format_type_id: Optional[int] = None
+    ownership_status_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class VideoSeasonEntry(BaseModel):
+    season_id: Optional[int] = None
+    season_number: int
+    episode_count: Optional[int] = None
+    format_type_id: Optional[int] = None
+    ownership_status_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class VideoCreate(BaseModel):
+    title: str
+    top_level_category_id: int  # Movie, TV Series, Miniseries, Concert/Live
+    ownership_status_id: int
+    reading_status_id: Optional[int] = None  # watch status
+    release_date: Optional[str] = None
+    runtime_minutes: Optional[int] = None
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    notes: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None  # TMDB ID
+    director_names: List[str] = []
+    cast_names: List[str] = []
+    genres: List[dict] = []
+    copies: List[VideoCopyEntry] = []    # for Movie/Miniseries/Concert
+    seasons: List[VideoSeasonEntry] = []  # for TV Series
+
+
+class VideoUpdate(BaseModel):
+    title: Optional[str] = None
+    top_level_category_id: Optional[int] = None
+    ownership_status_id: Optional[int] = None
+    reading_status_id: Optional[int] = None
+    release_date: Optional[str] = None
+    runtime_minutes: Optional[int] = None
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    notes: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+    director_names: Optional[List[str]] = None
+    cast_names: Optional[List[str]] = None
+    genres: Optional[List[dict]] = None
+    copies: Optional[List[VideoCopyEntry]] = None
+    seasons: Optional[List[VideoSeasonEntry]] = None
+
+
+class VideoBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    reading_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+
+
+class VideoBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: VideoBulkUpdateFields
+
+
+# --- Video helpers ---
+
+def _make_title_sort_video(title: str) -> str:
+    for prefix in ("The ", "A ", "An "):
+        if title.startswith(prefix):
+            return title[len(prefix):] + ", " + prefix.strip()
+    return title
+
+
+def _upsert_video_director(db, name: str) -> int:
+    name = name.strip()
+    row = db.execute(
+        text("SELECT director_id FROM lkup_video_directors WHERE director_name = :name"),
+        {"name": name},
+    ).fetchone()
+    if row:
+        return row[0]
+    result = db.execute(
+        text("INSERT INTO lkup_video_directors (director_name) VALUES (:name)"),
+        {"name": name},
+    )
+    return result.lastrowid
+
+
+def _upsert_video_cast_member(db, name: str) -> int:
+    name = name.strip()
+    row = db.execute(
+        text("SELECT cast_id FROM lkup_video_cast WHERE cast_name = :name"),
+        {"name": name},
+    ).fetchone()
+    if row:
+        return row[0]
+    result = db.execute(
+        text("INSERT INTO lkup_video_cast (cast_name) VALUES (:name)"),
+        {"name": name},
+    )
+    return result.lastrowid
+
+
+def _insert_video_relationships(db, item_id: int, payload):
+    # Directors
+    for order, name in enumerate(payload.director_names or []):
+        name = name.strip()
+        if not name:
+            continue
+        dir_id = _upsert_video_director(db, name)
+        db.execute(
+            text("INSERT OR IGNORE INTO xref_video_directors (item_id, director_id, director_order) VALUES (:iid, :did, :ord)"),
+            {"iid": item_id, "did": dir_id, "ord": order},
+        )
+
+    # Cast
+    for order, name in enumerate(payload.cast_names or []):
+        name = name.strip()
+        if not name:
+            continue
+        cast_id = _upsert_video_cast_member(db, name)
+        db.execute(
+            text("INSERT OR IGNORE INTO xref_video_cast (item_id, cast_id, cast_order) VALUES (:iid, :cid, :ord)"),
+            {"iid": item_id, "cid": cast_id, "ord": order},
+        )
+
+    # Genres
+    for g in (payload.genres or []):
+        top_id = g.get("top_genre_id")
+        sub_id = g.get("sub_genre_id")
+        if not top_id:
+            continue
+        db.execute(
+            text("INSERT OR IGNORE INTO xref_video_genres (item_id, top_genre_id, sub_genre_id) VALUES (:iid, :tg, :sg)"),
+            {"iid": item_id, "tg": top_id, "sg": sub_id},
+        )
+
+
+def _insert_video_copies(db, item_id: int, copies: list):
+    for c in copies:
+        db.execute(
+            text("""
+                INSERT INTO tbl_video_copies (item_id, format_type_id, ownership_status_id, notes)
+                VALUES (:iid, :fmt, :own, :notes)
+            """),
+            {
+                "iid": item_id,
+                "fmt": c.format_type_id,
+                "own": c.ownership_status_id,
+                "notes": c.notes or None,
+            },
+        )
+
+
+def _insert_video_seasons(db, item_id: int, seasons: list):
+    for s in seasons:
+        db.execute(
+            text("""
+                INSERT INTO tbl_video_seasons
+                    (item_id, season_number, episode_count, format_type_id, ownership_status_id, notes)
+                VALUES (:iid, :num, :eps, :fmt, :own, :notes)
+            """),
+            {
+                "iid": item_id,
+                "num": s.season_number,
+                "eps": s.episode_count,
+                "fmt": s.format_type_id,
+                "own": s.ownership_status_id,
+                "notes": s.notes or None,
+            },
+        )
+
+
+def _get_video_detail(db, item_id: int):
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.ownership_status_id,
+                os.status_name AS ownership_status,
+                i.top_level_category_id,
+                tlc.category_name AS video_type,
+                i.reading_status_id,
+                rs.status_name AS watch_status,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                vd.title,
+                vd.title_sort,
+                vd.description,
+                vd.release_date,
+                vd.runtime_minutes,
+                vd.cover_image_url,
+                vd.api_source,
+                vd.external_work_id
+            FROM tbl_items i
+            JOIN tbl_video_details vd ON i.item_id = vd.item_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
+            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    directors = db.execute(
+        text("""
+            SELECT d.director_id, d.director_name
+            FROM xref_video_directors xd
+            JOIN lkup_video_directors d ON xd.director_id = d.director_id
+            WHERE xd.item_id = :item_id
+            ORDER BY xd.director_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    cast = db.execute(
+        text("""
+            SELECT c.cast_id, c.cast_name
+            FROM xref_video_cast xc
+            JOIN lkup_video_cast c ON xc.cast_id = c.cast_id
+            WHERE xc.item_id = :item_id
+            ORDER BY xc.cast_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    genres = db.execute(
+        text("""
+            SELECT xg.xref_id, xg.top_genre_id, tg.genre_name, xg.sub_genre_id, sg.sub_genre_name
+            FROM xref_video_genres xg
+            JOIN lkup_video_top_genres tg ON xg.top_genre_id = tg.top_genre_id
+            LEFT JOIN lkup_video_sub_genres sg ON xg.sub_genre_id = sg.sub_genre_id
+            WHERE xg.item_id = :item_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    copies = db.execute(
+        text("""
+            SELECT c.copy_id, c.format_type_id, ft.format_name, c.ownership_status_id,
+                   os.status_name AS ownership_status, c.notes
+            FROM tbl_video_copies c
+            LEFT JOIN lkup_video_format_types ft ON c.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_ownership_statuses os ON c.ownership_status_id = os.ownership_status_id
+            WHERE c.item_id = :item_id
+            ORDER BY c.copy_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    seasons = db.execute(
+        text("""
+            SELECT s.season_id, s.season_number, s.episode_count, s.format_type_id,
+                   ft.format_name, s.ownership_status_id, os.status_name AS ownership_status, s.notes
+            FROM tbl_video_seasons s
+            LEFT JOIN lkup_video_format_types ft ON s.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_ownership_statuses os ON s.ownership_status_id = os.ownership_status_id
+            WHERE s.item_id = :item_id
+            ORDER BY s.season_number
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "ownership_status_id": row[1],
+        "ownership_status": row[2],
+        "top_level_category_id": row[3],
+        "video_type": row[4],
+        "reading_status_id": row[5],
+        "watch_status": row[6],
+        "notes": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
+        "title": row[10],
+        "title_sort": row[11],
+        "description": row[12],
+        "release_date": row[13],
+        "runtime_minutes": row[14],
+        "cover_image_url": row[15],
+        "api_source": row[16],
+        "external_work_id": row[17],
+        "director_names": [d[1] for d in directors],
+        "cast_names": [c[1] for c in cast],
+        "genres": [
+            {
+                "top_genre_id": g[1],
+                "genre_name": g[2],
+                "sub_genre_id": g[3],
+                "sub_genre_name": g[4],
+            }
+            for g in genres
+        ],
+        "copies": [
+            {
+                "copy_id": c[0],
+                "format_type_id": c[1],
+                "format_name": c[2],
+                "ownership_status_id": c[3],
+                "ownership_status": c[4],
+                "notes": c[5],
+            }
+            for c in copies
+        ],
+        "seasons": [
+            {
+                "season_id": s[0],
+                "season_number": s[1],
+                "episode_count": s[2],
+                "format_type_id": s[3],
+                "format_name": s[4],
+                "ownership_status_id": s[5],
+                "ownership_status": s[6],
+                "notes": s[7],
+            }
+            for s in seasons
+        ],
+    }
+
+
+# --- Video lookup endpoints ---
+
+@app.get("/video/categories")
+def get_video_categories():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT tlc.top_level_category_id, tlc.category_name
+                FROM lkup_top_level_categories tlc
+                JOIN lkup_collection_types lct ON tlc.collection_type_id = lct.collection_type_id
+                WHERE lct.collection_type_code = 'video'
+                ORDER BY tlc.sort_order
+            """)
+        ).fetchall()
+        return [{"top_level_category_id": r[0], "category_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/video/format-types")
+def get_video_format_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("SELECT format_type_id, format_name FROM lkup_video_format_types WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        return [{"format_type_id": r[0], "format_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/video/genres")
+def get_video_genres():
+    db = SessionLocal()
+    try:
+        top = db.execute(
+            text("SELECT top_genre_id, genre_name FROM lkup_video_top_genres WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        sub = db.execute(
+            text("SELECT sub_genre_id, top_genre_id, sub_genre_name FROM lkup_video_sub_genres WHERE is_active=1 ORDER BY sort_order")
+        ).fetchall()
+        sub_map = {}
+        for s in sub:
+            sub_map.setdefault(s[1], []).append({"sub_genre_id": s[0], "sub_genre_name": s[2]})
+        return [
+            {"top_genre_id": t[0], "genre_name": t[1], "sub_genres": sub_map.get(t[0], [])}
+            for t in top
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/video/directors")
+def search_video_directors(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT director_id, director_name FROM lkup_video_directors WHERE director_name LIKE :q ORDER BY director_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text("SELECT director_id, director_name FROM lkup_video_directors ORDER BY director_name LIMIT 100")
+            ).fetchall()
+        return [{"director_id": r[0], "director_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/video/cast")
+def search_video_cast(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT cast_id, cast_name FROM lkup_video_cast WHERE cast_name LIKE :q ORDER BY cast_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text("SELECT cast_id, cast_name FROM lkup_video_cast ORDER BY cast_name LIMIT 100")
+            ).fetchall()
+        return [{"cast_id": r[0], "cast_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/video/watch-statuses")
+def get_video_watch_statuses():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT read_status_id, status_name
+                FROM lkup_book_read_statuses
+                WHERE status_name IN ('Watched', 'Currently Watching', 'Want to Watch', 'Abandoned')
+                ORDER BY sort_order
+            """)
+        ).fetchall()
+        return [{"read_status_id": r[0], "status_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/video/tmdb-search")
+def tmdb_search(q: str, media_type: str = "movie"):
+    """Proxy TMDB search. media_type = 'movie' or 'tv'."""
+    if not q or not q.strip():
+        return []
+    if not TMDB_API_KEY:
+        raise HTTPException(status_code=503, detail="TMDB_API_KEY not configured.")
+    if media_type not in ("movie", "tv"):
+        media_type = "movie"
+    encoded = urllib.parse.quote(q.strip())
+    url = f"https://api.themoviedb.org/3/search/{media_type}?api_key={urllib.parse.quote(TMDB_API_KEY)}&query={encoded}&page=1"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+        results = []
+        img_base = "https://image.tmdb.org/t/p/w300"
+        for item in data.get("results", [])[:10]:
+            poster = item.get("poster_path")
+            title = item.get("title") or item.get("name") or ""
+            year = ""
+            date_str = item.get("release_date") or item.get("first_air_date") or ""
+            if date_str:
+                year = date_str[:4]
+            results.append({
+                "tmdb_id": item.get("id"),
+                "title": title,
+                "year": year,
+                "overview": (item.get("overview") or "")[:300],
+                "cover_image_url": img_base + poster if poster else None,
+                "media_type": media_type,
+            })
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TMDB search failed: {str(e)}")
+
+
+@app.get("/video/tmdb-detail/{tmdb_id}")
+def tmdb_detail(tmdb_id: int, media_type: str = "movie"):
+    """Fetch full TMDB detail with credits. media_type = 'movie' or 'tv'."""
+    if not TMDB_API_KEY:
+        raise HTTPException(status_code=503, detail="TMDB_API_KEY not configured.")
+    if media_type not in ("movie", "tv"):
+        media_type = "movie"
+    url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}?api_key={urllib.parse.quote(TMDB_API_KEY)}&append_to_response=credits"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            d = json.loads(resp.read().decode())
+
+        img_base = "https://image.tmdb.org/t/p/w500"
+        poster = d.get("poster_path")
+        credits = d.get("credits") or {}
+        crew = credits.get("crew") or []
+        cast_list = credits.get("cast") or []
+
+        if media_type == "movie":
+            directors = [c["name"] for c in crew if c.get("job") == "Director"]
+            title = d.get("title", "")
+            release_date = d.get("release_date", "")
+            runtime = d.get("runtime")
+            seasons = []
+        else:
+            # TV: creator(s) as directors
+            directors = [c["name"] for c in (d.get("created_by") or [])]
+            title = d.get("name", "")
+            release_date = d.get("first_air_date", "")
+            runtime = None
+            # Return season stubs so frontend can pre-fill seasons editor
+            seasons = [
+                {
+                    "season_number": s["season_number"],
+                    "episode_count": s.get("episode_count"),
+                    "name": s.get("name", ""),
+                }
+                for s in (d.get("seasons") or [])
+                if s.get("season_number", 0) > 0  # skip specials (season 0)
+            ]
+
+        top_cast = [c["name"] for c in cast_list[:10]]
+
+        return {
+            "tmdb_id": d.get("id"),
+            "title": title,
+            "release_date": release_date,
+            "runtime_minutes": runtime,
+            "overview": d.get("overview", ""),
+            "cover_image_url": img_base + poster if poster else None,
+            "media_type": media_type,
+            "directors": directors,
+            "cast": top_cast,
+            "seasons": seasons,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TMDB detail fetch failed: {str(e)}")
+
+
+@app.get("/video")
+def list_video(
+    search: Optional[str] = None,
+    video_type_id: Optional[int] = None,
+    ownership_status_id: Optional[int] = None,
+    reading_status_id: Optional[int] = None,
+):
+    db = SessionLocal()
+    try:
+        where = ["i.collection_type_id = :ct"]
+        params: dict = {"ct": VIDEO_COLLECTION_TYPE_ID}
+
+        if search:
+            where.append("vd.title LIKE :search")
+            params["search"] = f"%{search}%"
+        if video_type_id is not None:
+            where.append("i.top_level_category_id = :vt")
+            params["vt"] = video_type_id
+        if ownership_status_id is not None:
+            where.append("i.ownership_status_id = :own")
+            params["own"] = ownership_status_id
+        if reading_status_id is not None:
+            where.append("i.reading_status_id = :rs")
+            params["rs"] = reading_status_id
+
+        where_clause = " AND ".join(where)
+
+        rows = db.execute(
+            text(f"""
+                SELECT
+                    i.item_id,
+                    i.ownership_status_id,
+                    os.status_name AS ownership_status,
+                    i.top_level_category_id,
+                    tlc.category_name AS video_type,
+                    i.reading_status_id,
+                    rs.status_name AS watch_status,
+                    i.notes,
+                    vd.title,
+                    vd.title_sort,
+                    vd.release_date,
+                    vd.runtime_minutes,
+                    vd.cover_image_url,
+                    (
+                        SELECT GROUP_CONCAT(d.director_name, ', ')
+                        FROM xref_video_directors xd
+                        JOIN lkup_video_directors d ON xd.director_id = d.director_id
+                        WHERE xd.item_id = i.item_id
+                        ORDER BY xd.director_order
+                    ) AS directors,
+                    (
+                        SELECT GROUP_CONCAT(tg.genre_name, ', ')
+                        FROM xref_video_genres xg
+                        JOIN lkup_video_top_genres tg ON xg.top_genre_id = tg.top_genre_id
+                        WHERE xg.item_id = i.item_id
+                    ) AS genres,
+                    (
+                        SELECT GROUP_CONCAT(ft.format_name, ', ')
+                        FROM tbl_video_copies c
+                        LEFT JOIN lkup_video_format_types ft ON c.format_type_id = ft.format_type_id
+                        WHERE c.item_id = i.item_id
+                    ) AS copy_formats,
+                    (SELECT COUNT(*) FROM tbl_video_seasons s WHERE s.item_id = i.item_id) AS season_count,
+                    (SELECT COUNT(*) FROM tbl_video_copies c WHERE c.item_id = i.item_id) AS copy_count
+                FROM tbl_items i
+                JOIN tbl_video_details vd ON i.item_id = vd.item_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
+                LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+                WHERE {where_clause}
+                ORDER BY vd.title_sort, vd.title
+            """),
+            params,
+        ).fetchall()
+
+        return [
+            {
+                "item_id": r[0],
+                "ownership_status_id": r[1],
+                "ownership_status": r[2],
+                "top_level_category_id": r[3],
+                "video_type": r[4],
+                "reading_status_id": r[5],
+                "watch_status": r[6],
+                "notes": r[7],
+                "title": r[8],
+                "title_sort": r[9],
+                "release_date": r[10],
+                "runtime_minutes": r[11],
+                "cover_image_url": r[12],
+                "directors": r[13].split(", ") if r[13] else [],
+                "genres": r[14].split(", ") if r[14] else [],
+                "copy_formats": list(dict.fromkeys(r[15].split(", "))) if r[15] else [],
+                "season_count": r[16],
+                "copy_count": r[17],
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/video/{item_id}")
+def get_video(item_id: int):
+    db = SessionLocal()
+    try:
+        detail = _get_video_detail(db, item_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Video not found.")
+        return detail
+    finally:
+        db.close()
+
+
+@app.post("/video")
+def create_video(payload: VideoCreate):
+    db = SessionLocal()
+    try:
+        title_sort = _make_title_sort_video(payload.title)
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items
+                    (collection_type_id, top_level_category_id, ownership_status_id, reading_status_id, notes)
+                VALUES (:ct, :tlc, :own, :rs, :notes)
+            """),
+            {
+                "ct": VIDEO_COLLECTION_TYPE_ID,
+                "tlc": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "rs": payload.reading_status_id,
+                "notes": payload.notes,
+            },
+        )
+        item_id = item_result.lastrowid
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_video_details
+                    (item_id, title, title_sort, description, release_date, runtime_minutes,
+                     cover_image_url, api_source, external_work_id)
+                VALUES (:iid, :title, :sort, :desc, :date, :runtime, :cover, :api_src, :ext_id)
+            """),
+            {
+                "iid": item_id,
+                "title": payload.title,
+                "sort": title_sort,
+                "desc": payload.description,
+                "date": payload.release_date,
+                "runtime": payload.runtime_minutes,
+                "cover": payload.cover_image_url,
+                "api_src": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        _insert_video_relationships(db, item_id, payload)
+        _insert_video_copies(db, item_id, payload.copies)
+        _insert_video_seasons(db, item_id, payload.seasons)
+
+        db.commit()
+        detail = _get_video_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "video": detail}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/video/{item_id}")
+def update_video(item_id: int, payload: VideoUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Video not found.")
+
+        item_updates = []
+        item_params: dict = {"id": item_id}
+        if payload.top_level_category_id is not None:
+            item_updates.append("top_level_category_id = :tlc")
+            item_params["tlc"] = payload.top_level_category_id
+        if payload.ownership_status_id is not None:
+            item_updates.append("ownership_status_id = :own")
+            item_params["own"] = payload.ownership_status_id
+        if payload.reading_status_id is not None:
+            item_updates.append("reading_status_id = :rs")
+            item_params["rs"] = payload.reading_status_id
+        if payload.notes is not None:
+            item_updates.append("notes = :notes")
+            item_params["notes"] = payload.notes
+        if item_updates:
+            item_updates.append("updated_at = CURRENT_TIMESTAMP")
+            db.execute(
+                text(f"UPDATE tbl_items SET {', '.join(item_updates)} WHERE item_id = :id"),
+                item_params,
+            )
+
+        detail_updates = []
+        detail_params: dict = {"id": item_id}
+        if payload.title is not None:
+            detail_updates.append("title = :title")
+            detail_updates.append("title_sort = :sort")
+            detail_params["title"] = payload.title
+            detail_params["sort"] = _make_title_sort_video(payload.title)
+        if payload.description is not None:
+            detail_updates.append("description = :desc")
+            detail_params["desc"] = payload.description
+        if payload.release_date is not None:
+            detail_updates.append("release_date = :date")
+            detail_params["date"] = payload.release_date
+        if payload.runtime_minutes is not None:
+            detail_updates.append("runtime_minutes = :runtime")
+            detail_params["runtime"] = payload.runtime_minutes
+        if payload.cover_image_url is not None:
+            detail_updates.append("cover_image_url = :cover")
+            detail_params["cover"] = payload.cover_image_url
+        if payload.api_source is not None:
+            detail_updates.append("api_source = :api_src")
+            detail_params["api_src"] = payload.api_source
+        if payload.external_work_id is not None:
+            detail_updates.append("external_work_id = :ext_id")
+            detail_params["ext_id"] = payload.external_work_id
+        if detail_updates:
+            db.execute(
+                text(f"UPDATE tbl_video_details SET {', '.join(detail_updates)} WHERE item_id = :id"),
+                detail_params,
+            )
+
+        if payload.director_names is not None:
+            db.execute(text("DELETE FROM xref_video_directors WHERE item_id = :id"), {"id": item_id})
+            for order, name in enumerate(payload.director_names):
+                name = name.strip()
+                if not name:
+                    continue
+                dir_id = _upsert_video_director(db, name)
+                db.execute(
+                    text("INSERT OR IGNORE INTO xref_video_directors (item_id, director_id, director_order) VALUES (:iid, :did, :ord)"),
+                    {"iid": item_id, "did": dir_id, "ord": order},
+                )
+
+        if payload.cast_names is not None:
+            db.execute(text("DELETE FROM xref_video_cast WHERE item_id = :id"), {"id": item_id})
+            for order, name in enumerate(payload.cast_names):
+                name = name.strip()
+                if not name:
+                    continue
+                cast_id = _upsert_video_cast_member(db, name)
+                db.execute(
+                    text("INSERT OR IGNORE INTO xref_video_cast (item_id, cast_id, cast_order) VALUES (:iid, :cid, :ord)"),
+                    {"iid": item_id, "cid": cast_id, "ord": order},
+                )
+
+        if payload.genres is not None:
+            db.execute(text("DELETE FROM xref_video_genres WHERE item_id = :id"), {"id": item_id})
+            for g in payload.genres:
+                top_id = g.get("top_genre_id")
+                sub_id = g.get("sub_genre_id")
+                if not top_id:
+                    continue
+                db.execute(
+                    text("INSERT OR IGNORE INTO xref_video_genres (item_id, top_genre_id, sub_genre_id) VALUES (:iid, :tg, :sg)"),
+                    {"iid": item_id, "tg": top_id, "sg": sub_id},
+                )
+
+        if payload.copies is not None:
+            db.execute(text("DELETE FROM tbl_video_copies WHERE item_id = :id"), {"id": item_id})
+            _insert_video_copies(db, item_id, payload.copies)
+
+        if payload.seasons is not None:
+            db.execute(text("DELETE FROM tbl_video_seasons WHERE item_id = :id"), {"id": item_id})
+            _insert_video_seasons(db, item_id, payload.seasons)
+
+        db.commit()
+        detail = _get_video_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "video": detail}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/video/{item_id}")
+def delete_video(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Video not found.")
+
+        db.execute(text("DELETE FROM xref_video_directors WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_video_cast WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_video_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_video_copies WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_video_seasons WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_video_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": item_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/video/bulk")
+def bulk_update_video(payload: VideoBulkUpdatePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+            updates = []
+            params = {"id": item_id}
+            if payload.fields.ownership_status_id is not None:
+                updates.append("ownership_status_id = :own")
+                params["own"] = payload.fields.ownership_status_id
+            if payload.fields.reading_status_id is not None:
+                updates.append("reading_status_id = :rs")
+                params["rs"] = payload.fields.reading_status_id
+            if payload.fields.top_level_category_id is not None:
+                updates.append("top_level_category_id = :tlc")
+                params["tlc"] = payload.fields.top_level_category_id
+
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :id"),
+                    params,
+                )
+
+        db.commit()
+        return {"updated": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/video/bulk-delete")
+def bulk_delete_video(payload: BulkDeletePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_video_directors WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_video_cast WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM xref_video_genres WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_video_copies WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_video_seasons WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_video_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ============================================================
+# BOARD GAMES MODULE
+# ============================================================
+
+BOARDGAMES_COLLECTION_TYPE_ID = _resolve_collection_type_id("boardgames", 7)
+
+
+class BoardgameExpansionEntry(BaseModel):
+    expansion_id: Optional[int] = None
+    title: str
+    year_published: Optional[int] = None
+    ownership_status_id: Optional[int] = None
+    external_work_id: Optional[str] = None
+
+
+class BoardgameCreate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    year_published: Optional[int] = None
+    min_players: Optional[int] = None
+    max_players: Optional[int] = None
+    publisher_name: Optional[str] = None
+    designer_names: Optional[List[str]] = None
+    expansions: Optional[List[BoardgameExpansionEntry]] = None
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+class BoardgameUpdate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    year_published: Optional[int] = None
+    min_players: Optional[int] = None
+    max_players: Optional[int] = None
+    publisher_name: Optional[str] = None
+    designer_names: Optional[List[str]] = None
+    expansions: Optional[List[BoardgameExpansionEntry]] = None
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+
+
+class BoardgameBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+
+
+class BoardgameBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: BoardgameBulkUpdateFields
+
+
+# --- Board Games helpers ---
+
+def _upsert_boardgame_designer(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT designer_id FROM lkup_boardgame_designers WHERE LOWER(TRIM(designer_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_boardgame_designers (designer_name) VALUES (:name) RETURNING designer_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_boardgame_publisher(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT publisher_id FROM lkup_boardgame_publishers WHERE LOWER(TRIM(publisher_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_boardgame_publishers (publisher_name) VALUES (:name) RETURNING publisher_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _insert_boardgame_designers(db, item_id: int, designer_names) -> None:
+    if not designer_names:
+        return
+    for order, name in enumerate(designer_names):
+        if name.strip():
+            designer_id = _upsert_boardgame_designer(db, name)
+            db.execute(
+                text("INSERT OR IGNORE INTO xref_boardgame_designers (item_id, designer_id, designer_order) VALUES (:item_id, :did, :ord)"),
+                {"item_id": item_id, "did": designer_id, "ord": order},
+            )
+
+
+def _insert_boardgame_expansions(db, item_id: int, expansions) -> None:
+    if not expansions:
+        return
+    for exp in expansions:
+        db.execute(
+            text("""
+                INSERT INTO tbl_boardgame_expansions (item_id, title, year_published, ownership_status_id, external_work_id)
+                VALUES (:item_id, :title, :year, :own, :ext)
+            """),
+            {
+                "item_id": item_id,
+                "title": exp.title.strip(),
+                "year": exp.year_published,
+                "own": exp.ownership_status_id,
+                "ext": exp.external_work_id,
+            },
+        )
+
+
+def _get_boardgame_detail(db, item_id: int):
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.top_level_category_id,
+                ltc.category_name,
+                i.ownership_status_id,
+                os.status_name,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                bd.title,
+                bd.title_sort,
+                bd.description,
+                bd.year_published,
+                bd.min_players,
+                bd.max_players,
+                bd.publisher_id,
+                bd.cover_image_url,
+                bd.api_source,
+                bd.external_work_id
+            FROM tbl_items i
+            JOIN tbl_boardgame_details bd ON i.item_id = bd.item_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    publisher = None
+    publisher_name = None
+    if row[14]:
+        pub_row = db.execute(
+            text("SELECT publisher_id, publisher_name FROM lkup_boardgame_publishers WHERE publisher_id = :id"),
+            {"id": row[14]},
+        ).fetchone()
+        if pub_row:
+            publisher = {"publisher_id": pub_row[0], "publisher_name": pub_row[1]}
+            publisher_name = pub_row[1]
+
+    designers = db.execute(
+        text("""
+            SELECT d.designer_id, d.designer_name, x.designer_order
+            FROM xref_boardgame_designers x
+            JOIN lkup_boardgame_designers d ON x.designer_id = d.designer_id
+            WHERE x.item_id = :item_id
+            ORDER BY x.designer_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    expansions = db.execute(
+        text("""
+            SELECT e.expansion_id, e.title, e.year_published, e.ownership_status_id, os.status_name, e.external_work_id
+            FROM tbl_boardgame_expansions e
+            LEFT JOIN lkup_ownership_statuses os ON e.ownership_status_id = os.ownership_status_id
+            WHERE e.item_id = :item_id
+            ORDER BY e.expansion_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "top_level_category_id": row[1],
+        "category_name": row[2],
+        "ownership_status_id": row[3],
+        "ownership_status": row[4],
+        "notes": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
+        "title": row[8],
+        "title_sort": row[9],
+        "description": row[10],
+        "year_published": row[11],
+        "min_players": row[12],
+        "max_players": row[13],
+        "publisher_id": row[14],
+        "publisher_name": publisher_name,
+        "publisher": publisher,
+        "cover_image_url": row[15],
+        "api_source": row[16],
+        "external_work_id": row[17],
+        "designers": [{"designer_id": d[0], "designer_name": d[1]} for d in designers],
+        "designer_names": [d[1] for d in designers],
+        "expansions": [
+            {
+                "expansion_id": e[0],
+                "title": e[1],
+                "year_published": e[2],
+                "ownership_status_id": e[3],
+                "ownership_status": e[4],
+                "external_work_id": e[5],
+            }
+            for e in expansions
+        ],
+    }
+
+
+# --- Board Games lookup endpoints ---
+# NOTE: specific paths must appear before /{item_id}
+
+@app.get("/boardgames/categories")
+def get_boardgame_categories():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT ltc.top_level_category_id, ltc.category_name FROM lkup_top_level_categories ltc
+            JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+            WHERE lct.collection_type_code = 'boardgames' AND ltc.is_active = 1
+            ORDER BY ltc.sort_order
+        """)).fetchall()
+        return [{"top_level_category_id": r[0], "category_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/boardgames/designers")
+def get_boardgame_designers(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT designer_id, designer_name FROM lkup_boardgame_designers WHERE is_active = 1 AND LOWER(designer_name) LIKE LOWER(:q) ORDER BY designer_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("SELECT designer_id, designer_name FROM lkup_boardgame_designers WHERE is_active = 1 ORDER BY designer_name")).fetchall()
+        return [{"designer_id": r[0], "designer_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/boardgames/publishers")
+def get_boardgame_publishers(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT publisher_id, publisher_name FROM lkup_boardgame_publishers WHERE is_active = 1 AND LOWER(publisher_name) LIKE LOWER(:q) ORDER BY publisher_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("SELECT publisher_id, publisher_name FROM lkup_boardgame_publishers WHERE is_active = 1 ORDER BY publisher_name")).fetchall()
+        return [{"publisher_id": r[0], "publisher_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/boardgames/bgg-search")
+def bgg_search(q: str):
+    """Search BoardGameGeek XML API v2. Returns lightweight result list."""
+    if not q or not q.strip():
+        return []
+    encoded = urllib.parse.quote(q.strip())
+    url = f"https://boardgamegeek.com/xmlapi2/search?query={encoded}&type=boardgame"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            xml_data = resp.read().decode("utf-8")
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_data)
+        results = []
+        for item in root.findall("item"):
+            bgg_id = item.get("id")
+            name_el = item.find("name[@type='primary']") or item.find("name")
+            title = name_el.get("value") if name_el is not None else None
+            year_el = item.find("yearpublished")
+            year = year_el.get("value") if year_el is not None else None
+            if title:
+                results.append({
+                    "bgg_id": bgg_id,
+                    "title": title,
+                    "year_published": int(year) if year and year.isdigit() else None,
+                })
+        return results[:20]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"BGG search failed: {str(e)}")
+
+
+@app.get("/boardgames/bgg-detail/{bgg_id}")
+def bgg_detail(bgg_id: str):
+    """Fetch detailed info from BGG for a single game (used to pre-fill the form)."""
+    url = f"https://boardgamegeek.com/xmlapi2/thing?id={bgg_id}&stats=0"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            xml_data = resp.read().decode("utf-8")
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_data)
+        item = root.find("item")
+        if item is None:
+            raise HTTPException(status_code=404, detail="BGG item not found.")
+
+        name_el = item.find("name[@type='primary']") or item.find("name")
+        title = name_el.get("value") if name_el is not None else None
+        year_el = item.find("yearpublished")
+        year = int(year_el.get("value")) if year_el is not None and year_el.get("value", "").isdigit() else None
+        min_p = item.find("minplayers")
+        max_p = item.find("maxplayers")
+        min_players = int(min_p.get("value")) if min_p is not None and min_p.get("value", "").isdigit() else None
+        max_players = int(max_p.get("value")) if max_p is not None and max_p.get("value", "").isdigit() else None
+        desc_el = item.find("description")
+        description = desc_el.text.strip() if desc_el is not None and desc_el.text else None
+        img_el = item.find("image")
+        cover_image_url = img_el.text.strip() if img_el is not None and img_el.text else None
+        if cover_image_url and not cover_image_url.startswith("http"):
+            cover_image_url = "https:" + cover_image_url
+
+        designers = []
+        for link in item.findall("link[@type='boardgamedesigner']"):
+            name = link.get("value")
+            if name:
+                designers.append(name)
+
+        publisher = None
+        for link in item.findall("link[@type='boardgamepublisher']"):
+            publisher = link.get("value")
+            break
+
+        expansions = []
+        for link in item.findall("link[@type='boardgameexpansion']"):
+            exp_title = link.get("value")
+            exp_id = link.get("id")
+            if exp_title and link.get("inbound") != "true":
+                expansions.append({"title": exp_title, "external_work_id": exp_id})
+
+        return {
+            "bgg_id": bgg_id,
+            "title": title,
+            "year_published": year,
+            "min_players": min_players,
+            "max_players": max_players,
+            "description": description,
+            "cover_image_url": cover_image_url,
+            "designers": designers,
+            "publisher": publisher,
+            "expansions": expansions[:10],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"BGG detail fetch failed: {str(e)}")
+
+
+@app.get("/boardgames")
+def list_boardgames():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT
+                    i.item_id,
+                    i.top_level_category_id,
+                    ltc.category_name,
+                    i.ownership_status_id,
+                    os.status_name,
+                    i.notes,
+                    bd.title,
+                    bd.title_sort,
+                    bd.year_published,
+                    bd.min_players,
+                    bd.max_players,
+                    bd.cover_image_url,
+                    bd.external_work_id,
+                    (SELECT p.publisher_name FROM lkup_boardgame_publishers p WHERE p.publisher_id = bd.publisher_id) AS publisher_name,
+                    (SELECT GROUP_CONCAT(d.designer_name, ', ')
+                     FROM xref_boardgame_designers x
+                     JOIN lkup_boardgame_designers d ON x.designer_id = d.designer_id
+                     WHERE x.item_id = i.item_id
+                     ORDER BY x.designer_order) AS designers_str,
+                    (SELECT COUNT(*) FROM tbl_boardgame_expansions e WHERE e.item_id = i.item_id) AS expansion_count
+                FROM tbl_items i
+                JOIN tbl_boardgame_details bd ON i.item_id = bd.item_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+                WHERE i.collection_type_id = :ct
+                ORDER BY COALESCE(bd.title_sort, bd.title)
+            """),
+            {"ct": BOARDGAMES_COLLECTION_TYPE_ID},
+        ).fetchall()
+
+        return [
+            {
+                "item_id": row[0],
+                "top_level_category_id": row[1],
+                "category_name": row[2],
+                "ownership_status_id": row[3],
+                "ownership_status": row[4],
+                "notes": row[5],
+                "title": row[6],
+                "title_sort": row[7],
+                "year_published": row[8],
+                "min_players": row[9],
+                "max_players": row[10],
+                "cover_image_url": row[11],
+                "external_work_id": row[12],
+                "publisher_name": row[13],
+                "designers": row[14].split(", ") if row[14] else [],
+                "expansion_count": row[15],
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/boardgames/{item_id}")
+def get_boardgame(item_id: int):
+    db = SessionLocal()
+    try:
+        game = _get_boardgame_detail(db, item_id)
+        if not game:
+            raise HTTPException(status_code=404, detail="Board game not found.")
+        return game
+    finally:
+        db.close()
+
+
+@app.post("/boardgames")
+def create_boardgame(payload: BoardgameCreate):
+    db = SessionLocal()
+    try:
+        publisher_id = None
+        if payload.publisher_name and payload.publisher_name.strip():
+            publisher_id = _upsert_boardgame_publisher(db, payload.publisher_name)
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
+                VALUES (:ct, :cat, :own, :notes)
+                RETURNING item_id
+            """),
+            {
+                "ct": BOARDGAMES_COLLECTION_TYPE_ID,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_boardgame_details (
+                    item_id, title, title_sort, description,
+                    year_published, min_players, max_players,
+                    publisher_id, cover_image_url, api_source, external_work_id
+                ) VALUES (
+                    :item_id, :title, :title_sort, :description,
+                    :year, :min_p, :max_p,
+                    :pub_id, :cover, :api_source, :ext_id
+                )
+            """),
+            {
+                "item_id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "year": payload.year_published,
+                "min_p": payload.min_players,
+                "max_p": payload.max_players,
+                "pub_id": publisher_id,
+                "cover": payload.cover_image_url,
+                "api_source": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        _insert_boardgame_designers(db, item_id, payload.designer_names or [])
+        _insert_boardgame_expansions(db, item_id, payload.expansions or [])
+        db.commit()
+
+        game = _get_boardgame_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "boardgame": game}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/boardgames/{item_id}")
+def update_boardgame(item_id: int, payload: BoardgameUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Board game not found.")
+
+        publisher_id = None
+        if payload.publisher_name and payload.publisher_name.strip():
+            publisher_id = _upsert_boardgame_publisher(db, payload.publisher_name)
+
+        db.execute(
+            text("""
+                UPDATE tbl_items
+                SET top_level_category_id = :cat,
+                    ownership_status_id = :own,
+                    notes = :notes,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = :id
+            """),
+            {"id": item_id, "cat": payload.top_level_category_id, "own": payload.ownership_status_id, "notes": payload.notes},
+        )
+
+        db.execute(
+            text("""
+                UPDATE tbl_boardgame_details
+                SET title = :title,
+                    title_sort = :title_sort,
+                    description = :description,
+                    year_published = :year,
+                    min_players = :min_p,
+                    max_players = :max_p,
+                    publisher_id = :pub_id,
+                    cover_image_url = :cover,
+                    api_source = :api_source,
+                    external_work_id = :ext_id
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "year": payload.year_published,
+                "min_p": payload.min_players,
+                "max_p": payload.max_players,
+                "pub_id": publisher_id,
+                "cover": payload.cover_image_url,
+                "api_source": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+        _insert_boardgame_designers(db, item_id, payload.designer_names or [])
+        _insert_boardgame_expansions(db, item_id, payload.expansions or [])
+
+        db.commit()
+        game = _get_boardgame_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "boardgame": game}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/boardgames/{item_id}")
+def delete_boardgame(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Board game not found.")
+
+        db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_boardgame_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": item_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/boardgames/bulk")
+def bulk_update_boardgames(payload: BoardgameBulkUpdatePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+            updates = []
+            params = {"id": item_id}
+            if payload.fields.ownership_status_id is not None:
+                updates.append("ownership_status_id = :own")
+                params["own"] = payload.fields.ownership_status_id
+            if payload.fields.top_level_category_id is not None:
+                updates.append("top_level_category_id = :cat")
+                params["cat"] = payload.fields.top_level_category_id
+
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :id"),
+                    params,
+                )
+
+        db.commit()
+        return {"updated": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/boardgames/bulk-delete")
+def bulk_delete_boardgames(payload: BulkDeletePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+        for item_id in payload.item_ids:
+            db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_boardgame_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 # ---------- Ingest endpoints ----------
 
 _ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -3976,6 +6487,7 @@ class IngestFrontPayload(BaseModel):
     source_origin_id: Optional[int] = None
     version: Optional[str] = None
     member_ids: List[int]
+    is_special: bool = False
 
 
 @app.post("/ingest/front")
@@ -4011,14 +6523,15 @@ def ingest_front(payload: IngestFrontPayload):
 
         db.execute(
             text("""
-                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version)
-                VALUES (:item_id, :group_id, :source_origin_id, :version)
+                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version, is_special)
+                VALUES (:item_id, :group_id, :source_origin_id, :version, :is_special)
             """),
             {
                 "item_id": item_id,
                 "group_id": payload.group_id,
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
+                "is_special": 1 if payload.is_special else 0,
             },
         )
 
@@ -4108,6 +6621,7 @@ class IngestPairPayload(BaseModel):
     source_origin_id: Optional[int] = None
     version: Optional[str] = None
     member_ids: List[int]
+    is_special: bool = False
 
 
 class AttachBackPayload(BaseModel):
@@ -4152,14 +6666,15 @@ def ingest_pair(payload: IngestPairPayload):
 
         db.execute(
             text("""
-                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version)
-                VALUES (:item_id, :group_id, :source_origin_id, :version)
+                INSERT INTO tbl_photocard_details (item_id, group_id, source_origin_id, version, is_special)
+                VALUES (:item_id, :group_id, :source_origin_id, :version, :is_special)
             """),
             {
                 "item_id": item_id,
                 "group_id": payload.group_id,
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
+                "is_special": 1 if payload.is_special else 0,
             },
         )
 
@@ -4385,17 +6900,17 @@ class ExportPayload(BaseModel):
     include_backs: bool = False
 
 
-def _build_caption(card: dict) -> str:
-    parts = []
-    if card.get("group_name"):
-        parts.append(card["group_name"])
-    if card.get("members"):
-        parts.append(", ".join(card["members"]))
-    if card.get("source_origin"):
-        parts.append(card["source_origin"])
-    if card.get("version"):
-        parts.append(card["version"])
-    return " • ".join(parts)
+def _build_caption(card: dict) -> list:
+    """Return up to 3 caption lines: [members, source_origin, version]."""
+    lines = []
+    member_str = ", ".join(card["members"]) if card.get("members") else None
+    lines.append(member_str or "—")
+    lines.append(card.get("source_origin") or "")
+    lines.append(card.get("version") or "")
+    # Strip trailing empty lines
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
 
 
 def _generate_pdf(entries: list, include_captions: bool) -> bytes:
@@ -4407,7 +6922,9 @@ def _generate_pdf(entries: list, include_captions: bool) -> bytes:
     margin = 20.0
     cols = 4
     gap = 6.0
-    caption_h = 16.0 if include_captions else 0.0
+    line_h = 8.5  # pts per caption line
+    max_caption_lines = 3
+    caption_h = (line_h * max_caption_lines + 3.0) if include_captions else 0.0
 
     content_w = page_w - 2 * margin
     cell_w = (content_w - gap * (cols - 1)) / cols
@@ -4456,12 +6973,13 @@ def _generate_pdf(entries: list, include_captions: bool) -> bytes:
 
         if include_captions and entry["caption"]:
             c.setFillColorRGB(0, 0, 0)
-            caption_text = entry["caption"]
-            # Truncate to fit cell width (rough: ~10 chars per 50pts)
             max_chars = max(20, int(cell_w / 5.5))
-            if len(caption_text) > max_chars:
-                caption_text = caption_text[:max_chars - 1] + "…"
-            c.drawString(x, y + 3, caption_text)
+            for i, line in enumerate(entry["caption"]):
+                if not line:
+                    continue
+                text = line if len(line) <= max_chars else line[:max_chars - 1] + "…"
+                line_y = y + 3 + (len(entry["caption"]) - 1 - i) * line_h
+                c.drawString(x, line_y, text)
 
     c.save()
     return buf.getvalue()
@@ -4493,17 +7011,21 @@ def export_photocards(payload: ExportPayload):
 
     entries = []
     for card in cards:
-        caption = _build_caption(card) if payload.include_captions else ""
+        caption = _build_caption(card) if payload.include_captions else []
         # Always include a front entry — use placeholder if no image so the card is never silently dropped
         if card["front_image_path"]:
             front_path = APP_ROOT / card["front_image_path"]
             entries.append({"path": front_path, "caption": caption, "exists": front_path.exists()})
         else:
             entries.append({"path": None, "caption": caption, "exists": False})
-        if payload.include_backs and card["back_image_path"]:
-            back_path = APP_ROOT / card["back_image_path"]
-            back_caption = (caption + " [back]") if payload.include_captions else ""
-            entries.append({"path": back_path, "caption": back_caption, "exists": back_path.exists()})
+        if payload.include_backs:
+            back_caption = (caption[:-1] + [caption[-1] + " [back]"]) if (payload.include_captions and caption) else []
+            if card["back_image_path"]:
+                back_path = APP_ROOT / card["back_image_path"]
+                entries.append({"path": back_path, "caption": back_caption, "exists": back_path.exists()})
+            else:
+                # Placeholder keeps grid alignment when a card has no back image
+                entries.append({"path": None, "caption": back_caption, "exists": False})
 
     pdf_bytes = _generate_pdf(entries, payload.include_captions)
 
@@ -4595,7 +7117,10 @@ async def upload_restore(file: UploadFile = File(...)):
                     detail="Invalid backup: 'collectcore.db' not found in ZIP.",
                 )
 
-            # Write DB to a temp file then move atomically
+            # Write DB to a temp file first (outside the replace) so we can
+            # dispose the engine before touching the live DB file.
+            # On Windows, Path.replace() fails with PermissionError if the
+            # destination file is held open by SQLAlchemy's connection pool.
             db_data = zf.read("collectcore.db")
             tmp_db = tempfile.NamedTemporaryFile(
                 suffix=".db", dir=DB_PATH.parent, delete=False
@@ -4604,6 +7129,11 @@ async def upload_restore(file: UploadFile = File(...)):
             try:
                 tmp_db.write(db_data)
                 tmp_db.close()
+
+                # Release all pooled connections before replacing the file
+                from db import engine
+                engine.dispose()
+
                 tmp_db_path.replace(DB_PATH)
             except Exception:
                 tmp_db_path.unlink(missing_ok=True)
@@ -4626,15 +7156,761 @@ async def upload_restore(file: UploadFile = File(...)):
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
 
-    # Reinitialise the DB connection pool so SQLAlchemy picks up the restored file
-    from db import engine
-    engine.dispose()
-
     return {
         "status": "restored",
         "db_restored": True,
         "images_restored": bool(image_entries) if "image_entries" in dir() else False,
     }
+
+
+# ============================================================
+# TTRPG MODULE
+# ============================================================
+
+TTRPG_COLLECTION_TYPE_ID = _resolve_collection_type_id("ttrpg", 8)
+
+
+class TTRPGCopyEntry(BaseModel):
+    copy_id: Optional[int] = None
+    format_type_id: Optional[int] = None
+    isbn_13: Optional[str] = None
+    isbn_10: Optional[str] = None
+    ownership_status_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class TTRPGCreate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    system_edition_name: Optional[str] = None
+    line_name: Optional[str] = None
+    book_type_id: Optional[int] = None
+    publisher_name: Optional[str] = None
+    author_names: Optional[List[str]] = None
+    release_date: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+    copies: Optional[List[TTRPGCopyEntry]] = None
+
+
+class TTRPGUpdate(BaseModel):
+    top_level_category_id: int
+    ownership_status_id: int
+    notes: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    system_edition_name: Optional[str] = None
+    line_name: Optional[str] = None
+    book_type_id: Optional[int] = None
+    publisher_name: Optional[str] = None
+    author_names: Optional[List[str]] = None
+    release_date: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    api_source: Optional[str] = None
+    external_work_id: Optional[str] = None
+    copies: Optional[List[TTRPGCopyEntry]] = None
+
+
+class TTRPGBulkUpdateFields(BaseModel):
+    ownership_status_id: Optional[int] = None
+    top_level_category_id: Optional[int] = None
+
+
+class TTRPGBulkUpdatePayload(BaseModel):
+    item_ids: List[int]
+    fields: TTRPGBulkUpdateFields
+
+
+# --- TTRPG helpers ---
+
+def _upsert_ttrpg_author(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT author_id FROM lkup_ttrpg_authors WHERE LOWER(TRIM(author_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_ttrpg_authors (author_name) VALUES (:name) RETURNING author_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_ttrpg_publisher(db, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT publisher_id FROM lkup_ttrpg_publishers WHERE LOWER(TRIM(publisher_name)) = LOWER(TRIM(:name))"),
+        {"name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_ttrpg_publishers (publisher_name) VALUES (:name) RETURNING publisher_id"),
+        {"name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_ttrpg_system_edition(db, system_category_id: int, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT edition_id FROM lkup_ttrpg_system_editions WHERE system_category_id = :sys AND LOWER(TRIM(edition_name)) = LOWER(TRIM(:name))"),
+        {"sys": system_category_id, "name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_ttrpg_system_editions (system_category_id, edition_name) VALUES (:sys, :name) RETURNING edition_id"),
+        {"sys": system_category_id, "name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _upsert_ttrpg_line(db, system_category_id: int, name: str) -> int:
+    clean = name.strip()
+    existing = db.execute(
+        text("SELECT line_id FROM lkup_ttrpg_lines WHERE system_category_id = :sys AND LOWER(TRIM(line_name)) = LOWER(TRIM(:name))"),
+        {"sys": system_category_id, "name": clean},
+    ).fetchone()
+    if existing:
+        return existing[0]
+    result = db.execute(
+        text("INSERT INTO lkup_ttrpg_lines (system_category_id, line_name) VALUES (:sys, :name) RETURNING line_id"),
+        {"sys": system_category_id, "name": clean},
+    ).fetchone()
+    return result[0]
+
+
+def _insert_ttrpg_authors(db, item_id: int, author_names) -> None:
+    if not author_names:
+        return
+    for order, name in enumerate(author_names):
+        if name.strip():
+            author_id = _upsert_ttrpg_author(db, name)
+            db.execute(
+                text("INSERT OR IGNORE INTO xref_ttrpg_book_authors (item_id, author_id, author_order) VALUES (:item_id, :aid, :ord)"),
+                {"item_id": item_id, "aid": author_id, "ord": order},
+            )
+
+
+def _insert_ttrpg_copies(db, item_id: int, copies) -> None:
+    if not copies:
+        return
+    for copy in copies:
+        db.execute(
+            text("""
+                INSERT INTO tbl_ttrpg_copies (item_id, format_type_id, isbn_13, isbn_10, ownership_status_id, notes)
+                VALUES (:item_id, :fmt, :isbn13, :isbn10, :own, :notes)
+            """),
+            {
+                "item_id": item_id,
+                "fmt": copy.format_type_id,
+                "isbn13": copy.isbn_13,
+                "isbn10": copy.isbn_10,
+                "own": copy.ownership_status_id,
+                "notes": copy.notes,
+            },
+        )
+
+
+def _get_ttrpg_detail(db, item_id: int):
+    row = db.execute(
+        text("""
+            SELECT
+                i.item_id,
+                i.top_level_category_id,
+                ltc.category_name,
+                i.ownership_status_id,
+                os.status_name,
+                i.notes,
+                i.created_at,
+                i.updated_at,
+                td.title,
+                td.title_sort,
+                td.description,
+                td.system_edition_id,
+                td.line_id,
+                td.book_type_id,
+                td.publisher_id,
+                td.release_date,
+                td.cover_image_url,
+                td.api_source,
+                td.external_work_id
+            FROM tbl_items i
+            JOIN tbl_ttrpg_details td ON i.item_id = td.item_id
+            JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+            JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+            WHERE i.item_id = :item_id AND i.collection_type_id = :ct
+        """),
+        {"item_id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
+    ).fetchone()
+
+    if not row:
+        return None
+
+    # system edition
+    system_edition_name = None
+    if row[11]:
+        se_row = db.execute(
+            text("SELECT edition_name FROM lkup_ttrpg_system_editions WHERE edition_id = :id"),
+            {"id": row[11]},
+        ).fetchone()
+        if se_row:
+            system_edition_name = se_row[0]
+
+    # line
+    line_name = None
+    if row[12]:
+        ln_row = db.execute(
+            text("SELECT line_name FROM lkup_ttrpg_lines WHERE line_id = :id"),
+            {"id": row[12]},
+        ).fetchone()
+        if ln_row:
+            line_name = ln_row[0]
+
+    # book type
+    book_type_name = None
+    if row[13]:
+        bt_row = db.execute(
+            text("SELECT book_type_name FROM lkup_ttrpg_book_types WHERE book_type_id = :id"),
+            {"id": row[13]},
+        ).fetchone()
+        if bt_row:
+            book_type_name = bt_row[0]
+
+    # publisher
+    publisher_name = None
+    if row[14]:
+        pub_row = db.execute(
+            text("SELECT publisher_name FROM lkup_ttrpg_publishers WHERE publisher_id = :id"),
+            {"id": row[14]},
+        ).fetchone()
+        if pub_row:
+            publisher_name = pub_row[0]
+
+    authors = db.execute(
+        text("""
+            SELECT a.author_id, a.author_name, x.author_order
+            FROM xref_ttrpg_book_authors x
+            JOIN lkup_ttrpg_authors a ON x.author_id = a.author_id
+            WHERE x.item_id = :item_id
+            ORDER BY x.author_order
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    copies = db.execute(
+        text("""
+            SELECT c.copy_id, c.format_type_id, ft.format_name, c.isbn_13, c.isbn_10,
+                   c.ownership_status_id, os.status_name, c.notes
+            FROM tbl_ttrpg_copies c
+            LEFT JOIN lkup_ttrpg_format_types ft ON c.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_ownership_statuses os ON c.ownership_status_id = os.ownership_status_id
+            WHERE c.item_id = :item_id
+            ORDER BY c.copy_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+
+    return {
+        "item_id": row[0],
+        "top_level_category_id": row[1],
+        "category_name": row[2],
+        "ownership_status_id": row[3],
+        "ownership_status": row[4],
+        "notes": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
+        "title": row[8],
+        "title_sort": row[9],
+        "description": row[10],
+        "system_edition_id": row[11],
+        "system_edition_name": system_edition_name,
+        "line_id": row[12],
+        "line_name": line_name,
+        "book_type_id": row[13],
+        "book_type_name": book_type_name,
+        "publisher_id": row[14],
+        "publisher_name": publisher_name,
+        "release_date": row[15],
+        "cover_image_url": row[16],
+        "api_source": row[17],
+        "external_work_id": row[18],
+        "authors": [{"author_id": a[0], "author_name": a[1]} for a in authors],
+        "author_names": [a[1] for a in authors],
+        "copies": [
+            {
+                "copy_id": c[0],
+                "format_type_id": c[1],
+                "format_name": c[2],
+                "isbn_13": c[3],
+                "isbn_10": c[4],
+                "ownership_status_id": c[5],
+                "ownership_status": c[6],
+                "notes": c[7],
+            }
+            for c in copies
+        ],
+    }
+
+
+# --- TTRPG lookup endpoints ---
+# NOTE: specific paths must appear before /{item_id}
+
+@app.get("/ttrpg/systems")
+def get_ttrpg_systems():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT ltc.top_level_category_id, ltc.category_name FROM lkup_top_level_categories ltc
+            JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+            WHERE lct.collection_type_code = 'ttrpg' AND ltc.is_active = 1
+            ORDER BY ltc.sort_order
+        """)).fetchall()
+        return [{"top_level_category_id": r[0], "category_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/system-editions")
+def get_ttrpg_system_editions(system_id: Optional[int] = None):
+    db = SessionLocal()
+    try:
+        if system_id:
+            rows = db.execute(
+                text("SELECT edition_id, edition_name FROM lkup_ttrpg_system_editions WHERE system_category_id = :sys AND is_active = 1 ORDER BY sort_order, edition_name"),
+                {"sys": system_id},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text("SELECT edition_id, edition_name FROM lkup_ttrpg_system_editions WHERE is_active = 1 ORDER BY edition_name"),
+            ).fetchall()
+        return [{"edition_id": r[0], "edition_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/lines")
+def get_ttrpg_lines(system_id: Optional[int] = None):
+    db = SessionLocal()
+    try:
+        if system_id:
+            rows = db.execute(
+                text("SELECT line_id, line_name FROM lkup_ttrpg_lines WHERE system_category_id = :sys AND is_active = 1 ORDER BY sort_order, line_name"),
+                {"sys": system_id},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text("SELECT line_id, line_name FROM lkup_ttrpg_lines WHERE is_active = 1 ORDER BY line_name"),
+            ).fetchall()
+        return [{"line_id": r[0], "line_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/book-types")
+def get_ttrpg_book_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("SELECT book_type_id, book_type_name FROM lkup_ttrpg_book_types WHERE is_active = 1 ORDER BY sort_order")).fetchall()
+        return [{"book_type_id": r[0], "book_type_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/format-types")
+def get_ttrpg_format_types():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("SELECT format_type_id, format_name FROM lkup_ttrpg_format_types WHERE is_active = 1 ORDER BY sort_order")).fetchall()
+        return [{"format_type_id": r[0], "format_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/publishers")
+def get_ttrpg_publishers(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT publisher_id, publisher_name FROM lkup_ttrpg_publishers WHERE is_active = 1 AND LOWER(publisher_name) LIKE LOWER(:q) ORDER BY publisher_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("SELECT publisher_id, publisher_name FROM lkup_ttrpg_publishers WHERE is_active = 1 ORDER BY publisher_name")).fetchall()
+        return [{"publisher_id": r[0], "publisher_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/authors")
+def get_ttrpg_authors(q: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        if q:
+            rows = db.execute(
+                text("SELECT author_id, author_name FROM lkup_ttrpg_authors WHERE is_active = 1 AND LOWER(author_name) LIKE LOWER(:q) ORDER BY author_name LIMIT 20"),
+                {"q": f"%{q}%"},
+            ).fetchall()
+        else:
+            rows = db.execute(text("SELECT author_id, author_name FROM lkup_ttrpg_authors WHERE is_active = 1 ORDER BY author_name")).fetchall()
+        return [{"author_id": r[0], "author_name": r[1]} for r in rows]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg")
+def list_ttrpg():
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT
+                    i.item_id,
+                    i.top_level_category_id,
+                    ltc.category_name,
+                    i.ownership_status_id,
+                    os.status_name,
+                    i.notes,
+                    td.title,
+                    td.title_sort,
+                    td.release_date,
+                    td.cover_image_url,
+                    td.system_edition_id,
+                    td.line_id,
+                    td.book_type_id,
+                    td.publisher_id,
+                    (SELECT bt.book_type_name FROM lkup_ttrpg_book_types bt WHERE bt.book_type_id = td.book_type_id) AS book_type_name,
+                    (SELECT se.edition_name FROM lkup_ttrpg_system_editions se WHERE se.edition_id = td.system_edition_id) AS system_edition_name,
+                    (SELECT ln.line_name FROM lkup_ttrpg_lines ln WHERE ln.line_id = td.line_id) AS line_name,
+                    (SELECT pub.publisher_name FROM lkup_ttrpg_publishers pub WHERE pub.publisher_id = td.publisher_id) AS publisher_name,
+                    (SELECT GROUP_CONCAT(a.author_name, ', ')
+                     FROM xref_ttrpg_book_authors x
+                     JOIN lkup_ttrpg_authors a ON x.author_id = a.author_id
+                     WHERE x.item_id = i.item_id
+                     ORDER BY x.author_order) AS authors_str,
+                    (SELECT GROUP_CONCAT(
+                         COALESCE(ft.format_name, 'Unknown') || CASE WHEN own2.status_name IS NOT NULL THEN ' (' || own2.status_name || ')' ELSE '' END,
+                         ', ')
+                     FROM tbl_ttrpg_copies c
+                     LEFT JOIN lkup_ttrpg_format_types ft ON c.format_type_id = ft.format_type_id
+                     LEFT JOIN lkup_ownership_statuses own2 ON c.ownership_status_id = own2.ownership_status_id
+                     WHERE c.item_id = i.item_id) AS copies_summary,
+                    (SELECT COUNT(*) FROM tbl_ttrpg_copies c WHERE c.item_id = i.item_id) AS copy_count
+                FROM tbl_items i
+                JOIN tbl_ttrpg_details td ON i.item_id = td.item_id
+                JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
+                JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+                WHERE i.collection_type_id = :ct
+                ORDER BY COALESCE(td.title_sort, td.title)
+            """),
+            {"ct": TTRPG_COLLECTION_TYPE_ID},
+        ).fetchall()
+
+        return [
+            {
+                "item_id": row[0],
+                "top_level_category_id": row[1],
+                "category_name": row[2],
+                "ownership_status_id": row[3],
+                "ownership_status": row[4],
+                "notes": row[5],
+                "title": row[6],
+                "title_sort": row[7],
+                "release_date": row[8],
+                "cover_image_url": row[9],
+                "system_edition_id": row[10],
+                "line_id": row[11],
+                "book_type_id": row[12],
+                "publisher_id": row[13],
+                "book_type_name": row[14],
+                "system_edition_name": row[15],
+                "line_name": row[16],
+                "publisher_name": row[17],
+                "authors": row[18].split(", ") if row[18] else [],
+                "copies_summary": row[19],
+                "copy_count": row[20],
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/ttrpg/{item_id}")
+def get_ttrpg(item_id: int):
+    db = SessionLocal()
+    try:
+        book = _get_ttrpg_detail(db, item_id)
+        if not book:
+            raise HTTPException(status_code=404, detail="TTRPG book not found.")
+        return book
+    finally:
+        db.close()
+
+
+@app.post("/ttrpg")
+def create_ttrpg(payload: TTRPGCreate):
+    db = SessionLocal()
+    try:
+        publisher_id = None
+        if payload.publisher_name and payload.publisher_name.strip():
+            publisher_id = _upsert_ttrpg_publisher(db, payload.publisher_name)
+
+        system_edition_id = None
+        if payload.system_edition_name and payload.system_edition_name.strip():
+            system_edition_id = _upsert_ttrpg_system_edition(db, payload.top_level_category_id, payload.system_edition_name)
+
+        line_id = None
+        if payload.line_name and payload.line_name.strip():
+            line_id = _upsert_ttrpg_line(db, payload.top_level_category_id, payload.line_name)
+
+        item_result = db.execute(
+            text("""
+                INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
+                VALUES (:ct, :cat, :own, :notes)
+                RETURNING item_id
+            """),
+            {
+                "ct": TTRPG_COLLECTION_TYPE_ID,
+                "cat": payload.top_level_category_id,
+                "own": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        item_id = item_result[0]
+
+        db.execute(
+            text("""
+                INSERT INTO tbl_ttrpg_details (
+                    item_id, title, title_sort, description,
+                    system_edition_id, line_id, book_type_id, publisher_id,
+                    release_date, cover_image_url, api_source, external_work_id
+                ) VALUES (
+                    :item_id, :title, :title_sort, :description,
+                    :edition_id, :line_id, :book_type_id, :pub_id,
+                    :release_date, :cover, :api_source, :ext_id
+                )
+            """),
+            {
+                "item_id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "edition_id": system_edition_id,
+                "line_id": line_id,
+                "book_type_id": payload.book_type_id,
+                "pub_id": publisher_id,
+                "release_date": payload.release_date,
+                "cover": payload.cover_image_url,
+                "api_source": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        _insert_ttrpg_authors(db, item_id, payload.author_names or [])
+        _insert_ttrpg_copies(db, item_id, payload.copies or [])
+        db.commit()
+
+        book = _get_ttrpg_detail(db, item_id)
+        return {"item_id": item_id, "status": "created", "ttrpg": book}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/ttrpg/{item_id}")
+def update_ttrpg(item_id: int, payload: TTRPGUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="TTRPG book not found.")
+
+        publisher_id = None
+        if payload.publisher_name and payload.publisher_name.strip():
+            publisher_id = _upsert_ttrpg_publisher(db, payload.publisher_name)
+
+        system_edition_id = None
+        if payload.system_edition_name and payload.system_edition_name.strip():
+            system_edition_id = _upsert_ttrpg_system_edition(db, payload.top_level_category_id, payload.system_edition_name)
+
+        line_id = None
+        if payload.line_name and payload.line_name.strip():
+            line_id = _upsert_ttrpg_line(db, payload.top_level_category_id, payload.line_name)
+
+        db.execute(
+            text("""
+                UPDATE tbl_items
+                SET top_level_category_id = :cat,
+                    ownership_status_id = :own,
+                    notes = :notes,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = :id
+            """),
+            {"id": item_id, "cat": payload.top_level_category_id, "own": payload.ownership_status_id, "notes": payload.notes},
+        )
+
+        db.execute(
+            text("""
+                UPDATE tbl_ttrpg_details
+                SET title = :title,
+                    title_sort = :title_sort,
+                    description = :description,
+                    system_edition_id = :edition_id,
+                    line_id = :line_id,
+                    book_type_id = :book_type_id,
+                    publisher_id = :pub_id,
+                    release_date = :release_date,
+                    cover_image_url = :cover,
+                    api_source = :api_source,
+                    external_work_id = :ext_id
+                WHERE item_id = :id
+            """),
+            {
+                "id": item_id,
+                "title": payload.title.strip(),
+                "title_sort": _make_title_sort(payload.title.strip()),
+                "description": payload.description,
+                "edition_id": system_edition_id,
+                "line_id": line_id,
+                "book_type_id": payload.book_type_id,
+                "pub_id": publisher_id,
+                "release_date": payload.release_date,
+                "cover": payload.cover_image_url,
+                "api_source": payload.api_source,
+                "ext_id": payload.external_work_id,
+            },
+        )
+
+        db.execute(text("DELETE FROM xref_ttrpg_book_authors WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_ttrpg_copies WHERE item_id = :id"), {"id": item_id})
+        _insert_ttrpg_authors(db, item_id, payload.author_names or [])
+        _insert_ttrpg_copies(db, item_id, payload.copies or [])
+
+        db.commit()
+        book = _get_ttrpg_detail(db, item_id)
+        return {"item_id": item_id, "status": "updated", "ttrpg": book}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/ttrpg/{item_id}")
+def delete_ttrpg(item_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+            {"id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="TTRPG book not found.")
+
+        db.execute(text("DELETE FROM xref_ttrpg_book_authors WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_ttrpg_copies WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_ttrpg_details WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": item_id}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.patch("/ttrpg/bulk")
+def bulk_update_ttrpg(payload: TTRPGBulkUpdatePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+            updates = []
+            params = {"id": item_id}
+            if payload.fields.ownership_status_id is not None:
+                updates.append("ownership_status_id = :own")
+                params["own"] = payload.fields.ownership_status_id
+            if payload.fields.top_level_category_id is not None:
+                updates.append("top_level_category_id = :cat")
+                params["cat"] = payload.fields.top_level_category_id
+
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                db.execute(
+                    text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :id"),
+                    params,
+                )
+
+        db.commit()
+        return {"updated": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.post("/ttrpg/bulk-delete")
+def bulk_delete_ttrpg(payload: BulkDeletePayload):
+    db = SessionLocal()
+    try:
+        for item_id in payload.item_ids:
+            existing = db.execute(
+                text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
+                {"id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
+
+            db.execute(text("DELETE FROM xref_ttrpg_book_authors WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_ttrpg_copies WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_ttrpg_details WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+        db.commit()
+        return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 # ---------- Frontend static files (production) ----------

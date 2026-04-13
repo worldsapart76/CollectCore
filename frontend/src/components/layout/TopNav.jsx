@@ -27,7 +27,7 @@ export default function TopNav({ theme, toggleTheme }) {
           setEnabledModuleIds([]);
         }
       })
-      .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS)));
+      .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS).sort()));
   }, []);
 
   useEffect(() => {
@@ -78,7 +78,8 @@ export default function TopNav({ theme, toggleTheme }) {
 
   const enabledModules = enabledModuleIds
     .map(id => MODULE_DEFS[id])
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <header className="topnav">

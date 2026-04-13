@@ -6,6 +6,7 @@ import {
   fetchOwnershipStatuses,
   exportPhotocards,
 } from "../api";
+import { exportState } from "../photocardPageState";
 import PhotocardFilters from "../components/photocard/PhotocardFilters";
 import {
   emptySection,
@@ -33,12 +34,14 @@ const DEFAULT_FILTERS = {
   member: emptySection(),
   category: emptySection(),
   sourceOrigin: emptySection(),
+  cardType: emptySection(),
   version: emptySection(),
   ownership: emptySection(),
   backImage: emptySection(),
 };
 
 const SORT_OPTIONS = [
+  { value: "default", label: "Default" },
   { value: "id_asc", label: "ID ↑" },
   { value: "id_desc", label: "ID ↓" },
   { value: "member", label: "Member" },
@@ -54,12 +57,20 @@ export default function ExportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const [sortMode, setSortMode] = useState("id_asc");
-  const [includeCaptions, setIncludeCaptions] = useState(true);
-  const [includeBacks, setIncludeBacks] = useState(false);
+  const [filters, setFilters] = useState(() => exportState.filters ?? DEFAULT_FILTERS);
+  const [sortMode, setSortMode] = useState(exportState.sortMode);
+  const [includeCaptions, setIncludeCaptions] = useState(exportState.includeCaptions);
+  const [includeBacks, setIncludeBacks] = useState(exportState.includeBacks);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+
+  // Sync filter/view state back to module store on changes
+  useEffect(() => {
+    exportState.filters         = filters;
+    exportState.sortMode        = sortMode;
+    exportState.includeCaptions = includeCaptions;
+    exportState.includeBacks    = includeBacks;
+  }, [filters, sortMode, includeCaptions, includeBacks]);
 
   useEffect(() => {
     async function loadAll() {
@@ -152,6 +163,11 @@ export default function ExportPage() {
         applySection(filters.sourceOrigin, [String(c.source_origin_id)])
       );
     }
+    if (sectionActive(filters.cardType)) {
+      result = result.filter((c) =>
+        applySection(filters.cardType, [c.is_special ? "special" : "regular"])
+      );
+    }
     if (sectionActive(filters.version)) {
       result = result.filter((c) =>
         applySection(filters.version, [c.version || ""])
@@ -195,8 +211,22 @@ export default function ExportPage() {
       case "group":
         return result.sort((a, b) => (a.group_name || "").localeCompare(b.group_name || ""));
       case "id_asc":
-      default:
         return result.sort((a, b) => a.item_id - b.item_id);
+      case "default":
+      default:
+        return result.sort((a, b) => {
+          const g = (a.group_name || "").localeCompare(b.group_name || "");
+          if (g !== 0) return g;
+          const c = (a.category || "").localeCompare(b.category || "");
+          if (c !== 0) return c;
+          const so = (a.source_origin || "").localeCompare(b.source_origin || "");
+          if (so !== 0) return so;
+          const ct = (a.is_special ? 1 : 0) - (b.is_special ? 1 : 0);
+          if (ct !== 0) return ct;
+          const v = (a.version || "").localeCompare(b.version || "");
+          if (v !== 0) return v;
+          return memberSortKey(a) - memberSortKey(b);
+        });
     }
   }, [filteredCards, sortMode]);
 
@@ -403,9 +433,9 @@ const styles = {
     fontSize: 13,
     fontWeight: "bold",
     cursor: "pointer",
-    background: "#1565c0",
+    background: "#377e00",
     color: "#fff",
-    border: "1px solid #1565c0",
+    border: "1px solid #377e00",
     borderRadius: 3,
   },
   exportBtnDisabled: {

@@ -6,6 +6,102 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-12 — Photocard module UX improvements
+
+**Completed:**
+- **Filter/form state persistence:** Inbox, Library, and Export tabs now preserve their filter selections and form values when switching tabs. Module-level store (`photocardPageState.js`) persists state for the session. InboxPage preserves group, category, ownership, members, source origin, card type, version, and notes. Library preserves all filter sections, sort mode, view mode, size, captions, and page size. Export preserves filters, sort, captions, and backs toggle.
+- **Modal prev/next navigation:** PhotocardDetailModal now accepts `allCards` prop and shows ‹/› nav buttons with a position counter (e.g. "3/47"). Clicking prev/next auto-saves if dirty then navigates.
+- **Modal auto-save:** Changes auto-save when closing via X or clicking the overlay. Cancel button explicitly discards unsaved changes. Explicit Save button saves and closes (unchanged UX). Save errors block close/navigation and display inline.
+- **Bulk edit Card Type:** Added Regular/★ Special toggle to PhotocardBulkEdit. Backend `is_special` field in `BulkUpdateFields` was already supported.
+
+**Next:**
+- Run migration scripts for any pending modules
+- Test all photocard modal flows (prev/next, auto-save, cancel discard)
+
+### 2026-04-12 — TTRPG module v1 complete
+
+**Completed:**
+- **Schema:** Added `lkup_ttrpg_system_editions`, `lkup_ttrpg_lines`, `lkup_ttrpg_book_types`, `lkup_ttrpg_format_types`, `lkup_ttrpg_publishers`, `lkup_ttrpg_authors`, `tbl_ttrpg_details`, `tbl_ttrpg_copies`, `xref_ttrpg_book_authors` to `schema.sql` with indexes and seed data
+- **Seed data:** Collection type `ttrpg` (sort_order=8); 6 game systems (D&D, Pathfinder, Blades in the Dark, Call of Cthulhu, Shadowrun, Other); 6 book types (Core Rulebook, Adventure Module, Sourcebook, Supplement, Campaign Setting, Other); 3 format types (Physical, PDF, Other)
+- **Migration script:** `backend/migrate_ttrpg_schema.py` — idempotent
+- **Backend (`main.py`):** `TTRPG_COLLECTION_TYPE_ID` constant; Pydantic models (`TTRPGCopyEntry`, `TTRPGCreate`, `TTRPGUpdate`, `TTRPGBulkUpdateFields`, `TTRPGBulkUpdatePayload`); helpers (`_upsert_ttrpg_author`, `_upsert_ttrpg_publisher`, `_upsert_ttrpg_system_edition`, `_upsert_ttrpg_line`, `_insert_ttrpg_authors`, `_insert_ttrpg_copies`, `_get_ttrpg_detail`); endpoints: `GET /ttrpg/systems`, `/system-editions`, `/lines`, `/book-types`, `/format-types`, `/publishers`, `/authors`, `GET /ttrpg`, `GET /ttrpg/{id}`, `POST /ttrpg`, `PUT /ttrpg/{id}`, `DELETE /ttrpg/{id}`, `PATCH /ttrpg/bulk`, `POST /ttrpg/bulk-delete`
+- **System edition + line upsert:** New editions and lines are created inline on save, scoped to the selected game system (`top_level_category_id`). Datalist inputs load existing entries for the selected system.
+- **Frontend:** `api.js` — all TTRPG API functions; `modules.js` + `App.jsx` + `vite.config.js` wired; `TTRPGIngestPage.jsx` (game system select, system edition + line with datalist, book type, ownership, publisher, authors M:N, copies sub-editor with format/ISBN/ownership, cover URL, description, notes); `TTRPGLibraryPage.jsx` (filter sidebar with ownership/system/book-type/author/publisher, table with edition+line column, copies summary column, edit modal with full copies + scoped edition/line datalists, bulk edit/delete)
+
+**Next:**
+- Run `python migrate_ttrpg_schema.py` to apply schema to live DB
+- Test TTRPG module end-to-end
+- All planned modules are now complete (Video Games, Music, Video, Board Games, TTRPG)
+
+### 2026-04-12 — Board Games module v1 complete
+
+**Completed:**
+- **Schema:** Added `lkup_boardgame_publishers`, `lkup_boardgame_designers`, `tbl_boardgame_details`, `tbl_boardgame_expansions`, `xref_boardgame_designers` to `schema.sql` with indexes and seed data
+- **Seed data:** Collection type `boardgames` (sort_order=7); 4 player-count categories (Solo/2-Player/Small Group/Large Group)
+- **Migration script:** `backend/migrate_boardgames_schema.py` — idempotent
+- **Backend (`main.py`):** `BOARDGAMES_COLLECTION_TYPE_ID` constant; Pydantic models (`BoardgameExpansionEntry`, `BoardgameCreate`, `BoardgameUpdate`, `BoardgameBulkUpdateFields`, `BoardgameBulkUpdatePayload`); helpers (`_upsert_boardgame_designer`, `_upsert_boardgame_publisher`, `_insert_boardgame_designers`, `_insert_boardgame_expansions`, `_get_boardgame_detail`); endpoints: `GET /boardgames/categories`, `/designers`, `/publishers`, `/bgg-search`, `/bgg-detail/{bgg_id}`, `GET /boardgames`, `GET /boardgames/{id}`, `POST /boardgames`, `PUT /boardgames/{id}`, `DELETE /boardgames/{id}`, `PATCH /boardgames/bulk`, `POST /boardgames/bulk-delete`
+- **BGG API:** `GET /boardgames/bgg-search?q=...` + `GET /boardgames/bgg-detail/{bgg_id}` — no API key required; pre-fills title, year, players, description, cover, designers, publisher, expansions list
+- **Frontend:** `api.js` — all board games API functions; `modules.js` + `App.jsx` + `vite.config.js` wired; `BoardgamesIngestPage.jsx` (BGG search panel, title, player count category, ownership, year, min/max players, designers M:N, publisher single, cover URL, description, notes, expansions sub-editor); `BoardgamesLibraryPage.jsx` (filter sidebar with ownership/player count/designer/publisher filters, table with thumbnails toggle, expansion count column, edit modal with full expansions editor, bulk edit/delete)
+
+**Next:**
+- Run `python migrate_boardgames_schema.py` to apply schema to live DB
+- Test Board Games module end-to-end
+- TTRPG module (final module in build order)
+
+### 2026-04-12 — Video module v1 complete
+
+**Completed:**
+- **Schema:** Added `lkup_video_format_types`, `lkup_video_directors`, `lkup_video_cast`, `lkup_video_top_genres`, `lkup_video_sub_genres`, `tbl_video_details`, `tbl_video_copies`, `tbl_video_seasons`, `xref_video_directors`, `xref_video_cast`, `xref_video_genres` to `schema.sql` with indexes and seed data
+- **Seed data:** Collection type `video` (sort_order=6); 4 video types (Movie, TV Series, Miniseries, Concert/Live); 7 format types (Blu-ray, 4K UHD, DVD, Digital, Streaming, VHS, Other); 10 top genres (Action through Other); watch statuses Watched/Currently Watching/Want to Watch added to `lkup_book_read_statuses` (Abandoned already there from Video Games)
+- **Migration script:** `backend/migrate_video_schema.py` — idempotent
+- **Backend (`main.py`):** `VIDEO_COLLECTION_TYPE_ID` constant; `TMDB_API_KEY` env var; Pydantic models (`VideoCopyEntry`, `VideoSeasonEntry`, `VideoCreate`, `VideoUpdate`, `VideoBulkUpdateFields`, `VideoBulkUpdatePayload`); helpers (`_upsert_video_director`, `_upsert_video_cast_member`, `_insert_video_relationships`, `_insert_video_copies`, `_insert_video_seasons`, `_get_video_detail`); endpoints: `GET /video/categories`, `/format-types`, `/genres`, `/directors`, `/cast`, `/watch-statuses`, `/tmdb-search`, `/tmdb-detail/{id}`, `GET /video`, `GET /video/{id}`, `POST /video`, `PUT /video/{id}`, `DELETE /video/{id}`, `PATCH /video/bulk`, `POST /video/bulk-delete`
+- **TMDB integration:** `GET /video/tmdb-search?q=...&media_type=movie|tv` (proxy); `GET /video/tmdb-detail/{id}?media_type=movie|tv` returns full detail with directors, cast, and seasons stub for TV. Requires `TMDB_API_KEY` in `.env`.
+- **Sub-table routing:** TV Series uses `tbl_video_seasons`; Movie/Miniseries/Concert/Live use `tbl_video_copies`. Frontend detects category name to show the right editor.
+- **Frontend:** `api.js` — all video API functions; `modules.js` + `App.jsx` wired; `VideoIngestPage.jsx` (TMDB search panel, content type selector, copies/seasons editor based on type, directors/cast M:N, genre picker, watch status, cover image); `VideoLibraryPage.jsx` (filter sidebar, table with copies/seasons summary column, edit modal with full copies/seasons editor, bulk edit/delete)
+
+**Next:**
+- Run `python migrate_music_schema.py` then `python migrate_video_schema.py` to apply both to live DB
+- Test Music module end-to-end, then Video module
+- Add `TMDB_API_KEY=your_key` to `.env` to enable TMDB search (get free key at themoviedb.org)
+- Board Games module (next in build order)
+
+### 2026-04-12 — UI polish pass (multi-item fixes)
+
+**Completed:**
+- **Blue → green audit:** Export PDF button, Inbox ingest/attach buttons, inbox file selection highlight, candidate card selection, upload zone drag highlight — all now use the green palette
+- **Inbox: larger card view default** — `previewLarge` now defaults to `true` (was `false`)
+- **PDF export alignment** — when exporting with backs enabled, cards without a back image now get a gray placeholder cell so the rest of the sheet stays aligned
+- **VideoGames + Music ingest pages centered** — added `margin: "0 auto"` to match Books/GN layout (should be the default for all ingest pages going forward)
+- **Music library grid: editions column** — replaced "Format(s)" column with "Editions" showing `Version (Format, Owned Status)` per edition, concatenated; backend now returns `editions_summary` in the list endpoint
+- **Home tiles restyled** — removed redundant "Open x library" label; collection name now dark green (`--green`); tile background is light green sidebar color (`--bg-sidebar`); grid centered on page
+- **Module sort: alphabetical** — home page tiles and switcher dropdown now sort by label alphabetically; applies to all enabled modules
+
+**Added to CLAUDE.md deferred list (items 11-14):**
+- Dark mode needs full revision
+- Distributed: hidden PowerShell + startup popup
+- Photocard: filter state persistence across Inbox/Library/Export
+- Library pop-ups: always offer image update option
+
+**Added to CLAUDE.md:** Cloud Hosting Future Features section (collection sharing)
+
+**Next:**
+- Run music migration and test Music module end-to-end
+- Video module (next in build order)
+
+### 2026-04-11 — Music module v1 complete
+
+**Completed:**
+- **Schema:** Added `lkup_music_format_types`, `lkup_music_artists`, `lkup_music_top_genres`, `lkup_music_sub_genres`, `tbl_music_release_details`, `tbl_music_songs`, `tbl_music_editions`, `xref_music_release_artists`, `xref_music_release_genres` to `schema.sql` with indexes and seed data
+- **Seed data:** Collection type `music` (sort_order=5); 6 release types (Album, EP, Single, Compilation, Live, Soundtrack); 6 format types (CD, Vinyl, Cassette, Digital, Streaming, Other); 10 top genres (K-pop through Other)
+- **Migration script:** `backend/migrate_music_schema.py` — idempotent, updates `modules_enabled` to include `music`
+- **Backend (`main.py`):** `MUSIC_COLLECTION_TYPE_ID` constant; Pydantic models (`MusicSongEntry`, `MusicEditionEntry`, `MusicReleaseCreate`, `MusicReleaseUpdate`, `MusicBulkUpdatePayload`); helpers (`_upsert_music_artist`, `_insert_music_relationships`, `_insert_music_songs`, `_insert_music_editions`, `_get_music_detail`); endpoints: `GET /music/release-types`, `/format-types`, `/genres`, `/artists`, `GET /music`, `GET /music/{id}`, `POST /music`, `PUT /music/{id}`, `DELETE /music/{id}`, `PATCH /music/bulk`, `POST /music/bulk-delete`
+- **Frontend:** `api.js` — all music API functions; `modules.js` + `App.jsx` wired; `MusicIngestPage.jsx` (release type, ownership, release date, artists M:N, genre picker, cover URL, description, notes, track list editor, editions/versions editor); `MusicLibraryPage.jsx` (filter sidebar, table view with thumbnail toggle, edit modal with full track list + editions, bulk edit/delete)
+
+**Next:**
+- Run `python migrate_music_schema.py` to apply schema to live DB
+- Test Music module end-to-end
+- Video module (next in build order)
+
 ### 2026-04-11 — Video Games: testing fixes + RAWG API integration
 
 **Completed:**

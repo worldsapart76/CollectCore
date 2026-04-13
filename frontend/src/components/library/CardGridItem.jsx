@@ -26,6 +26,10 @@ function getOwnershipBadge(status) {
       return { label: "W", color: "#ffd600" }; // yellow
     case "For Trade":
       return { label: "T", color: "#ff3b3b" }; // red
+    case "Pending - Outgoing":
+      return { label: "P", color: "#ff9900" }; // orange
+    case "Pending - Incoming":
+      return { label: "I", color: "#00bfff" }; // sky blue
     default:
       return null;
   }

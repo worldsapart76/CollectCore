@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS tbl_photocard_details (
     group_id          INTEGER NOT NULL,
     source_origin_id  INTEGER,
     version           TEXT,
+    is_special        INTEGER NOT NULL DEFAULT 1,
 
     FOREIGN KEY (item_id) REFERENCES tbl_items(item_id),
     FOREIGN KEY (group_id) REFERENCES lkup_photocard_groups(group_id),
@@ -450,8 +451,9 @@ INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_or
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('wanted',         'Wanted',         2);
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('trade',          'Trade',          3);
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('formerly_owned', 'Formerly Owned', 4);
-INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending',        'Pending',        5);
-INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('borrowed',       'Borrowed',       6);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending_outgoing', 'Pending - Outgoing', 5);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('borrowed',          'Borrowed',          6);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending_incoming',  'Pending - Incoming', 7);
 
 
 -- ============================================================
@@ -1020,6 +1022,204 @@ INSERT OR IGNORE INTO lkup_game_top_genres (genre_name, sort_order) VALUES ('Oth
 
 
 -- ============================================================
+-- MUSIC LOOKUP TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS lkup_music_format_types (
+    format_type_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    format_name     TEXT NOT NULL UNIQUE,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_active       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_music_artists (
+    artist_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name  TEXT NOT NULL UNIQUE,
+    artist_sort  TEXT,
+    is_active    INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_music_top_genres (
+    top_genre_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    genre_name    TEXT NOT NULL UNIQUE,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    is_active     INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_music_sub_genres (
+    sub_genre_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    top_genre_id   INTEGER NOT NULL,
+    sub_genre_name TEXT NOT NULL,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_active      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (sub_genre_name, top_genre_id),
+    FOREIGN KEY (top_genre_id) REFERENCES lkup_music_top_genres(top_genre_id)
+);
+
+
+-- ============================================================
+-- MUSIC CORE TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS tbl_music_release_details (
+    item_id           INTEGER PRIMARY KEY,
+    title             TEXT NOT NULL,
+    title_sort        TEXT,
+    description       TEXT,
+    release_date      TEXT,
+    cover_image_url   TEXT,
+    api_source        TEXT,
+    external_work_id  TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tbl_music_songs (
+    song_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id           INTEGER NOT NULL,
+    title             TEXT NOT NULL,
+    duration_seconds  INTEGER,
+    track_number      INTEGER,
+    disc_number       INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (item_id) REFERENCES tbl_music_release_details(item_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tbl_music_editions (
+    edition_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    format_type_id      INTEGER,
+    version_name        TEXT,
+    label               TEXT,
+    catalog_number      TEXT,
+    barcode             TEXT,
+    notes               TEXT,
+    ownership_status_id INTEGER,
+    FOREIGN KEY (item_id) REFERENCES tbl_music_release_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (format_type_id) REFERENCES lkup_music_format_types(format_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+
+-- ============================================================
+-- MUSIC XREF TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS xref_music_release_artists (
+    xref_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id      INTEGER NOT NULL,
+    artist_id    INTEGER NOT NULL,
+    artist_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (item_id, artist_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_music_release_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (artist_id) REFERENCES lkup_music_artists(artist_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_music_release_genres (
+    xref_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id       INTEGER NOT NULL,
+    top_genre_id  INTEGER NOT NULL,
+    sub_genre_id  INTEGER,
+    FOREIGN KEY (item_id) REFERENCES tbl_music_release_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (top_genre_id) REFERENCES lkup_music_top_genres(top_genre_id),
+    FOREIGN KEY (sub_genre_id) REFERENCES lkup_music_sub_genres(sub_genre_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_music_genres_with_sub
+ON xref_music_release_genres(item_id, top_genre_id, sub_genre_id)
+WHERE sub_genre_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_music_genres_no_sub
+ON xref_music_release_genres(item_id, top_genre_id)
+WHERE sub_genre_id IS NULL;
+
+
+-- ============================================================
+-- MUSIC INDEXES
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_music_release_details_title
+ON tbl_music_release_details(title);
+
+CREATE INDEX IF NOT EXISTS idx_music_songs_item
+ON tbl_music_songs(item_id);
+
+CREATE INDEX IF NOT EXISTS idx_music_editions_item
+ON tbl_music_editions(item_id);
+
+
+-- ============================================================
+-- MUSIC SEED DATA
+-- ============================================================
+
+-- format types
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('CD',        1);
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('Vinyl',     2);
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('Cassette',  3);
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('Digital',   4);
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('Streaming', 5);
+INSERT OR IGNORE INTO lkup_music_format_types (format_name, sort_order) VALUES ('Other',     6);
+
+-- collection type
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('music', 'Music', 5);
+
+-- top-level categories (release types, scoped to music)
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'Album', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'Album'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'EP', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'EP'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'Single', 3
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'Single'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'Compilation', 4
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'Compilation'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'Live', 5
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'Live'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'music'), 'Soundtrack', 6
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'music' AND ltc.category_name = 'Soundtrack'
+);
+
+-- top genres
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('K-pop',       1);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Pop',         2);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Rock',        3);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Electronic',  4);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Hip-Hop',     5);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('R&B',         6);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Jazz',        7);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Classical',   8);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Country',     9);
+INSERT OR IGNORE INTO lkup_music_top_genres (genre_name, sort_order) VALUES ('Other',      10);
+
+
+-- ============================================================
 -- APP SETTINGS
 -- ============================================================
 
@@ -1029,4 +1229,448 @@ CREATE TABLE IF NOT EXISTS tbl_app_settings (
 );
 
 INSERT OR IGNORE INTO tbl_app_settings (key, value)
-VALUES ('modules_enabled', '["photocards","books","graphicnovels","videogames"]');
+VALUES ('modules_enabled', '["photocards","books","graphicnovels","videogames","music","video","boardgames","ttrpg"]');
+
+-- For existing installs: add any missing modules that were added after the initial seed.
+-- Each UPDATE is a no-op if the module is already present.
+UPDATE tbl_app_settings
+SET value = (SELECT CASE WHEN value LIKE '%"music"%' THEN value ELSE REPLACE(value, ']', ',"music"]') END FROM tbl_app_settings WHERE key = 'modules_enabled')
+WHERE key = 'modules_enabled';
+
+UPDATE tbl_app_settings
+SET value = (SELECT CASE WHEN value LIKE '%"video"%' THEN value ELSE REPLACE(value, ']', ',"video"]') END FROM tbl_app_settings WHERE key = 'modules_enabled')
+WHERE key = 'modules_enabled';
+
+UPDATE tbl_app_settings
+SET value = (SELECT CASE WHEN value LIKE '%"boardgames"%' THEN value ELSE REPLACE(value, ']', ',"boardgames"]') END FROM tbl_app_settings WHERE key = 'modules_enabled')
+WHERE key = 'modules_enabled';
+
+UPDATE tbl_app_settings
+SET value = (SELECT CASE WHEN value LIKE '%"ttrpg"%' THEN value ELSE REPLACE(value, ']', ',"ttrpg"]') END FROM tbl_app_settings WHERE key = 'modules_enabled')
+WHERE key = 'modules_enabled';
+
+
+-- ============================================================
+-- VIDEO MODULE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS lkup_video_format_types (
+    format_type_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    format_name     TEXT NOT NULL UNIQUE,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_active       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_video_directors (
+    director_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    director_name  TEXT NOT NULL UNIQUE,
+    is_active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_video_cast (
+    cast_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    cast_name  TEXT NOT NULL UNIQUE,
+    is_active  INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_video_top_genres (
+    top_genre_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    genre_name    TEXT NOT NULL UNIQUE,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    is_active     INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_video_sub_genres (
+    sub_genre_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    top_genre_id   INTEGER NOT NULL,
+    sub_genre_name TEXT NOT NULL,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_active      INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (sub_genre_name, top_genre_id),
+    FOREIGN KEY (top_genre_id) REFERENCES lkup_video_top_genres(top_genre_id)
+);
+
+CREATE TABLE IF NOT EXISTS tbl_video_details (
+    item_id           INTEGER PRIMARY KEY,
+    title             TEXT NOT NULL,
+    title_sort        TEXT,
+    description       TEXT,
+    release_date      TEXT,
+    runtime_minutes   INTEGER,
+    cover_image_url   TEXT,
+    api_source        TEXT,
+    external_work_id  TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tbl_video_copies (
+    copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    format_type_id      INTEGER,
+    ownership_status_id INTEGER,
+    notes               TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (format_type_id) REFERENCES lkup_video_format_types(format_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+CREATE TABLE IF NOT EXISTS tbl_video_seasons (
+    season_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    season_number       INTEGER NOT NULL,
+    episode_count       INTEGER,
+    format_type_id      INTEGER,
+    ownership_status_id INTEGER,
+    notes               TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (format_type_id) REFERENCES lkup_video_format_types(format_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_video_directors (
+    xref_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id        INTEGER NOT NULL,
+    director_id    INTEGER NOT NULL,
+    director_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (item_id, director_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (director_id) REFERENCES lkup_video_directors(director_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_video_cast (
+    xref_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id    INTEGER NOT NULL,
+    cast_id    INTEGER NOT NULL,
+    cast_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (item_id, cast_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (cast_id) REFERENCES lkup_video_cast(cast_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_video_genres (
+    xref_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id       INTEGER NOT NULL,
+    top_genre_id  INTEGER NOT NULL,
+    sub_genre_id  INTEGER,
+    FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (top_genre_id) REFERENCES lkup_video_top_genres(top_genre_id),
+    FOREIGN KEY (sub_genre_id) REFERENCES lkup_video_sub_genres(sub_genre_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_video_genres_with_sub
+ON xref_video_genres(item_id, top_genre_id, sub_genre_id)
+WHERE sub_genre_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_video_genres_no_sub
+ON xref_video_genres(item_id, top_genre_id)
+WHERE sub_genre_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_video_details_title ON tbl_video_details(title);
+CREATE INDEX IF NOT EXISTS idx_video_copies_item ON tbl_video_copies(item_id);
+CREATE INDEX IF NOT EXISTS idx_video_seasons_item ON tbl_video_seasons(item_id);
+
+-- Video seed data
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('Blu-ray',   1);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('4K UHD',    2);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('DVD',       3);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('Digital',   4);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('Streaming', 5);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('VHS',       6);
+INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('Other',     7);
+
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Action',      1);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Comedy',      2);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Drama',       3);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Sci-Fi',      4);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Horror',      5);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Romance',     6);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Documentary', 7);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Animation',   8);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('K-drama',     9);
+INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Other',      10);
+
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Watched',            20);
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Currently Watching', 21);
+INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Want to Watch',      22);
+
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('video', 'Video', 6);
+
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'video'), 'Movie', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'video' AND ltc.category_name = 'Movie'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'video'), 'TV Series', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'video' AND ltc.category_name = 'TV Series'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'video'), 'Miniseries', 3
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'video' AND ltc.category_name = 'Miniseries'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'video'), 'Concert/Live', 4
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'video' AND ltc.category_name = 'Concert/Live'
+);
+
+
+-- ============================================================
+-- BOARD GAMES MODULE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS lkup_boardgame_publishers (
+    publisher_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    publisher_name  TEXT NOT NULL UNIQUE,
+    is_active       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_boardgame_designers (
+    designer_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    designer_name  TEXT NOT NULL UNIQUE,
+    is_active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS tbl_boardgame_details (
+    item_id           INTEGER PRIMARY KEY,
+    title             TEXT NOT NULL,
+    title_sort        TEXT,
+    description       TEXT,
+    year_published    INTEGER,
+    min_players       INTEGER,
+    max_players       INTEGER,
+    publisher_id      INTEGER,
+    cover_image_url   TEXT,
+    api_source        TEXT,
+    external_work_id  TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (publisher_id) REFERENCES lkup_boardgame_publishers(publisher_id)
+);
+
+CREATE TABLE IF NOT EXISTS tbl_boardgame_expansions (
+    expansion_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    title               TEXT NOT NULL,
+    year_published      INTEGER,
+    ownership_status_id INTEGER,
+    external_work_id    TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_boardgame_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_boardgame_designers (
+    xref_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id        INTEGER NOT NULL,
+    designer_id    INTEGER NOT NULL,
+    designer_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (item_id, designer_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_boardgame_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (designer_id) REFERENCES lkup_boardgame_designers(designer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_boardgame_details_title ON tbl_boardgame_details(title);
+CREATE INDEX IF NOT EXISTS idx_boardgame_expansions_item ON tbl_boardgame_expansions(item_id);
+
+-- Board Games seed data
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('boardgames', 'Board Games', 7);
+
+-- top-level categories (player count, scoped to boardgames)
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'boardgames'), 'Solo (1 player)', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'boardgames' AND ltc.category_name = 'Solo (1 player)'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'boardgames'), '2-Player', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'boardgames' AND ltc.category_name = '2-Player'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'boardgames'), 'Small Group (3-4)', 3
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'boardgames' AND ltc.category_name = 'Small Group (3-4)'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'boardgames'), 'Large Group (5+)', 4
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'boardgames' AND ltc.category_name = 'Large Group (5+)'
+);
+
+-- ============================================================
+-- TTRPG MODULE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_system_editions (
+    edition_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_category_id INTEGER NOT NULL,
+    edition_name       TEXT NOT NULL,
+    sort_order         INTEGER NOT NULL DEFAULT 0,
+    is_active          INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (system_category_id) REFERENCES lkup_top_level_categories(top_level_category_id),
+    UNIQUE (system_category_id, edition_name)
+);
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_lines (
+    line_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    system_category_id INTEGER NOT NULL,
+    line_name          TEXT NOT NULL,
+    sort_order         INTEGER NOT NULL DEFAULT 0,
+    is_active          INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (system_category_id) REFERENCES lkup_top_level_categories(top_level_category_id),
+    UNIQUE (system_category_id, line_name)
+);
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_book_types (
+    book_type_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_type_name TEXT NOT NULL UNIQUE,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_format_types (
+    format_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    format_name    TEXT NOT NULL UNIQUE,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_publishers (
+    publisher_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    publisher_name TEXT NOT NULL UNIQUE,
+    is_active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS lkup_ttrpg_authors (
+    author_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    author_name TEXT NOT NULL UNIQUE,
+    is_active   INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS tbl_ttrpg_details (
+    item_id           INTEGER PRIMARY KEY,
+    title             TEXT NOT NULL,
+    title_sort        TEXT,
+    description       TEXT,
+    system_edition_id INTEGER,
+    line_id           INTEGER,
+    book_type_id      INTEGER,
+    publisher_id      INTEGER,
+    release_date      TEXT,
+    cover_image_url   TEXT,
+    api_source        TEXT,
+    external_work_id  TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (system_edition_id) REFERENCES lkup_ttrpg_system_editions(edition_id),
+    FOREIGN KEY (line_id) REFERENCES lkup_ttrpg_lines(line_id),
+    FOREIGN KEY (book_type_id) REFERENCES lkup_ttrpg_book_types(book_type_id),
+    FOREIGN KEY (publisher_id) REFERENCES lkup_ttrpg_publishers(publisher_id)
+);
+
+CREATE TABLE IF NOT EXISTS tbl_ttrpg_copies (
+    copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    format_type_id      INTEGER,
+    isbn_13             TEXT,
+    isbn_10             TEXT,
+    ownership_status_id INTEGER,
+    notes               TEXT,
+    FOREIGN KEY (item_id) REFERENCES tbl_ttrpg_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (format_type_id) REFERENCES lkup_ttrpg_format_types(format_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+CREATE TABLE IF NOT EXISTS xref_ttrpg_book_authors (
+    xref_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id      INTEGER NOT NULL,
+    author_id    INTEGER NOT NULL,
+    author_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (item_id, author_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_ttrpg_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (author_id) REFERENCES lkup_ttrpg_authors(author_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ttrpg_details_title ON tbl_ttrpg_details(title);
+CREATE INDEX IF NOT EXISTS idx_ttrpg_copies_item ON tbl_ttrpg_copies(item_id);
+CREATE INDEX IF NOT EXISTS idx_ttrpg_system_editions_system ON lkup_ttrpg_system_editions(system_category_id);
+CREATE INDEX IF NOT EXISTS idx_ttrpg_lines_system ON lkup_ttrpg_lines(system_category_id);
+
+-- TTRPG seed data
+INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
+VALUES ('ttrpg', 'TTRPG', 8);
+
+-- Top-level categories (game systems)
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Dungeons & Dragons', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Dungeons & Dragons'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Pathfinder', 2
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Pathfinder'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Blades in the Dark', 3
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Blades in the Dark'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Call of Cthulhu', 4
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Call of Cthulhu'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Shadowrun', 5
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Shadowrun'
+);
+INSERT OR IGNORE INTO lkup_top_level_categories (collection_type_id, category_name, sort_order)
+SELECT (SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = 'ttrpg'), 'Other', 99
+WHERE NOT EXISTS (
+    SELECT 1 FROM lkup_top_level_categories ltc
+    JOIN lkup_collection_types lct ON ltc.collection_type_id = lct.collection_type_id
+    WHERE lct.collection_type_code = 'ttrpg' AND ltc.category_name = 'Other'
+);
+
+-- Book types
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Core Rulebook', 1);
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Adventure Module', 2);
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Sourcebook', 3);
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Supplement', 4);
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Campaign Setting', 5);
+INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES ('Other', 99);
+
+-- Format types
+INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('Physical', 1);
+INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('PDF', 2);
+INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('Other', 99);

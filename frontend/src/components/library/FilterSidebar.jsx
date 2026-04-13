@@ -262,13 +262,25 @@ export function SearchableTriStateSection({ title, items, section, onChange, sel
     const unselected = items.filter((i) => getItemState(section, i.id) === "none");
     if (!search.trim()) return selectedOnly ? [] : unselected;
     const q = search.toLowerCase();
-    return unselected.filter((i) => i.label.toLowerCase().includes(q));
+    const matched = unselected.filter((i) => i.label.toLowerCase().includes(q));
+    // Sort: exact match first, then starts-with, then contains
+    matched.sort((a, b) => {
+      const al = a.label.toLowerCase();
+      const bl = b.label.toLowerCase();
+      const aExact = al === q ? 0 : al.startsWith(q) ? 1 : 2;
+      const bExact = bl === q ? 0 : bl.startsWith(q) ? 1 : 2;
+      return aExact - bExact;
+    });
+    return matched;
   }, [items, section, search, selectedOnly]);
 
+  const SELECTED_ONLY_DEFAULT = 8;
   const shown = selectedOnly
-    ? unselectedFiltered.slice(0, 8)
+    ? expanded ? unselectedFiltered : unselectedFiltered.slice(0, SELECTED_ONLY_DEFAULT)
     : expanded ? unselectedFiltered : unselectedFiltered.slice(0, 5);
-  const hasMore = !selectedOnly && unselectedFiltered.length > 5;
+  const hasMore = selectedOnly
+    ? unselectedFiltered.length > SELECTED_ONLY_DEFAULT
+    : unselectedFiltered.length > 5;
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -328,7 +340,9 @@ export function SearchableTriStateSection({ title, items, section, onChange, sel
           onClick={() => setExpanded((p) => !p)}
           style={{ ...btnSm, marginTop: 4 }}
         >
-          {expanded ? "Show less" : `+${unselectedFiltered.length - 5} more`}
+          {expanded
+            ? "Show less"
+            : `+${unselectedFiltered.length - (selectedOnly ? SELECTED_ONLY_DEFAULT : 5)} more`}
         </button>
       )}
     </div>

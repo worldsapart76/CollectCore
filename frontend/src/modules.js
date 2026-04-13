@@ -40,6 +40,46 @@ export const MODULE_DEFS = {
       { label: 'Library', to: '/videogames/library' },
     ],
   },
+  music: {
+    id: 'music',
+    label: 'Music',
+    primaryPath: '/music/library',
+    description: 'Track your music collection',
+    links: [
+      { label: 'Add',     to: '/music/add' },
+      { label: 'Library', to: '/music/library' },
+    ],
+  },
+  video: {
+    id: 'video',
+    label: 'Video',
+    primaryPath: '/video/library',
+    description: 'Track your movie and TV collection',
+    links: [
+      { label: 'Add',     to: '/video/add' },
+      { label: 'Library', to: '/video/library' },
+    ],
+  },
+  boardgames: {
+    id: 'boardgames',
+    label: 'Board Games',
+    primaryPath: '/boardgames/library',
+    description: 'Track your board game collection',
+    links: [
+      { label: 'Add',     to: '/boardgames/add' },
+      { label: 'Library', to: '/boardgames/library' },
+    ],
+  },
+  ttrpg: {
+    id: 'ttrpg',
+    label: 'TTRPG',
+    primaryPath: '/ttrpg/library',
+    description: 'Track your tabletop RPG collection',
+    links: [
+      { label: 'Add',     to: '/ttrpg/add' },
+      { label: 'Library', to: '/ttrpg/library' },
+    ],
+  },
 };
 
 // Derive active module from current pathname
@@ -47,6 +87,10 @@ export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/books')) return 'books';
   if (pathname.startsWith('/graphicnovels')) return 'graphicnovels';
   if (pathname.startsWith('/videogames')) return 'videogames';
+  if (pathname.startsWith('/music')) return 'music';
+  if (pathname.startsWith('/video')) return 'video';
+  if (pathname.startsWith('/boardgames')) return 'boardgames';
+  if (pathname.startsWith('/ttrpg')) return 'ttrpg';
   if (['/inbox', '/library', '/export'].some(p => pathname.startsWith(p))) return 'photocards';
   return null;
 }

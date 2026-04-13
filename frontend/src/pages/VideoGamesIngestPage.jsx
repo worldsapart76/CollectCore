@@ -303,7 +303,7 @@ export default function VideoGamesIngestPage() {
 
   return (
     <PageContainer>
-      <div style={{ maxWidth: 680, padding: "16px 0" }}>
+      <div style={{ maxWidth: 680, padding: "16px 0", margin: "0 auto" }}>
         <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: "var(--text-primary)" }}>Add Video Game</h2>
 
         {error && <div style={alertError}>{error}</div>}

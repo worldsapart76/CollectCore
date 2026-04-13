@@ -12,7 +12,15 @@
       "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/**)",
       "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/assets/**)",
       "Read(//f/Dropbox/Apps/CollectCore/backend/.venv/Lib/site-packages/**)",
-      "Bash(grep -l \"fastapi\\\\|uvicorn\\\\|sqlalchemy\" *.dist-info/METADATA)"
+      "Bash(grep -l \"fastapi\\\\|uvicorn\\\\|sqlalchemy\" *.dist-info/METADATA)",
+      "Read(//usr/**)",
+      "Read(//usr/local/**)",
+      "Bash(ls /opt/*/bin/python*)",
+      "Bash(wsl python3:*)",
+      "Read(//mnt/f/Dropbox/Apps/CollectCore/**)",
+      "Bash(wsl ls:*)",
+      "Bash(wsl bash:*)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

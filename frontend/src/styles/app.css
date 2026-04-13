@@ -217,6 +217,8 @@ select {
   grid-template-columns: repeat(2, minmax(220px, 320px));
   gap: 14px;
   align-content: start;
+  justify-content: center;
+  padding: 24px 16px;
 }
 
 .home-tile {
@@ -227,8 +229,9 @@ select {
   padding: 16px;
   display: block;
   box-shadow: var(--shadow-tile);
-  background: var(--bg-base);
+  background: var(--bg-sidebar);
   transition: box-shadow 0.15s ease, transform 0.1s ease;
+  text-align: center;
 }
 
 .home-tile:hover {
@@ -241,19 +244,12 @@ select {
   font-weight: 700;
   font-size: 1rem;
   margin-bottom: 6px;
-  color: var(--text-primary);
+  color: var(--green);
 }
 
 .home-tile-description {
   color: var(--text-secondary);
-  margin-bottom: 10px;
   font-size: 0.88rem;
-}
-
-.home-tile-count {
-  color: var(--green-vivid);
-  font-size: 0.92rem;
-  font-weight: 600;
 }
 
 /* ── Misc pages ──────────────────────────────────────────────────────────────── */

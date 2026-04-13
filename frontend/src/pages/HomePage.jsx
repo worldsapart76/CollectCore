@@ -12,12 +12,12 @@ export default function HomePage() {
       .then(settings => {
         try {
           const ids = JSON.parse(settings.modules_enabled || "[]");
-          setModules(ids.map(id => MODULE_DEFS[id]).filter(Boolean));
+          setModules(ids.map(id => MODULE_DEFS[id]).filter(Boolean).sort((a, b) => a.label.localeCompare(b.label)));
         } catch {
-          setModules(Object.values(MODULE_DEFS));
+          setModules(Object.values(MODULE_DEFS).sort((a, b) => a.label.localeCompare(b.label)));
         }
       })
-      .catch(() => setModules(Object.values(MODULE_DEFS)));
+      .catch(() => setModules(Object.values(MODULE_DEFS).sort((a, b) => a.label.localeCompare(b.label))));
   }, []);
 
   return (
@@ -28,7 +28,6 @@ export default function HomePage() {
             key={mod.id}
             title={mod.label}
             description={mod.description}
-            countLabel={`Open ${mod.label.toLowerCase()} library`}
             to={mod.primaryPath}
           />
         ))}

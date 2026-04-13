@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchPhotocardMembers,
+  fetchPhotocardSourceOrigins,
   fetchOwnershipStatuses,
   bulkUpdatePhotocards,
   bulkDeletePhotocards,
@@ -52,22 +53,36 @@ export default function PhotocardBulkEdit({
   const [updateMembers, setUpdateMembers] = useState(false);
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
 
+  const [updateSourceOrigin, setUpdateSourceOrigin] = useState(false);
+  const [sourceOrigins, setSourceOrigins] = useState([]);
+  const [sourceOriginId, setSourceOriginId] = useState("0");
+
+  const [updateIsSpecial, setUpdateIsSpecial] = useState(false);
+  const [bulkIsSpecial, setBulkIsSpecial] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
-  // Determine if all selected cards share a single group
+  // Determine if all selected cards share a single group and single category
   const groupIds = [...new Set(selectedCards.map((c) => c.group_id))];
   const singleGroup = groupIds.length === 1;
   const sharedGroupId = singleGroup ? groupIds[0] : null;
+
+  const categoryIds = [...new Set(selectedCards.map((c) => c.top_level_category_id))];
+  const singleCategory = categoryIds.length === 1;
+  const sharedCategoryId = singleCategory ? categoryIds[0] : null;
+
+  const canEditSourceOrigin = singleGroup && singleCategory;
 
   // Load ownership statuses + members (if single group)
   useEffect(() => {
     async function load() {
       try {
         const statusData = await fetchOwnershipStatuses();
-        setOwnershipStatuses(statusData);
+        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
+        setOwnershipStatuses(statusData.filter(s => !HIDDEN.has(s.status_name)));
         if (statusData.length > 0) {
           setOwnershipStatusId(String(statusData[0].ownership_status_id));
         }
@@ -86,6 +101,17 @@ export default function PhotocardBulkEdit({
     fetchPhotocardMembers(sharedGroupId).then(setMembers).catch(() => {});
   }, [sharedGroupId]);
 
+  useEffect(() => {
+    if (!canEditSourceOrigin) {
+      setSourceOrigins([]);
+      setSourceOriginId("0");
+      return;
+    }
+    fetchPhotocardSourceOrigins(sharedGroupId, sharedCategoryId)
+      .then(setSourceOrigins)
+      .catch(() => {});
+  }, [canEditSourceOrigin, sharedGroupId, sharedCategoryId]);
+
   function toggleMember(memberId) {
     const id = String(memberId);
     setSelectedMemberIds((prev) =>
@@ -96,7 +122,7 @@ export default function PhotocardBulkEdit({
   async function handleSave() {
     setError("");
 
-    if (!updateOwnership && !updateCategory && !updateNotes && !updateVersion && !updateMembers) {
+    if (!updateOwnership && !updateCategory && !updateNotes && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial) {
       setError("No fields selected to update.");
       return;
     }
@@ -127,6 +153,12 @@ export default function PhotocardBulkEdit({
     }
     if (updateMembers) {
       fields.member_ids = selectedMemberIds.map(Number);
+    }
+    if (updateSourceOrigin) {
+      fields.source_origin_id = Number(sourceOriginId); // 0 = clear to NULL
+    }
+    if (updateIsSpecial) {
+      fields.is_special = bulkIsSpecial;
     }
 
     setSaving(true);
@@ -282,6 +314,68 @@ export default function PhotocardBulkEdit({
                 {m.member_name}
               </label>
             ))}
+          </div>
+        </BulkRow>
+
+        {/* Source Origin — requires single group + single category */}
+        <BulkRow
+          label="Source Origin"
+          enabled={updateSourceOrigin && canEditSourceOrigin}
+          onToggle={() => canEditSourceOrigin && setUpdateSourceOrigin((p) => !p)}
+          disabled={!canEditSourceOrigin}
+          disabledReason="Requires all cards to share the same group and category"
+        >
+          <select
+            value={sourceOriginId}
+            onChange={(e) => setSourceOriginId(e.target.value)}
+            style={styles.select}
+            disabled={!updateSourceOrigin}
+          >
+            <option value="0">— None —</option>
+            {sourceOrigins.map((o) => (
+              <option key={o.source_origin_id} value={o.source_origin_id}>
+                {o.source_origin_name}
+              </option>
+            ))}
+          </select>
+        </BulkRow>
+
+        {/* Card Type */}
+        <BulkRow
+          label="Card Type"
+          enabled={updateIsSpecial}
+          onToggle={() => setUpdateIsSpecial((p) => !p)}
+        >
+          <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", width: "fit-content" }}>
+            <button
+              type="button"
+              onClick={() => setBulkIsSpecial(false)}
+              style={{
+                padding: "3px 10px",
+                fontSize: 12,
+                cursor: "pointer",
+                border: "none",
+                borderRight: "1px solid #ccc",
+                background: !bulkIsSpecial ? "#1565c0" : "#f5f5f5",
+                color: !bulkIsSpecial ? "#fff" : "#333",
+              }}
+            >
+              Regular
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkIsSpecial(true)}
+              style={{
+                padding: "3px 10px",
+                fontSize: 12,
+                cursor: "pointer",
+                border: "none",
+                background: bulkIsSpecial ? "#1565c0" : "#f5f5f5",
+                color: bulkIsSpecial ? "#fff" : "#333",
+              }}
+            >
+              ★ Special
+            </button>
           </div>
         </BulkRow>
       </div>

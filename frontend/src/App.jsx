@@ -11,6 +11,14 @@ import GraphicNovelsIngestPage from "./pages/GraphicNovelsIngestPage";
 import GraphicNovelsLibraryPage from "./pages/GraphicNovelsLibraryPage";
 import VideoGamesIngestPage from "./pages/VideoGamesIngestPage";
 import VideoGamesLibraryPage from "./pages/VideoGamesLibraryPage";
+import MusicIngestPage from "./pages/MusicIngestPage";
+import MusicLibraryPage from "./pages/MusicLibraryPage";
+import VideoIngestPage from "./pages/VideoIngestPage";
+import VideoLibraryPage from "./pages/VideoLibraryPage";
+import BoardgamesIngestPage from "./pages/BoardgamesIngestPage";
+import BoardgamesLibraryPage from "./pages/BoardgamesLibraryPage";
+import TTRPGIngestPage from "./pages/TTRPGIngestPage";
+import TTRPGLibraryPage from "./pages/TTRPGLibraryPage";
 
 export default function App() {
   return (
@@ -27,6 +35,14 @@ export default function App() {
         <Route path="/graphicnovels/library" element={<GraphicNovelsLibraryPage />} />
         <Route path="/videogames/add" element={<VideoGamesIngestPage />} />
         <Route path="/videogames/library" element={<VideoGamesLibraryPage />} />
+        <Route path="/music/add" element={<MusicIngestPage />} />
+        <Route path="/music/library" element={<MusicLibraryPage />} />
+        <Route path="/video/add" element={<VideoIngestPage />} />
+        <Route path="/video/library" element={<VideoLibraryPage />} />
+        <Route path="/boardgames/add" element={<BoardgamesIngestPage />} />
+        <Route path="/boardgames/library" element={<BoardgamesLibraryPage />} />
+        <Route path="/ttrpg/add" element={<TTRPGIngestPage />} />
+        <Route path="/ttrpg/library" element={<TTRPGLibraryPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

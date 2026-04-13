@@ -14,6 +14,7 @@ import {
   sectionActive,
   applySection,
 } from "../components/library/FilterSidebar";
+import { libraryState } from "../photocardPageState";
 
 const COLLECTION_TYPE_ID = 1;
 
@@ -35,12 +36,14 @@ const DEFAULT_FILTERS = {
   member: emptySection(),
   category: emptySection(),
   sourceOrigin: emptySection(),
+  cardType: emptySection(),
   version: emptySection(),
   ownership: emptySection(),
   backImage: emptySection(),
 };
 
 const SORT_OPTIONS = [
+  { value: "default", label: "Default" },
   { value: "id_asc", label: "ID ↑" },
   { value: "id_desc", label: "ID ↓" },
   { value: "member", label: "Member" },
@@ -57,13 +60,13 @@ export default function PhotocardLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Filter / view state
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const [sortMode, setSortMode] = useState("id_asc");
-  const [viewMode, setViewMode] = useState("fronts"); // "fronts" | "fronts_backs"
-  const [sizeMode, setSizeMode] = useState("m"); // "s" | "m" | "l"
-  const [showCaptions, setShowCaptions] = useState(true);
-  const [pageSize, setPageSize] = useState(30);
+  // Filter / view state — initialized from module store for cross-tab persistence
+  const [filters, setFilters] = useState(() => libraryState.filters ?? DEFAULT_FILTERS);
+  const [sortMode, setSortMode] = useState(libraryState.sortMode);
+  const [viewMode, setViewMode] = useState(libraryState.viewMode);
+  const [sizeMode, setSizeMode] = useState(libraryState.sizeMode);
+  const [showCaptions, setShowCaptions] = useState(libraryState.showCaptions);
+  const [pageSize, setPageSize] = useState(libraryState.pageSize);
 
   // Selection / bulk edit
   const [selectMode, setSelectMode] = useState(false);
@@ -75,6 +78,16 @@ export default function PhotocardLibraryPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
+
+  // Sync filter/view state back to module store on changes
+  useEffect(() => {
+    libraryState.filters      = filters;
+    libraryState.sortMode     = sortMode;
+    libraryState.viewMode     = viewMode;
+    libraryState.sizeMode     = sizeMode;
+    libraryState.showCaptions = showCaptions;
+    libraryState.pageSize     = pageSize;
+  }, [filters, sortMode, viewMode, sizeMode, showCaptions, pageSize]);
 
   // Load all lookup data + cards
   useEffect(() => {
@@ -91,7 +104,8 @@ export default function PhotocardLibraryPage() {
         setCards(cardData);
         setGroups(groupData);
         setCategories(categoryData);
-        setOwnershipStatuses(statusData);
+        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
+        setOwnershipStatuses(statusData.filter(s => !HIDDEN.has(s.status_name)));
       } catch (err) {
         setError(err.message || "Failed to load library");
       } finally {
@@ -201,6 +215,12 @@ export default function PhotocardLibraryPage() {
       );
     }
 
+    if (sectionActive(filters.cardType)) {
+      result = result.filter((c) =>
+        applySection(filters.cardType, [c.is_special ? "special" : "regular"])
+      );
+    }
+
     if (sectionActive(filters.version)) {
       result = result.filter((c) =>
         applySection(filters.version, [c.version || ""])
@@ -252,8 +272,22 @@ export default function PhotocardLibraryPage() {
           (a.group_name || "").localeCompare(b.group_name || "")
         );
       case "id_asc":
-      default:
         return result.sort((a, b) => a.item_id - b.item_id);
+      case "default":
+      default:
+        return result.sort((a, b) => {
+          const g = (a.group_name || "").localeCompare(b.group_name || "");
+          if (g !== 0) return g;
+          const c = (a.category || "").localeCompare(b.category || "");
+          if (c !== 0) return c;
+          const so = (a.source_origin || "").localeCompare(b.source_origin || "");
+          if (so !== 0) return so;
+          const ct = (a.is_special ? 1 : 0) - (b.is_special ? 1 : 0);
+          if (ct !== 0) return ct;
+          const v = (a.version || "").localeCompare(b.version || "");
+          if (v !== 0) return v;
+          return memberSortKey(a) - memberSortKey(b);
+        });
     }
   }, [filteredCards, sortMode]);
 
@@ -472,13 +506,11 @@ export default function PhotocardLibraryPage() {
       {detailCard && (
         <PhotocardDetailModal
           card={detailCard}
+          allCards={sortedCards}
           groups={groups}
           categories={categories}
           onClose={() => setDetailCard(null)}
-          onSaved={async () => {
-            setDetailCard(null);
-            await reloadCards();
-          }}
+          onSaved={reloadCards}
           onDeleted={async (itemId) => {
             setDetailCard(null);
             setCards((prev) => prev.filter((c) => c.item_id !== itemId));
@@ -515,7 +547,7 @@ const styles = {
   page: {
     display: "flex",
     flexDirection: "column",
-    height: "100vh",
+    height: "100%",
     overflow: "hidden",
     fontSize: 13,
   },
