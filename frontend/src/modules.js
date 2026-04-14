@@ -82,6 +82,16 @@ export const MODULE_DEFS = {
   },
 };
 
+// Active modules — filtered by VITE_ENABLED_MODULES if set.
+// Desktop: env var unset → all modules shown (no change).
+// Mobile v1: VITE_ENABLED_MODULES=photocards → only photocards shown.
+const _ENABLED = (import.meta.env.VITE_ENABLED_MODULES ?? 'all').split(',').map(s => s.trim());
+export const activeModules = _ENABLED[0] === 'all'
+  ? Object.values(MODULE_DEFS).sort((a, b) => a.label.localeCompare(b.label))
+  : Object.values(MODULE_DEFS)
+      .filter(m => _ENABLED.includes(m.id))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
 // Derive active module from current pathname
 export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/books')) return 'books';

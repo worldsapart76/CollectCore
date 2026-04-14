@@ -21,6 +21,7 @@ import {
   listVideoGames,
   updateVideoGame,
 } from "../api";
+import { getImageUrl } from "../utils/imageUrl";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -33,13 +34,6 @@ const btnSm = { fontSize: 11, padding: "2px 7px", background: "var(--btn-seconda
 const btnDanger = { fontSize: 13, padding: "5px 12px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
 const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--error-border)", background: "var(--error-bg)", fontSize: 13, borderRadius: 3 };
 const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
-
-const API_BASE = "http://127.0.0.1:8001";
-function coverUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
 
 const HIDDEN_OWNERSHIP_NAMES = new Set(["Trade", "Formerly Owned", "Pending", "Borrowed"]);
 
@@ -707,8 +701,8 @@ export default function VideoGamesLibraryPage() {
                     </td>
                     {showThumbnails && (
                       <td style={{ padding: "2px 4px" }}>
-                        {coverUrl(g.cover_image_url)
-                          ? <img src={coverUrl(g.cover_image_url)} alt="" style={{ width: 36, height: 50, objectFit: "cover", display: "block" }} />
+                        {getImageUrl(g.cover_image_url)
+                          ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 36, height: 50, objectFit: "cover", display: "block" }} />
                           : <div style={{ width: 36, height: 50, background: "var(--border)", borderRadius: 2 }} />}
                       </td>
                     )}

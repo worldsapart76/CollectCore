@@ -26,6 +26,7 @@ const PROXY_PATHS = [
   '/admin',
   '/settings',
   '/images',
+  '/shutdown',
 ]
 
 const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, BACKEND]))

@@ -1,3 +1,5 @@
+import { API_BASE } from "../../utils/imageUrl";
+
 /**
  * PhotocardGrid — displays cards in a compact grid.
  *
@@ -190,8 +192,6 @@ function CardCell({
 }
 
 function ImageSlot({ path, side, width, height, badge, isSpecial }) {
-  const API_BASE = "http://127.0.0.1:8001";
-
   return (
     <div
       style={{

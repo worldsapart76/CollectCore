@@ -26,13 +26,6 @@ const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid
 const alertWarn = { marginBottom: 10, padding: "8px 10px", border: "1px solid #e65100", background: "#fff3e0", fontSize: 13, borderRadius: 3 };
 const row2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 };
 
-const API_BASE = "http://127.0.0.1:8001";
-function coverUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
-
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
 
@@ -380,7 +373,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
       {form.coverImageUrl && (
         <div style={{ marginBottom: 12, display: "flex", gap: 12, alignItems: "flex-start" }}>
           <img
-            src={coverUrl(form.coverImageUrl)}
+            src={getImageUrl(form.coverImageUrl)}
             alt="cover preview"
             style={{ height: 150, width: "auto", maxWidth: 110, objectFit: "contain", borderRadius: 3, border: "1px solid var(--border-card)", background: "var(--bg-surface)", flexShrink: 0 }}
           />

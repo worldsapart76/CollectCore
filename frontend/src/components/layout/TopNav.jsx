@@ -2,6 +2,7 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { MODULE_DEFS, getActiveModuleId } from "../../modules";
 import { fetchSettings } from "../../api";
+import { API_BASE } from "../../utils/imageUrl";
 
 function navClass({ isActive }) {
   return isActive ? "topnav-link active" : "topnav-link";
@@ -44,7 +45,7 @@ export default function TopNav({ theme, toggleTheme }) {
   async function handleExit() {
     setIsShuttingDown(true);
     try {
-      await fetch("http://127.0.0.1:8000/shutdown", { method: "POST" });
+      await fetch(`${API_BASE}/shutdown`, { method: "POST" });
     } catch (error) {
       console.error("Shutdown request failed:", error);
     }

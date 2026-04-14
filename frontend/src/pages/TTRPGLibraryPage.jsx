@@ -23,6 +23,7 @@ import {
   listTtrpg,
   updateTtrpg,
 } from "../api";
+import { getImageUrl } from "../utils/imageUrl";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -35,13 +36,6 @@ const btnSm = { fontSize: 11, padding: "2px 7px", background: "var(--btn-seconda
 const btnDanger = { fontSize: 13, padding: "5px 12px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
 const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--error-border)", background: "var(--error-bg)", fontSize: 13, borderRadius: 3 };
 const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
-
-const API_BASE = "http://127.0.0.1:8001";
-function coverUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
 
 const HIDDEN_OWNERSHIP_NAMES = new Set(["Trade", "Formerly Owned", "Pending", "Borrowed"]);
 const row2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 };
@@ -311,7 +305,7 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
 
         {form.coverImageUrl && (
           <div style={{ padding: "10px 16px 0" }}>
-            <img src={coverUrl(form.coverImageUrl)} alt="cover" style={{ width: 60, height: 85, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => {}} />
+            <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ width: 60, height: 85, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => {}} />
           </div>
         )}
 
@@ -673,7 +667,7 @@ export default function TTRPGLibraryPage() {
                   {showThumbs && (
                     <td style={{ padding: "3px 6px" }}>
                       {book.cover_image_url
-                        ? <img src={coverUrl(book.cover_image_url)} alt="" style={{ width: 32, height: 45, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />
+                        ? <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: 32, height: 45, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />
                         : <div style={{ width: 32, height: 45, background: "var(--border)", borderRadius: 2 }} />
                       }
                     </td>

@@ -24,6 +24,7 @@ import {
   updateGraphicNovel,
   fetchTopLevelCategories,
 } from "../api";
+import { getImageUrl } from "../utils/imageUrl";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -36,13 +37,6 @@ const btnSm = { fontSize: 11, padding: "2px 7px", background: "var(--btn-seconda
 const btnDanger = { fontSize: 13, padding: "5px 12px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
 const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--error-border)", background: "var(--error-bg)", fontSize: 13, borderRadius: 3 };
 const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
-
-const API_BASE = "http://127.0.0.1:8001";
-function coverUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
@@ -410,7 +404,7 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
 
             {coverImageUrl && (
               <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                <img src={coverUrl(coverImageUrl)} alt="cover" style={{ height: 90, width: "auto", borderRadius: 3, border: "1px solid var(--border-card)", flexShrink: 0 }} />
+                <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 90, width: "auto", borderRadius: 3, border: "1px solid var(--border-card)", flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{title}</div>
                 </div>
@@ -540,7 +534,7 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
               <label style={labelStyle}>Cover Image URL</label>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                {coverImageUrl && <img src={coverUrl(coverImageUrl)} alt="cover" style={{ height: 36, width: "auto", borderRadius: 2, border: "1px solid var(--border-input)", flexShrink: 0 }} />}
+                {coverImageUrl && <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 36, width: "auto", borderRadius: 2, border: "1px solid var(--border-input)", flexShrink: 0 }} />}
               </div>
             </div>
 
@@ -759,7 +753,7 @@ function GnGridItem({ gn, isSelected, onToggleSelect, onClick, gridSize, showCap
           style={{ margin: 0, cursor: "pointer" }} />
       </div>
       {gn.cover_image_url ? (
-        <img src={coverUrl(gn.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        <img src={getImageUrl(gn.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
       ) : (
         <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>No Cover</span>
@@ -1182,7 +1176,7 @@ export default function GraphicNovelsLibraryPage() {
                       {showThumbnails && (
                         <td style={{ ...tdStyle, width: 50, verticalAlign: "middle" }} onClick={() => setActiveItemId(g.item_id)}>
                           {g.cover_image_url
-                            ? <img src={coverUrl(g.cover_image_url)} alt="" style={{ width: 34, height: 50, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 34, height: 50, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
                             : <div style={{ width: 34, height: 50, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)" }} />}
                         </td>
                       )}

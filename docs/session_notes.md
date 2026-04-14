@@ -6,6 +6,19 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-13 — Mobile Phase 0: desktop code prep
+
+**Completed:**
+- **API base URL externalized** — `api.js` and all pages now derive the base URL from `VITE_API_BASE_URL` env var (defaults to `''` → Vite proxy unchanged for desktop). No `http://127.0.0.1:8001` hardcodes remain in active code.
+- **`imageUrl.js` helper created** — `frontend/src/utils/imageUrl.js` exports `API_BASE` and `getImageUrl(filePath, storageType)`. Handles local (default) and hosted (R2) image types transparently.
+- **All hardcoded URLs replaced** — `InboxPage.jsx`, `PhotocardDetailModal.jsx`, `PhotocardGrid.jsx`, `GraphicNovelsLibraryPage.jsx`, `GraphicNovelsIngestPage.jsx`, `VideoLibraryPage.jsx`, `MusicLibraryPage.jsx`, `VideoGamesLibraryPage.jsx`, `TTRPGLibraryPage.jsx`, `BoardgamesLibraryPage.jsx` all now use `API_BASE` / `getImageUrl`. `TopNav.jsx` shutdown call fixed (was using wrong port 8000); `/shutdown` added to Vite proxy paths.
+- **`VITE_ENABLED_MODULES` config** — `modules.js` exports `activeModules`, filtered by env var. Desktop default (unset) = all modules shown, alphabetically sorted. Mobile: set `VITE_ENABLED_MODULES=photocards` to show only photocards.
+- **Single-module redirect** — `App.jsx` redirects `/` to the module's `primaryPath` when only one module is active. Multi-module builds unchanged.
+
+**Next:**
+- Design Phase — resolve 16 design questions (see plan) before Phase 1 (Capacitor setup)
+- Phase 0b — R2 setup + seed DB prep can start in parallel once design questions are answered
+
 ### 2026-04-12 — Photocard module UX improvements
 
 **Completed:**

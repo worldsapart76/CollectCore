@@ -18,6 +18,9 @@ backend/.env
 .DS_Store
 Thumbs.db
 
+# Vite dev server cache
+*.timestamp-*.mjs
+
 # Dropbox sync artifacts
 *.tmp
 *.tmp.*

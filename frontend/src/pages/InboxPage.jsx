@@ -16,17 +16,17 @@ import {
   uploadToInbox,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
+import { API_BASE } from "../utils/imageUrl";
 
-const API = "http://127.0.0.1:8001";
 const COLLECTION_TYPE_ID = 1;
 
 function inboxImageUrl(filename, mtime) {
-  return `${API}/images/inbox/${encodeURIComponent(filename)}?v=${mtime}`;
+  return `${API_BASE}/images/inbox/${encodeURIComponent(filename)}?v=${mtime}`;
 }
 
 function libraryImageUrl(path) {
   if (!path) return null;
-  return `${API}/${path}?v=${Date.now()}`;
+  return `${API_BASE}/${path}?v=${Date.now()}`;
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────

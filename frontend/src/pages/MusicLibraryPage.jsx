@@ -21,6 +21,7 @@ import {
   listMusicReleases,
   updateMusicRelease,
 } from "../api";
+import { getImageUrl } from "../utils/imageUrl";
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -35,13 +36,6 @@ const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid v
 const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
 const sectionStyle = { marginBottom: 14, padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4 };
 const sectionLabel = { fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 8 };
-
-const API_BASE = "http://127.0.0.1:8001";
-function coverUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
 
 const HIDDEN_OWNERSHIP_NAMES = new Set(["Trade", "Formerly Owned", "Pending", "Borrowed"]);
 
@@ -796,7 +790,7 @@ export default function MusicLibraryPage() {
                       {showThumbnails && (
                         <td style={{ ...tdStyle, padding: "2px 4px" }}>
                           {r.cover_image_url
-                            ? <img src={coverUrl(r.cover_image_url)} alt="" style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 2, display: "block" }} />
+                            ? <img src={getImageUrl(r.cover_image_url)} alt="" style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 2, display: "block" }} />
                             : <div style={{ width: 34, height: 34, background: "var(--surface-2)", borderRadius: 2 }} />}
                         </td>
                       )}

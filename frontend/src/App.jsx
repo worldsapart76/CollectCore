@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./components/layout/AppShell";
 import HomePage from "./pages/HomePage";
+import { activeModules } from "./modules";
 import InboxPage from "./pages/InboxPage";
 import PhotocardLibraryPage from "./pages/PhotocardLibraryPage";
 import AdminPage from "./pages/AdminPage";
@@ -20,11 +21,18 @@ import BoardgamesLibraryPage from "./pages/BoardgamesLibraryPage";
 import TTRPGIngestPage from "./pages/TTRPGIngestPage";
 import TTRPGLibraryPage from "./pages/TTRPGLibraryPage";
 
+// When only one module is configured (e.g. mobile build), skip the home page
+// and land directly on that module's primary path.
+const singleModulePath = activeModules.length === 1 ? activeModules[0].primaryPath : null;
+
 export default function App() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route
+          path="/"
+          element={singleModulePath ? <Navigate to={singleModulePath} replace /> : <HomePage />}
+        />
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/library" element={<PhotocardLibraryPage />} />
         <Route path="/export" element={<ExportPage />} />
