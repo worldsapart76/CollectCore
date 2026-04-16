@@ -1,26 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Read(//f/Dropbox/Apps/CollectCore/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/backend/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/frontend/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/backend/.venv/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/images/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/images/inbox/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/images/library/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/backend/sql/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/frontend/dist/assets/**)",
-      "Read(//f/Dropbox/Apps/CollectCore/backend/.venv/Lib/site-packages/**)",
-      "Bash(grep -l \"fastapi\\\\|uvicorn\\\\|sqlalchemy\" *.dist-info/METADATA)",
-      "Read(//usr/**)",
-      "Read(//usr/local/**)",
-      "Bash(ls /opt/*/bin/python*)",
-      "Bash(wsl python3:*)",
-      "Read(//mnt/f/Dropbox/Apps/CollectCore/**)",
-      "Bash(wsl ls:*)",
-      "Bash(wsl bash:*)",
-      "Bash(echo \"exit: $?\")"
+      "Read(C:/Dev/CollectCore/**)",
+      "Read(C:/Dev/CollectCore/backend/**)",
+      "Read(C:/Dev/CollectCore/frontend/**)",
+      "Read(C:/Dev/CollectCore/backend/.venv/**)",
+      "Read(C:/Dev/CollectCore/images/**)",
+      "Read(C:/Dev/CollectCore/images/inbox/**)",
+      "Read(C:/Dev/CollectCore/images/library/**)",
+      "Read(C:/Dev/CollectCore/backend/sql/**)",
+      "Read(C:/Dev/CollectCore/frontend/dist/**)",
+      "Read(C:/Dev/CollectCore/frontend/dist/assets/**)",
+      "Read(C:/Dev/CollectCore/backend/.venv/Lib/site-packages/**)",
+      "Bash(grep -l \"fastapi\\|uvicorn\\|sqlalchemy\" *.dist-info/METADATA)"
     ]
   }
 }
