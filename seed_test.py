@@ -1,6 +1,6 @@
 import sqlite3
 
-db_path = r"F:\Dropbox\Apps\CollectCore\data\collectcore.db"
+db_path = r"C:\Dev\CollectCore\data\collectcore.db"
 
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()

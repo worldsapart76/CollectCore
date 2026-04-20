@@ -48,6 +48,34 @@ _data_root_env = os.environ.get("COLLECTCORE_DATA_DIR")
 DATA_ROOT = Path(_data_root_env) if _data_root_env else APP_ROOT
 
 IMAGES_DIR = DATA_ROOT / "images"
+
+
+def _delete_attachment_files(db, item_id: int) -> list[str]:
+    """Collect attachment file paths for an item, to be deleted after DB commit."""
+    rows = db.execute(
+        text("SELECT file_path FROM tbl_attachments WHERE item_id = :id"),
+        {"id": item_id},
+    ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
+def _collect_cover_file(db, detail_table: str, item_id: int) -> list[str]:
+    """Collect a local cover_image_url from a detail table, if it points to a local file."""
+    row = db.execute(
+        text(f"SELECT cover_image_url FROM {detail_table} WHERE item_id = :id"),
+        {"id": item_id},
+    ).fetchone()
+    if row and row[0] and row[0].startswith("/images/"):
+        return [row[0].lstrip("/")]
+    return []
+
+
+def _remove_files(file_paths: list[str]) -> None:
+    """Delete image files from disk. Silently skips missing files."""
+    for fp in file_paths:
+        full = DATA_ROOT / fp
+        if full.is_file():
+            full.unlink()
 INBOX_DIR = IMAGES_DIR / "inbox"
 LIBRARY_DIR = IMAGES_DIR / "library"
 
@@ -632,6 +660,7 @@ def delete_photocard(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Photocard not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
         db.execute(
             text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
             {"item_id": item_id},
@@ -650,6 +679,7 @@ def delete_photocard(item_id: int):
         )
 
         db.commit()
+        _remove_files(files_to_delete)
 
         return {"item_id": item_id, "status": "deleted"}
     except HTTPException:
@@ -784,13 +814,16 @@ def bulk_delete_photocards(payload: BulkDeletePayload):
         if len(found) != len(payload.item_ids):
             raise HTTPException(status_code=404, detail="One or more item_ids not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
             db.execute(text("DELETE FROM xref_photocard_members WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -1705,14 +1738,18 @@ def delete_book(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Book not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_book_details", item_id))
         db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
         db.commit()
+        _remove_files(files_to_delete)
 
         return {"item_id": item_id, "status": "deleted"}
     except HTTPException:
@@ -1830,16 +1867,21 @@ def bulk_delete_books(payload: BulkDeletePayload):
         if len(found) != len(payload.item_ids):
             raise HTTPException(status_code=404, detail="One or more item_ids not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_book_details", item_id))
             db.execute(text("DELETE FROM xref_book_item_authors WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_book_item_series WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_book_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -3116,12 +3158,16 @@ def delete_graphicnovel(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Graphic novel not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_graphicnovel_details", item_id))
         db.execute(text("DELETE FROM xref_graphicnovel_item_writers WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_graphicnovel_item_artists WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_graphicnovel_item_tags WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_graphicnovel_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
         db.commit()
+        _remove_files(files_to_delete)
 
         return {"item_id": item_id, "status": "deleted"}
     except HTTPException:
@@ -3220,14 +3266,19 @@ def bulk_delete_graphicnovels(payload: BulkDeletePayload):
         if len(found) != len(payload.item_ids):
             raise HTTPException(status_code=404, detail="One or more item_ids not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_graphicnovel_details", item_id))
             db.execute(text("DELETE FROM xref_graphicnovel_item_writers WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_graphicnovel_item_artists WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_graphicnovel_item_tags WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_graphicnovel_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -3854,13 +3905,17 @@ def delete_videogame(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Video game not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_game_details", item_id))
         db.execute(text("DELETE FROM xref_game_developers WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_game_publishers WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_game_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_game_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(files_to_delete)
         return {"deleted": item_id}
     except HTTPException:
         db.rollback()
@@ -3924,14 +3979,19 @@ def bulk_delete_videogames(payload: BulkDeletePayload):
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_game_details", item_id))
             db.execute(text("DELETE FROM xref_game_developers WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_game_publishers WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_game_genres WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_game_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -4722,14 +4782,18 @@ def delete_music_release(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Music release not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_music_release_details", item_id))
         db.execute(text("DELETE FROM xref_music_release_artists WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_music_release_genres WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_music_songs WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_music_editions WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_music_release_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(files_to_delete)
         return {"deleted": item_id}
     except HTTPException:
         db.rollback()
@@ -4793,15 +4857,20 @@ def bulk_delete_music(payload: BulkDeletePayload):
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_music_release_details", item_id))
             db.execute(text("DELETE FROM xref_music_release_artists WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_music_release_genres WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_music_songs WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_music_editions WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_music_release_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -5654,15 +5723,19 @@ def delete_video(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Video not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_video_details", item_id))
         db.execute(text("DELETE FROM xref_video_directors WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_video_cast WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_video_genres WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_video_copies WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_video_seasons WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_video_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(files_to_delete)
         return {"deleted": item_id}
     except HTTPException:
         db.rollback()
@@ -5729,16 +5802,21 @@ def bulk_delete_video(payload: BulkDeletePayload):
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_video_details", item_id))
             db.execute(text("DELETE FROM xref_video_directors WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_video_cast WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_video_genres WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_video_copies WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_video_seasons WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_video_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -6348,12 +6426,16 @@ def delete_boardgame(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="Board game not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_boardgame_details", item_id))
         db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_boardgame_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(files_to_delete)
         return {"deleted": item_id}
     except HTTPException:
         db.rollback()
@@ -6417,13 +6499,18 @@ def bulk_delete_boardgames(payload: BulkDeletePayload):
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
 
+        all_files = []
         for item_id in payload.item_ids:
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_boardgame_details", item_id))
             db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_boardgame_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -7827,12 +7914,16 @@ def delete_ttrpg(item_id: int):
         if not existing:
             raise HTTPException(status_code=404, detail="TTRPG book not found.")
 
+        files_to_delete = _delete_attachment_files(db, item_id)
+        files_to_delete.extend(_collect_cover_file(db, "tbl_ttrpg_details", item_id))
         db.execute(text("DELETE FROM xref_ttrpg_book_authors WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_ttrpg_copies WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_ttrpg_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(files_to_delete)
         return {"deleted": item_id}
     except HTTPException:
         db.rollback()
@@ -7888,6 +7979,7 @@ def bulk_update_ttrpg(payload: TTRPGBulkUpdatePayload):
 def bulk_delete_ttrpg(payload: BulkDeletePayload):
     db = SessionLocal()
     try:
+        all_files = []
         for item_id in payload.item_ids:
             existing = db.execute(
                 text("SELECT item_id FROM tbl_items WHERE item_id = :id AND collection_type_id = :ct"),
@@ -7896,12 +7988,16 @@ def bulk_delete_ttrpg(payload: BulkDeletePayload):
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Item {item_id} not found.")
 
+            all_files.extend(_delete_attachment_files(db, item_id))
+            all_files.extend(_collect_cover_file(db, "tbl_ttrpg_details", item_id))
             db.execute(text("DELETE FROM xref_ttrpg_book_authors WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_ttrpg_copies WHERE item_id = :id"), {"id": item_id})
+            db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_ttrpg_details WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 
         db.commit()
+        _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
     except HTTPException:
         db.rollback()
@@ -7909,6 +8005,173 @@ def bulk_delete_ttrpg(payload: BulkDeletePayload):
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+# ---------- Admin: Unused Lookup Cleanup ----------
+
+# Each entry: (display_label, lookup_table, pk_column, name_column, [(ref_table, ref_fk_column), ...])
+_CLEANABLE_LOOKUPS = [
+    # Photocards
+    ("Photocard Groups", "lkup_photocard_groups", "group_id", "group_name", [
+        ("tbl_photocard_details", "group_id"),
+        ("lkup_photocard_members", "group_id"),
+        ("lkup_photocard_source_origins", "group_id"),
+    ]),
+    ("Photocard Members", "lkup_photocard_members", "member_id", "member_name", [
+        ("xref_photocard_members", "member_id"),
+    ]),
+    ("Photocard Source Origins", "lkup_photocard_source_origins", "source_origin_id", "source_origin_name", [
+        ("tbl_photocard_details", "source_origin_id"),
+    ]),
+    # Books
+    ("Book Authors", "lkup_book_authors", "author_id", "author_name", [
+        ("xref_book_item_authors", "author_id"),
+    ]),
+    ("Book Tags", "lkup_book_tags", "tag_id", "tag_name", [
+        ("xref_book_item_tags", "tag_id"),
+    ]),
+    ("Book Series", "tbl_book_series", "series_id", "series_name", [
+        ("xref_book_item_series", "series_id"),
+    ]),
+    # Graphic Novels
+    ("GN Publishers", "lkup_graphicnovel_publishers", "publisher_id", "publisher_name", [
+        ("tbl_graphicnovel_details", "publisher_id"),
+    ]),
+    ("GN Writers", "lkup_graphicnovel_writers", "writer_id", "writer_name", [
+        ("xref_graphicnovel_item_writers", "writer_id"),
+    ]),
+    ("GN Artists", "lkup_graphicnovel_artists", "artist_id", "artist_name", [
+        ("xref_graphicnovel_item_artists", "artist_id"),
+    ]),
+    ("GN Tags", "lkup_graphicnovel_tags", "tag_id", "tag_name", [
+        ("xref_graphicnovel_item_tags", "tag_id"),
+    ]),
+    # Video Games
+    ("Game Developers", "lkup_game_developers", "developer_id", "developer_name", [
+        ("xref_game_developers", "developer_id"),
+    ]),
+    ("Game Publishers", "lkup_game_publishers", "publisher_id", "publisher_name", [
+        ("xref_game_publishers", "publisher_id"),
+    ]),
+    ("Game Platforms", "lkup_game_platforms", "platform_id", "platform_name", [
+        ("tbl_game_copies", "platform_id"),
+    ]),
+    # Music
+    ("Music Artists", "lkup_music_artists", "artist_id", "artist_name", [
+        ("xref_music_release_artists", "artist_id"),
+    ]),
+    # Video
+    ("Video Directors", "lkup_video_directors", "director_id", "director_name", [
+        ("xref_video_directors", "director_id"),
+    ]),
+    ("Video Cast", "lkup_video_cast", "cast_id", "cast_name", [
+        ("xref_video_cast", "cast_id"),
+    ]),
+    # Board Games
+    ("Board Game Designers", "lkup_boardgame_designers", "designer_id", "designer_name", [
+        ("xref_boardgame_designers", "designer_id"),
+    ]),
+    ("Board Game Publishers", "lkup_boardgame_publishers", "publisher_id", "publisher_name", [
+        ("tbl_boardgame_details", "publisher_id"),
+    ]),
+    # TTRPG
+    ("TTRPG Authors", "lkup_ttrpg_authors", "author_id", "author_name", [
+        ("xref_ttrpg_book_authors", "author_id"),
+    ]),
+    ("TTRPG Publishers", "lkup_ttrpg_publishers", "publisher_id", "publisher_name", [
+        ("tbl_ttrpg_details", "publisher_id"),
+    ]),
+    ("TTRPG System Editions", "lkup_ttrpg_system_editions", "edition_id", "edition_name", [
+        ("tbl_ttrpg_details", "system_edition_id"),
+    ]),
+    ("TTRPG Lines", "lkup_ttrpg_lines", "line_id", "line_name", [
+        ("tbl_ttrpg_details", "line_id"),
+    ]),
+]
+
+
+@app.get("/admin/unused-lookups")
+def scan_unused_lookups():
+    """Scan all cleanable lookup tables and return values that are not
+    referenced by any records (and are still active)."""
+    db = SessionLocal()
+    try:
+        results = []
+        for label, lkup_table, pk_col, name_col, refs in _CLEANABLE_LOOKUPS:
+            # Build a WHERE clause: no references in any ref table
+            not_exists_clauses = " AND ".join(
+                f"NOT EXISTS (SELECT 1 FROM {ref_table} WHERE {ref_fk} = l.{pk_col})"
+                for ref_table, ref_fk in refs
+            )
+            sql = (
+                f"SELECT l.{pk_col}, l.{name_col} FROM {lkup_table} l "
+                f"WHERE l.is_active = 1 AND {not_exists_clauses} "
+                f"ORDER BY l.{name_col}"
+            )
+            rows = db.execute(text(sql)).fetchall()
+            if rows:
+                results.append({
+                    "label": label,
+                    "table": lkup_table,
+                    "values": [{"id": r[0], "name": r[1]} for r in rows],
+                })
+        return results
+    finally:
+        db.close()
+
+
+class DeactivateLookupRequest(BaseModel):
+    table: str
+    ids: List[int]
+
+
+@app.post("/admin/deactivate-lookups")
+def deactivate_unused_lookups(req: DeactivateLookupRequest):
+    """Soft-delete lookup values by setting is_active = 0.
+    Only allows tables that are in the cleanable list."""
+    # Validate table name against whitelist
+    valid = {entry[1]: entry for entry in _CLEANABLE_LOOKUPS}
+    if req.table not in valid:
+        raise HTTPException(status_code=400, detail=f"Table '{req.table}' is not a cleanable lookup table.")
+
+    _, lkup_table, pk_col, name_col, refs = valid[req.table]
+
+    if not req.ids:
+        return {"deactivated": 0}
+
+    db = SessionLocal()
+    try:
+        # Verify all requested IDs are actually unreferenced before deactivating
+        placeholders = ", ".join(str(int(i)) for i in req.ids)  # int() for safety
+        not_exists_clauses = " AND ".join(
+            f"NOT EXISTS (SELECT 1 FROM {ref_table} WHERE {ref_fk} = l.{pk_col})"
+            for ref_table, ref_fk in refs
+        )
+        safe_sql = (
+            f"UPDATE {lkup_table} l SET is_active = 0 "
+            f"WHERE l.{pk_col} IN ({placeholders}) AND l.is_active = 1 "
+            f"AND {not_exists_clauses}"
+        )
+        # SQLite doesn't support UPDATE with table alias — use subquery instead
+        safe_ids_sql = (
+            f"SELECT {pk_col} FROM {lkup_table} l "
+            f"WHERE l.{pk_col} IN ({placeholders}) AND l.is_active = 1 "
+            f"AND {not_exists_clauses}"
+        )
+        safe_rows = db.execute(text(safe_ids_sql)).fetchall()
+        safe_ids = [r[0] for r in safe_rows]
+
+        if not safe_ids:
+            db.commit()
+            return {"deactivated": 0}
+
+        safe_placeholders = ", ".join(str(i) for i in safe_ids)
+        update_sql = f"UPDATE {lkup_table} SET is_active = 0 WHERE {pk_col} IN ({safe_placeholders})"
+        db.execute(text(update_sql))
+        db.commit()
+        return {"deactivated": len(safe_ids)}
     finally:
         db.close()
 

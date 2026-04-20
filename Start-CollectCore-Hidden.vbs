@@ -7,9 +7,9 @@ oShell.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -ano ^| findstr :5181 ^| 
 WScript.Sleep 2000
 
 ' Start backend and frontend hidden
-oShell.Run "cmd /c cd /d F:\Dropbox\Apps\CollectCore\backend && .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8001", 0, False
+oShell.Run "cmd /c cd /d C:\Dev\CollectCore\backend && .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8001", 0, False
 WScript.Sleep 1000
-oShell.Run "cmd /c cd /d F:\Dropbox\Apps\CollectCore\frontend && npm run dev -- --port 5181", 0, False
+oShell.Run "cmd /c cd /d C:\Dev\CollectCore\frontend && npm run dev -- --port 5181", 0, False
 WScript.Sleep 7000
 
 ' Open app in browser

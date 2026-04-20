@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
-import { downloadBackup, fetchSettings, restoreBackup, updateSetting } from "../api";
+import { deactivateLookups, downloadBackup, fetchSettings, restoreBackup, scanUnusedLookups, updateSetting } from "../api";
 
 export default function AdminPage() {
   const [enabledIds, setEnabledIds] = useState(null);
@@ -14,6 +14,13 @@ export default function AdminPage() {
   const [restoreError, setRestoreError] = useState(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState(null);
   const restoreInputRef = useRef(null);
+
+  // Unused lookup cleanup
+  const [unusedLookups, setUnusedLookups] = useState(null); // null = not scanned, [] = clean
+  const [lookupScanStatus, setLookupScanStatus] = useState(null); // null | "scanning" | "done" | "error"
+  const [lookupScanError, setLookupScanError] = useState(null);
+  const [selectedForDeactivation, setSelectedForDeactivation] = useState({}); // { table: Set(ids) }
+  const [deactivating, setDeactivating] = useState(false);
 
   useEffect(() => {
     fetchSettings()
@@ -72,6 +79,65 @@ export default function AdminPage() {
     } catch (e) {
       setRestoreError(e.message || "Restore failed.");
       setRestoreStatus("error");
+    }
+  }
+
+  async function handleScanUnused() {
+    setLookupScanStatus("scanning");
+    setLookupScanError(null);
+    setUnusedLookups(null);
+    setSelectedForDeactivation({});
+    try {
+      const data = await scanUnusedLookups();
+      setUnusedLookups(data);
+      setLookupScanStatus("done");
+      // Pre-select all values by default
+      const sel = {};
+      for (const group of data) {
+        sel[group.table] = new Set(group.values.map(v => v.id));
+      }
+      setSelectedForDeactivation(sel);
+    } catch (e) {
+      setLookupScanError(e.message || "Scan failed.");
+      setLookupScanStatus("error");
+    }
+  }
+
+  function toggleLookupValue(table, id) {
+    setSelectedForDeactivation(prev => {
+      const next = { ...prev };
+      const s = new Set(next[table] || []);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      next[table] = s;
+      return next;
+    });
+  }
+
+  function toggleAllInTable(table, allIds) {
+    setSelectedForDeactivation(prev => {
+      const next = { ...prev };
+      const current = next[table] || new Set();
+      const allSelected = allIds.every(id => current.has(id));
+      next[table] = allSelected ? new Set() : new Set(allIds);
+      return next;
+    });
+  }
+
+  async function handleDeactivateSelected() {
+    setDeactivating(true);
+    try {
+      for (const [table, ids] of Object.entries(selectedForDeactivation)) {
+        const idArray = [...ids];
+        if (idArray.length > 0) {
+          await deactivateLookups(table, idArray);
+        }
+      }
+      // Re-scan to refresh
+      await handleScanUnused();
+    } catch (e) {
+      setLookupScanError(e.message || "Deactivation failed.");
+    } finally {
+      setDeactivating(false);
     }
   }
 
@@ -195,6 +261,86 @@ export default function AdminPage() {
             <span style={{ color: "#9b1c1c", fontSize: "0.9rem", marginLeft: 10 }}>{restoreError}</span>
           )}
         </div>
+      </section>
+      <section style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: "1rem", fontWeight: 600, margin: "0 0 10px" }}>Unused Lookup Cleanup</h2>
+        <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 12px" }}>
+          Scan for lookup values (authors, tags, publishers, etc.) that are no longer
+          associated with any records. Deactivating hides them from dropdowns without
+          deleting them from the database.
+        </p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <button
+            onClick={handleScanUnused}
+            disabled={lookupScanStatus === "scanning" || deactivating}
+            style={{ padding: "5px 14px", cursor: lookupScanStatus === "scanning" ? "default" : "pointer" }}
+          >
+            {lookupScanStatus === "scanning" ? "Scanning…" : "Scan for Unused Values"}
+          </button>
+          {lookupScanStatus === "error" && (
+            <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{lookupScanError}</span>
+          )}
+        </div>
+
+        {lookupScanStatus === "done" && unusedLookups && unusedLookups.length === 0 && (
+          <p style={{ color: "#166534", fontSize: "0.9rem" }}>No unused lookup values found.</p>
+        )}
+
+        {lookupScanStatus === "done" && unusedLookups && unusedLookups.length > 0 && (
+          <div>
+            {unusedLookups.map(group => {
+              const selected = selectedForDeactivation[group.table] || new Set();
+              const allIds = group.values.map(v => v.id);
+              const allSelected = allIds.every(id => selected.has(id));
+              return (
+                <div key={group.table} style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => toggleAllInTable(group.table, allIds)}
+                      disabled={deactivating}
+                    />
+                    <strong style={{ fontSize: "0.9rem" }}>
+                      {group.label} ({group.values.length})
+                    </strong>
+                  </div>
+                  <div style={{ marginLeft: 24, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {group.values.map(v => (
+                      <label key={v.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: "0.85rem" }}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(v.id)}
+                          onChange={() => toggleLookupValue(group.table, v.id)}
+                          disabled={deactivating}
+                        />
+                        {v.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ marginTop: 8 }}>
+              <button
+                onClick={handleDeactivateSelected}
+                disabled={deactivating || Object.values(selectedForDeactivation).every(s => s.size === 0)}
+                style={{
+                  padding: "5px 14px",
+                  background: "#b91c1c",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 3,
+                  cursor: deactivating ? "default" : "pointer",
+                }}
+              >
+                {deactivating ? "Deactivating…" : "Deactivate Selected"}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </PageContainer>
   );

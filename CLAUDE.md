@@ -1,5 +1,12 @@
 # CollectCore — Project Briefing for Claude Code
 
+## Cross-Project Architecture
+
+Decisions spanning multiple projects (Unraid infrastructure, hosting path, open
+strategic decisions): `C:\Dev\ARCHITECTURE.md`
+
+---
+
 ## Project Overview
 
 CollectCore is a multi-collection tracker application rebuilt from a
@@ -25,7 +32,7 @@ CollectCore is an active rebuild/generalization — not a from-scratch app.
 
 - **Backend:** Python + FastAPI + SQLite
 - **Frontend:** React + Vite
-- **Environment:** WSL2 + Ubuntu (local-first, no cloud deployment yet)
+- **Environment:** Windows, `C:\Dev\CollectCore` (local-first; Unraid self-hosting planned)
 
 ---
 
@@ -152,7 +159,7 @@ These are intentionally not yet built. Do not implement without instruction:
 1. Image field schema finalization and image ingest rebuild
 2. Ownership status dropdown — move to lookup-driven UI
 3. Return full object on create endpoints (currently returns minimal response for some)
-4. Lookup admin/management UI
+4. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred
 5. Validation improvements and consistent error handling across endpoints
 6. Pagination — not designed or implemented for any module
 7. Photocard library filter sidebar — update font size, spacing, and padding to match the books library sidebar style (user-preferred reference)
@@ -239,6 +246,7 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 | `docs/collectcore_books_module_plan.md` | Books implementation plan — finalized decisions, schema, phases, known gaps |
 | `docs/collectcore_books_v1_schema_proposal.md` | Books module v1 schema reference |
 | `C:\Users\world\.claude\plans\pure-inventing-whisper.md` | **Future modules plan** — full schema decisions for Music, Video, Video Games, TTRPG, Board Games |
+| `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` | **Mobile & hosting strategic plan** — Capacitor mobile app, Unraid self-hosting, Path A/B architecture, phased implementation (Phase 0 complete) |
 | `docs/session_notes.md` | Working session history — completed work and next steps |
 
 ---
@@ -273,15 +281,40 @@ up wholesale.
 
 ---
 
-## Cloud Hosting Future Features
+## Hosting & Mobile Plan
 
-Features deferred until CollectCore moves to cloud hosting. Do not implement
-in the local/desktop version.
+**Hosting direction is not yet decided.** Two paths are under consideration:
 
-- **Collection sharing** — ability to share a specific collection (e.g. Graphic Novels) with
-  another user in read-only view. The viewer sees the shared collection alongside their own;
-  the shared collection does not override or merge with the viewer's own records for the same
-  module. Each user retains full independent ownership of their own data.
+**Path A — Unraid self-hosting (leading candidate)**
+Self-hosted on Unraid with remote access via Tailscale and a public reverse proxy
+(Nginx Proxy Manager). SQLite stays — no Postgres migration needed. Images served
+from Unraid. Lower cost, data stays local, infrastructure shared with Calibre/Jellyfin.
+Downside: home uptime dependency (mitigated by existing UPS for brownouts; PWA offline
+cache planned for longer outages — read-only during downtime is acceptable).
+
+Multi-user model: separate container per user (Option A — separate SQLite DB per user,
+shared lookup data synced manually). Option B (single instance, multi-user auth, shared
+lookup tables) deferred but not ruled out — worth revisiting if user base grows or
+manual sync becomes burdensome.
+
+**Path B — Cloud hosting**
+FastAPI + SQLite (or Postgres) on a cloud provider (Railway, Render, Fly.io, etc.).
+Guaranteed uptime, no hardware dependency. Higher ongoing cost; image storage needs
+solving (S3/R2). Enables collection sharing and native mobile app distribution more
+naturally. Still viable if Unraid setup proves too complex or uptime requirements change.
+
+**Collection sharing** (deferred regardless of path):
+Ability to share a specific collection (e.g. Graphic Novels) with another user in
+read-only view. The viewer sees the shared collection alongside their own without
+it overriding their own records for the same module. Each user retains full independent
+ownership of their own data. Implementation differs by path: per-instance export/import
+for Unraid Option A; native multi-user feature for cloud or Unraid Option B.
+
+**Mobile:** Full plan (Capacitor, thin-client API approach, Android APK, iOS TestFlight
+or PWA via browser) is documented in `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md`.
+Phase 0 (desktop code prep: API base URL externalization, imageUrl.js helper,
+VITE_ENABLED_MODULES config) is complete as of 2026-04-13. Cloudflare R2 references in
+that plan apply to cloud path; Unraid path would serve images from Unraid instead.
 
 ---
 

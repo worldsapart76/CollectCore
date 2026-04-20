@@ -161,5 +161,5 @@ the one with the useful error. Common causes:
 → Install Inno Setup from `F:\CollectCore-Build\innosetup-6.7.1.exe`
 
 **build-release.bat fails at the frontend build step**
-→ Run `npm install` in `F:\Dropbox\Apps\CollectCore\frontend\` first,
+→ Run `npm install` in `C:\Dev\CollectCore\frontend\` first,
 then retry. This can happen after a fresh checkout.

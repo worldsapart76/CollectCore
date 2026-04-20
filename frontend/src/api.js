@@ -551,6 +551,22 @@ export async function restoreBackup(file) {
   return handleJsonResponse(res, "Restore failed.");
 }
 
+// --- Admin: Unused Lookup Cleanup ---
+
+export async function scanUnusedLookups() {
+  const res = await fetch(`${API}/admin/unused-lookups`);
+  return handleJsonResponse(res, "Failed to scan unused lookups.");
+}
+
+export async function deactivateLookups(table, ids) {
+  const res = await fetch(`${API}/admin/deactivate-lookups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ table, ids }),
+  });
+  return handleJsonResponse(res, "Failed to deactivate lookups.");
+}
+
 // --- Video Games ---
 
 export async function fetchGameGenres() {

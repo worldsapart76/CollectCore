@@ -20,10 +20,10 @@ import sys
 from pathlib import Path
 
 ORIGINAL_DB   = "F:/Dropbox/Apps/PhotocardTracker/data/photocards.db"
-COLLECTCORE_DB = "F:/Dropbox/Apps/CollectCore/data/collectcore.db"
+COLLECTCORE_DB = "C:/Dev/CollectCore/data/collectcore.db"
 
 ORIGINAL_IMAGES_DIR   = Path("F:/Dropbox/Apps/PhotocardTracker")
-COLLECTCORE_IMAGES_DIR = Path("F:/Dropbox/Apps/CollectCore")
+COLLECTCORE_IMAGES_DIR = Path("C:/Dev/CollectCore")
 
 OWNERSHIP_MAP = {
     "Owned":     1,
