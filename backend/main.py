@@ -143,17 +143,46 @@ def _photocard_row_to_dict(row):
         "group_name": row[2],
         "top_level_category_id": row[3],
         "category": row[4],
-        "ownership_status_id": row[5],
-        "ownership_status": row[6],
-        "notes": row[7],
-        "source_origin_id": row[8],
-        "source_origin": row[9],
-        "version": row[10],
-        "members": list(dict.fromkeys(row[11].split(", "))) if row[11] else [],
-        "front_image_path": row[12],
-        "back_image_path": row[13],
-        "is_special": bool(row[14]),
+        "notes": row[5],
+        "source_origin_id": row[6],
+        "source_origin": row[7],
+        "version": row[8],
+        "members": list(dict.fromkeys(row[9].split(", "))) if row[9] else [],
+        "front_image_path": row[10],
+        "back_image_path": row[11],
+        "is_special": bool(row[12]),
+        "copies": [],  # populated by caller
     }
+
+
+def _attach_copies(db, cards):
+    """Fetch copies for a list of card dicts and attach them in-place."""
+    if not cards:
+        return cards
+    item_ids = [c["item_id"] for c in cards]
+    placeholders = ",".join(str(i) for i in item_ids)
+    rows = db.execute(
+        text(f"""
+            SELECT pc.copy_id, pc.item_id, pc.ownership_status_id,
+                   os.status_name, pc.notes
+            FROM tbl_photocard_copies pc
+            JOIN lkup_ownership_statuses os
+                ON pc.ownership_status_id = os.ownership_status_id
+            WHERE pc.item_id IN ({placeholders})
+            ORDER BY pc.copy_id
+        """)
+    ).fetchall()
+    copies_map = {}
+    for r in rows:
+        copies_map.setdefault(r[1], []).append({
+            "copy_id": r[0],
+            "ownership_status_id": r[2],
+            "ownership_status": r[3],
+            "notes": r[4],
+        })
+    for card in cards:
+        card["copies"] = copies_map.get(card["item_id"], [])
+    return cards
 
 
 _PHOTOCARD_SELECT = """
@@ -163,8 +192,6 @@ _PHOTOCARD_SELECT = """
         g.group_name,
         i.top_level_category_id,
         c.category_name,
-        i.ownership_status_id,
-        os.status_name,
         i.notes,
         p.source_origin_id,
         so.source_origin_name,
@@ -187,8 +214,6 @@ _PHOTOCARD_SELECT = """
         ON i.item_id = p.item_id
     JOIN lkup_top_level_categories c
         ON i.top_level_category_id = c.top_level_category_id
-    JOIN lkup_ownership_statuses os
-        ON i.ownership_status_id = os.ownership_status_id
     JOIN lkup_photocard_groups g
         ON p.group_id = g.group_id
     LEFT JOIN lkup_photocard_source_origins so
@@ -205,8 +230,6 @@ _PHOTOCARD_GROUP_BY = """
         g.group_name,
         i.top_level_category_id,
         c.category_name,
-        i.ownership_status_id,
-        os.status_name,
         i.notes,
         p.source_origin_id,
         so.source_origin_name,
@@ -378,8 +401,6 @@ class PhotocardCreate(BaseModel):
 
 class PhotocardUpdate(BaseModel):
     top_level_category_id: int
-    ownership_status_id: int
-    notes: Optional[str] = None
     source_origin_id: Optional[int] = None
     version: Optional[str] = None
     member_ids: List[int]
@@ -487,7 +508,9 @@ def list_photocards():
         result = db.execute(
             text(_PHOTOCARD_SELECT + _PHOTOCARD_GROUP_BY + " ORDER BY i.item_id")
         ).fetchall()
-        return [_photocard_row_to_dict(row) for row in result]
+        cards = [_photocard_row_to_dict(row) for row in result]
+        _attach_copies(db, cards)
+        return cards
     finally:
         db.close()
 
@@ -508,7 +531,9 @@ def get_photocard(item_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Photocard not found.")
 
-        return _photocard_row_to_dict(row)
+        card = _photocard_row_to_dict(row)
+        _attach_copies(db, [card])
+        return card
     finally:
         db.close()
 
@@ -528,16 +553,14 @@ def create_photocard(payload: PhotocardCreate):
                 VALUES (
                     :collection_type_id,
                     :top_level_category_id,
-                    :ownership_status_id,
-                    :notes
+                    NULL,
+                    NULL
                 )
                 RETURNING item_id
             """),
             {
                 "collection_type_id": payload.collection_type_id,
                 "top_level_category_id": payload.top_level_category_id,
-                "ownership_status_id": payload.ownership_status_id,
-                "notes": payload.notes,
             },
         ).fetchone()
 
@@ -566,6 +589,19 @@ def create_photocard(payload: PhotocardCreate):
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
                 "is_special": 1 if payload.is_special else 0,
+            },
+        )
+
+        # Create the first copy row
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_copies (item_id, ownership_status_id, notes)
+                VALUES (:item_id, :ownership_status_id, :notes)
+            """),
+            {
+                "item_id": item_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
             },
         )
 
@@ -604,16 +640,12 @@ def update_photocard(item_id: int, payload: PhotocardUpdate):
             text("""
                 UPDATE tbl_items
                 SET top_level_category_id = :top_level_category_id,
-                    ownership_status_id = :ownership_status_id,
-                    notes = :notes,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE item_id = :item_id
             """),
             {
                 "item_id": item_id,
                 "top_level_category_id": payload.top_level_category_id,
-                "ownership_status_id": payload.ownership_status_id,
-                "notes": payload.notes,
             },
         )
 
@@ -674,6 +706,10 @@ def delete_photocard(item_id: int):
 
         files_to_delete = _delete_attachment_files(db, item_id)
         db.execute(
+            text("DELETE FROM tbl_photocard_copies WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        )
+        db.execute(
             text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
             {"item_id": item_id},
         )
@@ -726,26 +762,13 @@ def bulk_update_photocards(payload: BulkUpdatePayload):
 
         f = payload.fields
 
-        # Update tbl_items fields
+        # Update tbl_items fields (card-level only — no ownership or notes)
         items_updates = []
         items_params = {}
-
-        if f.ownership_status_id is not None:
-            items_updates.append("ownership_status_id = :ownership_status_id")
-            items_params["ownership_status_id"] = f.ownership_status_id
 
         if f.top_level_category_id is not None:
             items_updates.append("top_level_category_id = :top_level_category_id")
             items_params["top_level_category_id"] = f.top_level_category_id
-
-        if f.notes_action == "clear":
-            items_updates.append("notes = NULL")
-        elif f.notes_action == "set" and f.notes is not None:
-            items_updates.append("notes = :notes")
-            items_params["notes"] = f.notes
-        elif f.notes_action == "append" and f.notes is not None:
-            items_updates.append("notes = CASE WHEN notes IS NULL OR notes = '' THEN :notes ELSE notes || ' ' || :notes END")
-            items_params["notes"] = f.notes
 
         if items_updates:
             items_updates.append("updated_at = CURRENT_TIMESTAMP")
@@ -753,6 +776,14 @@ def bulk_update_photocards(payload: BulkUpdatePayload):
                 db.execute(
                     text(f"UPDATE tbl_items SET {', '.join(items_updates)} WHERE item_id = :item_id"),
                     {**items_params, "item_id": item_id},
+                )
+
+        # Update ownership on all copies of selected cards
+        if f.ownership_status_id is not None:
+            for item_id in payload.item_ids:
+                db.execute(
+                    text("UPDATE tbl_photocard_copies SET ownership_status_id = :oid WHERE item_id = :item_id"),
+                    {"oid": f.ownership_status_id, "item_id": item_id},
                 )
 
         # Update tbl_photocard_details fields
@@ -829,6 +860,7 @@ def bulk_delete_photocards(payload: BulkDeletePayload):
         all_files = []
         for item_id in payload.item_ids:
             all_files.extend(_delete_attachment_files(db, item_id))
+            db.execute(text("DELETE FROM tbl_photocard_copies WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM xref_photocard_members WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
             db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
@@ -837,6 +869,152 @@ def bulk_delete_photocards(payload: BulkDeletePayload):
         db.commit()
         _remove_files(all_files)
         return {"deleted": payload.item_ids, "count": len(payload.item_ids)}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# --- Photocard copy management ---
+
+class PhotocardCopyCreate(BaseModel):
+    ownership_status_id: int
+    notes: Optional[str] = None
+
+
+class PhotocardCopyUpdate(BaseModel):
+    ownership_status_id: int
+    notes: Optional[str] = None
+
+
+_OWNED_ID = 1
+_WANTED_ID = 2
+
+def _check_owned_wanted_conflict(db, item_id: int, new_status_id: int, exclude_copy_id: int = None):
+    """Raise 400 if adding/changing to Owned when Wanted exists, or vice versa."""
+    if new_status_id not in (_OWNED_ID, _WANTED_ID):
+        return
+    conflict_id = _WANTED_ID if new_status_id == _OWNED_ID else _OWNED_ID
+    exclude_clause = "AND copy_id != :exclude" if exclude_copy_id else ""
+    row = db.execute(
+        text(f"""
+            SELECT COUNT(*) FROM tbl_photocard_copies
+            WHERE item_id = :item_id AND ownership_status_id = :conflict_id {exclude_clause}
+        """),
+        {"item_id": item_id, "conflict_id": conflict_id, **({"exclude": exclude_copy_id} if exclude_copy_id else {})},
+    ).fetchone()
+    if row[0] > 0:
+        conflict_name = "Wanted" if conflict_id == _WANTED_ID else "Owned"
+        new_name = "Owned" if new_status_id == _OWNED_ID else "Wanted"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot set copy to {new_name} — this card already has a {conflict_name} copy.",
+        )
+
+
+@app.post("/photocards/{item_id}/copies")
+def create_photocard_copy(item_id: int, payload: PhotocardCopyCreate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT item_id FROM tbl_photocard_details WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Photocard not found.")
+
+        _check_owned_wanted_conflict(db, item_id, payload.ownership_status_id)
+
+        result = db.execute(
+            text("""
+                INSERT INTO tbl_photocard_copies (item_id, ownership_status_id, notes)
+                VALUES (:item_id, :ownership_status_id, :notes)
+                RETURNING copy_id
+            """),
+            {
+                "item_id": item_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        ).fetchone()
+        db.commit()
+        return {"copy_id": result[0], "item_id": item_id, "status": "created"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.put("/photocards/{item_id}/copies/{copy_id}")
+def update_photocard_copy(item_id: int, copy_id: int, payload: PhotocardCopyUpdate):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT copy_id FROM tbl_photocard_copies WHERE copy_id = :copy_id AND item_id = :item_id"),
+            {"copy_id": copy_id, "item_id": item_id},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Copy not found.")
+
+        _check_owned_wanted_conflict(db, item_id, payload.ownership_status_id, exclude_copy_id=copy_id)
+
+        db.execute(
+            text("""
+                UPDATE tbl_photocard_copies
+                SET ownership_status_id = :ownership_status_id, notes = :notes
+                WHERE copy_id = :copy_id
+            """),
+            {
+                "copy_id": copy_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
+            },
+        )
+        db.commit()
+        return {"copy_id": copy_id, "item_id": item_id, "status": "updated"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@app.delete("/photocards/{item_id}/copies/{copy_id}")
+def delete_photocard_copy(item_id: int, copy_id: int):
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text("SELECT copy_id FROM tbl_photocard_copies WHERE copy_id = :copy_id AND item_id = :item_id"),
+            {"copy_id": copy_id, "item_id": item_id},
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Copy not found.")
+
+        # Cannot delete the last copy
+        (count,) = db.execute(
+            text("SELECT COUNT(*) FROM tbl_photocard_copies WHERE item_id = :item_id"),
+            {"item_id": item_id},
+        ).fetchone()
+        if count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last copy of a card.")
+
+        db.execute(
+            text("DELETE FROM tbl_photocard_copies WHERE copy_id = :copy_id"),
+            {"copy_id": copy_id},
+        )
+        db.commit()
+        return {"copy_id": copy_id, "item_id": item_id, "status": "deleted"}
     except HTTPException:
         db.rollback()
         raise
@@ -6731,14 +6909,12 @@ def ingest_front(payload: IngestFrontPayload):
         item_result = db.execute(
             text("""
                 INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
-                VALUES (:collection_type_id, :top_level_category_id, :ownership_status_id, :notes)
+                VALUES (:collection_type_id, :top_level_category_id, NULL, NULL)
                 RETURNING item_id
             """),
             {
                 "collection_type_id": payload.collection_type_id,
                 "top_level_category_id": payload.top_level_category_id,
-                "ownership_status_id": payload.ownership_status_id,
-                "notes": payload.notes,
             },
         ).fetchone()
         item_id = item_result[0]
@@ -6754,6 +6930,19 @@ def ingest_front(payload: IngestFrontPayload):
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
                 "is_special": 1 if payload.is_special else 0,
+            },
+        )
+
+        # Create the first copy row
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_copies (item_id, ownership_status_id, notes)
+                VALUES (:item_id, :ownership_status_id, :notes)
+            """),
+            {
+                "item_id": item_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
             },
         )
 
@@ -6827,7 +7016,9 @@ def get_ingest_candidates(
             params,
         ).fetchall()
 
-        return [_photocard_row_to_dict(row) for row in result]
+        cards = [_photocard_row_to_dict(row) for row in result]
+        _attach_copies(db, cards)
+        return cards
     finally:
         db.close()
 
@@ -6874,14 +7065,12 @@ def ingest_pair(payload: IngestPairPayload):
         item_result = db.execute(
             text("""
                 INSERT INTO tbl_items (collection_type_id, top_level_category_id, ownership_status_id, notes)
-                VALUES (:collection_type_id, :top_level_category_id, :ownership_status_id, :notes)
+                VALUES (:collection_type_id, :top_level_category_id, NULL, NULL)
                 RETURNING item_id
             """),
             {
                 "collection_type_id": payload.collection_type_id,
                 "top_level_category_id": payload.top_level_category_id,
-                "ownership_status_id": payload.ownership_status_id,
-                "notes": payload.notes,
             },
         ).fetchone()
         item_id = item_result[0]
@@ -6897,6 +7086,19 @@ def ingest_pair(payload: IngestPairPayload):
                 "source_origin_id": payload.source_origin_id,
                 "version": payload.version,
                 "is_special": 1 if payload.is_special else 0,
+            },
+        )
+
+        # Create the first copy row
+        db.execute(
+            text("""
+                INSERT INTO tbl_photocard_copies (item_id, ownership_status_id, notes)
+                VALUES (:item_id, :ownership_status_id, :notes)
+            """),
+            {
+                "item_id": item_id,
+                "ownership_status_id": payload.ownership_status_id,
+                "notes": payload.notes,
             },
         )
 
@@ -7222,12 +7424,14 @@ def export_photocards(payload: ExportPayload):
                 + _PHOTOCARD_GROUP_BY
             )
         ).fetchall()
+        cards = [_photocard_row_to_dict(r) for r in rows]
+        _attach_copies(db, cards)
     finally:
         db.close()
 
     order_map = {iid: idx for idx, iid in enumerate(payload.item_ids)}
     cards = sorted(
-        [_photocard_row_to_dict(r) for r in rows],
+        cards,
         key=lambda c: order_map.get(c["item_id"], 0),
     )
 

@@ -16,23 +16,62 @@ import { API_BASE } from "../../utils/imageUrl";
  *   pageSize       — number of cards per page (default 30, 0 = all)
  */
 
-// First-letter → neon color mapping (black background, neon letter)
-const BADGE_LETTER_COLORS = {
-  O: "#39ff14",  // Owned — neon green
-  W: "#ffff00",  // Want / Wishlist — neon yellow
-  F: "#ff3131",  // For Trade / For Sale — neon red
-  T: "#00ffff",  // Trading — neon cyan
-  S: "#bf00ff",  // Sold / Selling — neon purple
-  P: "#ff9900",  // Pending - Outgoing — neon orange
-  I: "#00bfff",  // Pending - Incoming — neon sky blue
+// Status → letter mapping
+const STATUS_LETTERS = {
+  Owned: "O",
+  Wanted: "W",
+  Trade: "T",
+  "Formerly Owned": "F",
+  "Pending - Outgoing": "P",
+  Borrowed: "B",
+  "Pending - Incoming": "I",
 };
 
-function getOwnershipBadge(statusName) {
-  if (!statusName) return null;
-  // "Pending - Incoming" starts with "P" like Pending - Outgoing, so handle explicitly
-  const letter = statusName === "Pending - Incoming" ? "I" : statusName[0].toUpperCase();
-  const neonColor = BADGE_LETTER_COLORS[letter] || "#ffffff";
-  return { label: letter, neonColor };
+// Letter → neon color mapping
+const BADGE_LETTER_COLORS = {
+  O: "#39ff14",  // Owned — neon green
+  W: "#ffff00",  // Wanted — neon yellow
+  T: "#ff3131",  // Trade — neon red
+  F: "#607d8b",  // Formerly Owned — grey
+  P: "#ff9900",  // Pending - Outgoing — neon orange
+  B: "#00bcd4",  // Borrowed — cyan
+  I: "#00bfff",  // Pending - Incoming — sky blue
+};
+
+// Render order for non-Owned/non-Wanted statuses (bottom-right)
+const OTHER_STATUS_ORDER = ["T", "P", "I", "B", "F"];
+
+function getCopyBadges(copies) {
+  if (!copies || copies.length === 0) return { primary: null, other: null };
+
+  // Count by letter
+  const counts = {};
+  for (const c of copies) {
+    const letter = STATUS_LETTERS[c.ownership_status] || c.ownership_status[0].toUpperCase();
+    counts[letter] = (counts[letter] || 0) + 1;
+  }
+
+  // Primary badge (bottom-left) — O or W, mutually exclusive, always singular
+  let primary = null;
+  if (counts.O) {
+    primary = { label: "O", neonColor: BADGE_LETTER_COLORS.O };
+  } else if (counts.W) {
+    primary = { label: "W", neonColor: BADGE_LETTER_COLORS.W };
+  }
+
+  // Other statuses badge (bottom-right) — everything except O and W
+  let other = null;
+  const otherParts = [];
+  for (const letter of OTHER_STATUS_ORDER) {
+    if (counts[letter]) {
+      otherParts.push({ letter, count: counts[letter], color: BADGE_LETTER_COLORS[letter] || "#fff" });
+    }
+  }
+  if (otherParts.length > 0) {
+    other = otherParts;
+  }
+
+  return { primary, other };
 }
 
 const SIZE_CONFIG = {
@@ -52,6 +91,7 @@ export default function PhotocardGrid({
   page,
   onPageChange,
   pageSize = 30,
+  copyCount,
 }) {
   const { cellWidth, imageHeight } = SIZE_CONFIG[sizeMode] || SIZE_CONFIG.m;
   const effectivePageSize = pageSize === 0 ? cards.length : pageSize;
@@ -104,7 +144,7 @@ export default function PhotocardGrid({
             ← Prev
           </button>
           <span style={styles.pageInfo}>
-            Page {safePage} of {totalPages} ({cards.length} cards)
+            Page {safePage} of {totalPages} ({cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""})
           </span>
           <button
             style={styles.pageBtn}
@@ -117,7 +157,9 @@ export default function PhotocardGrid({
       )}
 
       {cards.length > 0 && totalPages === 1 && (
-        <div style={styles.countLine}>{cards.length} cards</div>
+        <div style={styles.countLine}>
+          {cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""}
+        </div>
       )}
     </div>
   );
@@ -133,7 +175,7 @@ function CardCell({
   selected,
   onClick,
 }) {
-  const badge = getOwnershipBadge(card.ownership_status);
+  const { primary, other } = getCopyBadges(card.copies);
   const isFrontsBacksMode = viewMode === "fronts_backs";
   const totalWidth = isFrontsBacksMode ? cellWidth * 2 + 4 : cellWidth;
 
@@ -155,7 +197,8 @@ function CardCell({
           side="front"
           width={cellWidth}
           height={imageHeight}
-          badge={badge}
+          primaryBadge={primary}
+          otherBadges={other}
           isSpecial={card.is_special}
         />
 
@@ -191,7 +234,7 @@ function CardCell({
   );
 }
 
-function ImageSlot({ path, side, width, height, badge, isSpecial }) {
+function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpecial }) {
   return (
     <div
       style={{
@@ -212,12 +255,25 @@ function ImageSlot({ path, side, width, height, badge, isSpecial }) {
         </div>
       )}
 
-      {badge && side === "front" && (
-        <div style={{ ...styles.ownershipBadge, color: badge.neonColor }}>
-          {badge.label}
+      {/* Primary badge (O or W) — bottom-left */}
+      {primaryBadge && side === "front" && (
+        <div style={{ ...styles.ownershipBadge, color: primaryBadge.neonColor }}>
+          {primaryBadge.label}
         </div>
       )}
 
+      {/* Other statuses badge — bottom-right */}
+      {otherBadges && side === "front" && (
+        <div style={styles.otherBadge}>
+          {otherBadges.map((part, i) => (
+            <span key={i} style={{ color: part.color }}>
+              {part.letter}{part.count > 1 ? part.count : ""}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Special star — top-right */}
       {isSpecial && side === "front" && (
         <div style={styles.specialBadge}>★</div>
       )}
@@ -257,7 +313,8 @@ const styles = {
     background: "#000",
     fontWeight: "bold",
     fontSize: 12,
-    width: 20,
+    padding: "2px 4px",
+    minWidth: 20,
     height: 20,
     display: "flex",
     alignItems: "center",
@@ -265,9 +322,26 @@ const styles = {
     borderRadius: 3,
     lineHeight: 1,
   },
-  specialBadge: {
+  otherBadge: {
     position: "absolute",
     bottom: 4,
+    right: 4,
+    background: "#000",
+    fontWeight: "bold",
+    fontSize: 12,
+    padding: "2px 4px",
+    minWidth: 20,
+    height: 20,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 3,
+    lineHeight: 1,
+    gap: 1,
+  },
+  specialBadge: {
+    position: "absolute",
+    top: 4,
     right: 4,
     color: "#f5c518",
     fontSize: 26,

@@ -103,8 +103,6 @@ export async function createPhotocard({
 
 export async function updatePhotocard(itemId, {
   topLevelCategoryId,
-  ownershipStatusId,
-  notes = null,
   sourceOriginId = null,
   version = null,
   memberIds,
@@ -115,8 +113,6 @@ export async function updatePhotocard(itemId, {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       top_level_category_id: topLevelCategoryId,
-      ownership_status_id: ownershipStatusId,
-      notes,
       source_origin_id: sourceOriginId,
       version,
       member_ids: memberIds,
@@ -149,6 +145,33 @@ export async function bulkDeletePhotocards(itemIds) {
     body: JSON.stringify({ item_ids: itemIds }),
   });
   return handleJsonResponse(res, "Failed to bulk delete photocards");
+}
+
+// --- Photocard Copies ---
+
+export async function createPhotocardCopy(itemId, { ownershipStatusId, notes = null }) {
+  const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}/copies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ownership_status_id: ownershipStatusId, notes }),
+  });
+  return handleJsonResponse(res, "Failed to create copy");
+}
+
+export async function updatePhotocardCopy(itemId, copyId, { ownershipStatusId, notes = null }) {
+  const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}/copies/${encodeURIComponent(copyId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ownership_status_id: ownershipStatusId, notes }),
+  });
+  return handleJsonResponse(res, "Failed to update copy");
+}
+
+export async function deletePhotocardCopy(itemId, copyId) {
+  const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}/copies/${encodeURIComponent(copyId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete copy");
 }
 
 // --- Ingest ---

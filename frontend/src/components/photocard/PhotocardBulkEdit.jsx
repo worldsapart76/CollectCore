@@ -122,7 +122,7 @@ export default function PhotocardBulkEdit({
   async function handleSave() {
     setError("");
 
-    if (!updateOwnership && !updateCategory && !updateNotes && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial) {
+    if (!updateOwnership && !updateCategory && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial) {
       setError("No fields selected to update.");
       return;
     }
@@ -132,6 +132,21 @@ export default function PhotocardBulkEdit({
       return;
     }
 
+    // Mixed-status warning for ownership bulk update
+    if (updateOwnership) {
+      const mixedCards = selectedCards.filter((c) => {
+        const statuses = new Set((c.copies || []).map((cp) => cp.ownership_status_id));
+        return statuses.size > 1;
+      });
+      if (mixedCards.length > 0) {
+        const statusName = ownershipStatuses.find((s) => String(s.ownership_status_id) === ownershipStatusId)?.status_name || ownershipStatusId;
+        const ok = window.confirm(
+          `${mixedCards.length} of the selected cards have copies with mixed ownership statuses. Setting ownership to "${statusName}" will update ALL copies of those cards. Continue?`
+        );
+        if (!ok) return;
+      }
+    }
+
     const fields = {};
 
     if (updateOwnership) {
@@ -139,14 +154,6 @@ export default function PhotocardBulkEdit({
     }
     if (updateCategory) {
       fields.top_level_category_id = Number(topLevelCategoryId);
-    }
-    if (updateNotes) {
-      if (notesAction === "clear") {
-        fields.notes_action = "clear";
-      } else {
-        fields.notes_action = notesAction;
-        fields.notes = notesValue;
-      }
     }
     if (updateVersion) {
       fields.version = version.trim() || null;
@@ -240,40 +247,6 @@ export default function PhotocardBulkEdit({
               </option>
             ))}
           </select>
-        </BulkRow>
-
-        {/* Notes */}
-        <BulkRow
-          label="Notes"
-          enabled={updateNotes}
-          onToggle={() => setUpdateNotes((p) => !p)}
-        >
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["set", "append", "clear"].map((action) => (
-              <label key={action} style={styles.radioLabel}>
-                <input
-                  type="radio"
-                  name="notesAction"
-                  value={action}
-                  checked={notesAction === action}
-                  onChange={() => setNotesAction(action)}
-                  disabled={!updateNotes}
-                  style={{ marginRight: 4 }}
-                />
-                {action.charAt(0).toUpperCase() + action.slice(1)}
-              </label>
-            ))}
-          </div>
-          {notesAction !== "clear" && (
-            <textarea
-              value={notesValue}
-              onChange={(e) => setNotesValue(e.target.value)}
-              rows={2}
-              style={{ ...styles.textarea, marginTop: 6 }}
-              disabled={!updateNotes}
-              placeholder={notesAction === "append" ? "Text to append..." : "New notes..."}
-            />
-          )}
         </BulkRow>
 
         {/* Version — single group only */}

@@ -8,6 +8,9 @@ import {
   deletePhotocard,
   replaceFrontImage,
   replaceBackImage,
+  createPhotocardCopy,
+  updatePhotocardCopy,
+  deletePhotocardCopy,
 } from "../../api";
 import { API_BASE } from "../../utils/imageUrl";
 
@@ -47,14 +50,10 @@ export default function PhotocardDetailModal({
   const [topLevelCategoryId, setTopLevelCategoryId] = useState(
     String(currentCard.top_level_category_id)
   );
-  const [ownershipStatusId, setOwnershipStatusId] = useState(
-    String(currentCard.ownership_status_id)
-  );
   const [sourceOriginId, setSourceOriginId] = useState(
     currentCard.source_origin_id ? String(currentCard.source_origin_id) : ""
   );
   const [version, setVersion] = useState(currentCard.version || "");
-  const [notes, setNotes] = useState(currentCard.notes || "");
   const [isSpecial, setIsSpecial] = useState(currentCard.is_special ?? true);
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
 
@@ -90,10 +89,8 @@ export default function PhotocardDetailModal({
   // Reset form and reload per-card data whenever the current card changes
   useEffect(() => {
     setTopLevelCategoryId(String(currentCard.top_level_category_id));
-    setOwnershipStatusId(String(currentCard.ownership_status_id));
     setSourceOriginId(currentCard.source_origin_id ? String(currentCard.source_origin_id) : "");
     setVersion(currentCard.version || "");
-    setNotes(currentCard.notes || "");
     setIsSpecial(currentCard.is_special ?? true);
     setSelectedMemberIds([]);
     setFrontImagePath(currentCard.front_image_path || null);
@@ -216,8 +213,6 @@ export default function PhotocardDetailModal({
     try {
       await updatePhotocard(currentCard.item_id, {
         topLevelCategoryId: Number(topLevelCategoryId),
-        ownershipStatusId: Number(ownershipStatusId),
-        notes: notes.trim() || null,
         sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
         version: version.trim() || null,
         memberIds: selectedMemberIds.map(Number),
@@ -401,21 +396,6 @@ export default function PhotocardDetailModal({
               </select>
             </FormRow>
 
-            {/* Ownership */}
-            <FormRow label="Ownership">
-              <select
-                value={ownershipStatusId}
-                onChange={(e) => { setOwnershipStatusId(e.target.value); setIsDirty(true); }}
-                style={styles.select}
-              >
-                {ownershipStatuses.map((s) => (
-                  <option key={s.ownership_status_id} value={s.ownership_status_id}>
-                    {s.status_name}
-                  </option>
-                ))}
-              </select>
-            </FormRow>
-
             {/* Source Origin */}
             <FormRow label="Source Origin">
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -485,13 +465,13 @@ export default function PhotocardDetailModal({
               </div>
             </FormRow>
 
-            {/* Notes */}
-            <FormRow label="Notes">
-              <textarea
-                value={notes}
-                onChange={(e) => { setNotes(e.target.value); setIsDirty(true); }}
-                rows={3}
-                style={styles.textarea}
+            {/* Copies */}
+            <FormRow label="Copies">
+              <CopiesTable
+                copies={currentCard.copies || []}
+                ownershipStatuses={ownershipStatuses}
+                itemId={currentCard.item_id}
+                onChanged={onSaved}
               />
             </FormRow>
           </div>
@@ -582,6 +562,142 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
     </div>
   );
 }
+
+function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
+  const [adding, setAdding] = useState(false);
+  const [newOwnership, setNewOwnership] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+  const [error, setError] = useState("");
+
+  async function handleAdd() {
+    if (!newOwnership) return;
+    setError("");
+    try {
+      await createPhotocardCopy(itemId, {
+        ownershipStatusId: Number(newOwnership),
+        notes: newNotes.trim() || null,
+      });
+      setAdding(false);
+      setNewOwnership("");
+      setNewNotes("");
+      onChanged();
+    } catch (err) {
+      setError(err.message || "Failed to add copy");
+    }
+  }
+
+  async function handleUpdate(copy, field, value) {
+    setError("");
+    try {
+      await updatePhotocardCopy(itemId, copy.copy_id, {
+        ownershipStatusId: field === "ownership" ? Number(value) : copy.ownership_status_id,
+        notes: field === "notes" ? (value.trim() || null) : (copy.notes || null),
+      });
+      onChanged();
+    } catch (err) {
+      setError(err.message || "Failed to update copy");
+    }
+  }
+
+  async function handleDelete(copyId) {
+    if (!window.confirm("Delete this copy?")) return;
+    setError("");
+    try {
+      await deletePhotocardCopy(itemId, copyId);
+      onChanged();
+    } catch (err) {
+      setError(err.message || "Failed to delete copy");
+    }
+  }
+
+  return (
+    <div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #ddd" }}>
+            <th style={{ textAlign: "left", padding: "3px 4px", fontWeight: 600 }}>Ownership</th>
+            <th style={{ textAlign: "left", padding: "3px 4px", fontWeight: 600 }}>Notes</th>
+            <th style={{ width: 28, padding: "3px 4px" }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {copies.map((cp) => (
+            <tr key={cp.copy_id} style={{ borderBottom: "1px solid #eee" }}>
+              <td style={{ padding: "3px 4px" }}>
+                <select
+                  value={cp.ownership_status_id}
+                  onChange={(e) => handleUpdate(cp, "ownership", e.target.value)}
+                  style={{ fontSize: 12, padding: "1px 2px" }}
+                >
+                  {ownershipStatuses.map((s) => (
+                    <option key={s.ownership_status_id} value={s.ownership_status_id}>
+                      {s.status_name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td style={{ padding: "3px 4px" }}>
+                <input
+                  defaultValue={cp.notes || ""}
+                  onBlur={(e) => {
+                    if (e.target.value !== (cp.notes || "")) {
+                      handleUpdate(cp, "notes", e.target.value);
+                    }
+                  }}
+                  style={{ fontSize: 12, width: "100%", border: "1px solid #ddd", borderRadius: 2, padding: "1px 3px" }}
+                />
+              </td>
+              <td style={{ padding: "3px 4px", textAlign: "center" }}>
+                <button
+                  onClick={() => handleDelete(cp.copy_id)}
+                  style={{ background: "none", border: "none", color: "#c00", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
+                  title="Delete copy"
+                >
+                  ×
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {adding ? (
+        <div style={{ marginTop: 4, display: "flex", gap: 4, alignItems: "center" }}>
+          <select
+            value={newOwnership}
+            onChange={(e) => setNewOwnership(e.target.value)}
+            style={{ fontSize: 12, padding: "1px 2px" }}
+          >
+            <option value="">— Select —</option>
+            {ownershipStatuses.map((s) => (
+              <option key={s.ownership_status_id} value={s.ownership_status_id}>
+                {s.status_name}
+              </option>
+            ))}
+          </select>
+          <input
+            value={newNotes}
+            onChange={(e) => setNewNotes(e.target.value)}
+            placeholder="Notes"
+            style={{ fontSize: 12, flex: 1, border: "1px solid #ddd", borderRadius: 2, padding: "1px 3px" }}
+          />
+          <button onClick={handleAdd} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>Add</button>
+          <button onClick={() => setAdding(false)} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>Cancel</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          style={{ marginTop: 4, fontSize: 11, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#f5f5f5" }}
+        >
+          + Add Copy
+        </button>
+      )}
+
+      {error && <div style={{ color: "#c00", fontSize: 11, marginTop: 4 }}>{error}</div>}
+    </div>
+  );
+}
+
 
 function FormRow({ label, children }) {
   return (

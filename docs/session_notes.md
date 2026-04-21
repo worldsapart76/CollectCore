@@ -6,6 +6,24 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-21 — Photocard copies migration complete
+
+**Completed:**
+- **`tbl_photocard_copies` sub-table:** New table with `copy_id`, `item_id`, `ownership_status_id`, `notes`, `created_at`. Ownership now lives per-copy, not on `tbl_items`. Pattern mirrors `tbl_book_copies`.
+- **Duplicate review tool:** Built `frontend/public/review-duplicates.html` — standalone HTML tool to review 111 duplicate groups (303 cards) with images side-by-side, select main vs sub-edition vs unique per group, export mapping JSON.
+- **Data migration:** `backend/migrate_photocard_copies.py` — created copy rows for all 10,185 photocards, merged 170 sub-edition records into 99 main records (re-parented copies, deleted sub-edition items + 330 image files), nulled out `ownership_status_id` on `tbl_items` for all photocard rows. 28 unique cards identified and preserved. Final: 10,015 photocards, 10,185 copy rows.
+- **Backend updates:** `_PHOTOCARD_SELECT` returns copies array via `_attach_copies()` helper; `POST /photocards` + ingest endpoints create first copy row; `PUT /photocards` no longer touches ownership/notes; `PATCH /photocards/bulk` ownership updates target `tbl_photocard_copies`; new copy CRUD: `POST/PUT/DELETE /photocards/{id}/copies/{copy_id}` with last-copy protection.
+- **Owned/Wanted mutual exclusion:** Backend constraint prevents having both Owned and Wanted copies on the same card.
+- **Grid badge overhaul:** Bottom-left shows `O` (green) or `W` (yellow) — mutually exclusive. Bottom-right shows other statuses concatenated (`T2P`, etc.). Special star moved to top-right.
+- **Detail modal:** Ownership dropdown and notes field replaced with inline copies sub-table (ownership select + notes input per copy, add/delete copy buttons).
+- **Library filter/count:** Ownership filter checks copies (card appears if any copy matches). Copy count shown alongside card count. Notes search includes copy notes.
+- **Bulk edit:** Ownership update targets all copies; notes field removed; mixed-status warning dialog before applying.
+
+**Next:**
+- Update `docs/collectcore_summary.md` with new `tbl_photocard_copies` table and updated endpoints
+- Update plan file status to reflect completion
+- End-to-end testing of remaining flows (ingest, export, bulk operations)
+
 ### 2026-04-13 — Mobile Phase 0: desktop code prep
 
 **Completed:**

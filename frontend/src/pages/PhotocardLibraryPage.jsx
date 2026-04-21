@@ -229,7 +229,7 @@ export default function PhotocardLibraryPage() {
 
     if (sectionActive(filters.ownership)) {
       result = result.filter((c) =>
-        applySection(filters.ownership, [String(c.ownership_status_id)])
+        applySection(filters.ownership, (c.copies || []).map((cp) => String(cp.ownership_status_id)))
       );
     }
 
@@ -244,6 +244,7 @@ export default function PhotocardLibraryPage() {
       result = result.filter(
         (c) =>
           c.notes?.toLowerCase().includes(q) ||
+          c.copies?.some((cp) => cp.notes?.toLowerCase().includes(q)) ||
           c.members?.some((m) => m.toLowerCase().includes(q)) ||
           c.source_origin?.toLowerCase().includes(q) ||
           c.version?.toLowerCase().includes(q) ||
@@ -254,6 +255,21 @@ export default function PhotocardLibraryPage() {
 
     return result;
   }, [cards, filters]);
+
+  // Compute copy count: sum of copies matching active ownership filter
+  const copyCount = useMemo(() => {
+    if (!sectionActive(filters.ownership)) {
+      // No ownership filter — count all copies across filtered cards
+      return filteredCards.reduce((sum, c) => sum + (c.copies?.length || 0), 0);
+    }
+    // Count only copies matching the ownership filter
+    return filteredCards.reduce((sum, c) => {
+      const matching = (c.copies || []).filter((cp) =>
+        applySection(filters.ownership, [String(cp.ownership_status_id)])
+      );
+      return sum + matching.length;
+    }, 0);
+  }, [filteredCards, filters]);
 
   // Apply sort
   const sortedCards = useMemo(() => {
@@ -476,6 +492,7 @@ export default function PhotocardLibraryPage() {
             page={page}
             onPageChange={setPage}
             pageSize={pageSize}
+            copyCount={copyCount}
           />
         </div>
 
