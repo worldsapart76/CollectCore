@@ -124,17 +124,6 @@ export default function PhotocardLibraryPage() {
     }
   }
 
-  // Derive all members and source origins from current cards (for filter sidebar)
-  const allMembers = useMemo(() => {
-    const seen = new Map();
-    for (const card of cards) {
-      // Build member objects from cards — we need member_id which isn't in card members array.
-      // We work around this by populating members from groups data loaded separately.
-      // For filter purposes we use member names from card data mapped through group members.
-    }
-    return [];
-  }, [cards]);
-
   // Member list for filter sidebar — sorted by canonical MEMBER_ORDER
   const filterMembers = useMemo(() => {
     const memberMap = new Map();

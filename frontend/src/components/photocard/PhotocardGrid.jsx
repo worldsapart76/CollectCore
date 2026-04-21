@@ -245,7 +245,7 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
     >
       {path ? (
         <img
-          src={`${API_BASE}/images/library/${path.replace(/^.*[\\/]/, "")}`}
+          src={`${API_BASE}/images/library/${path.replace(/^.*[\\/]/, "")}?v=${Date.now()}`}
           alt={side}
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         />

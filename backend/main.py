@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,9 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+logger = logging.getLogger("collectcore")
 
 # Load backend/.env if present (simple key=value, no dependencies needed)
 _env_file = Path(__file__).parent / ".env"
@@ -37,7 +41,7 @@ from pydantic import BaseModel
 
 from db import init_db
 
-print("LOADED BACKEND FILE:", __file__)
+logger.info("Loaded backend file: %s", __file__)
 
 # ---------- Paths ----------
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -100,10 +104,10 @@ for _d in COVER_DIRS.values():
 # ---------- App ----------
 app = FastAPI(title="CollectCore API")
 
+_cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5181").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -6869,12 +6873,13 @@ async def upload_to_inbox(file: UploadFile = File(...)):
     if Path(file.filename).suffix.lower() not in _ALLOWED_IMAGE_SUFFIXES:
         raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-    dest = INBOX_DIR / file.filename
+    safe_name = Path(file.filename).name
+    dest = INBOX_DIR / safe_name
     with open(dest, "wb") as out:
         shutil.copyfileobj(file.file, out)
 
     stat = dest.stat()
-    return {"filename": file.filename, "size": stat.st_size, "mtime": stat.st_mtime, "status": "uploaded"}
+    return {"filename": safe_name, "size": stat.st_size, "mtime": stat.st_mtime, "status": "uploaded"}
 
 
 class IngestFrontPayload(BaseModel):
@@ -7238,8 +7243,8 @@ def _replace_image(item_id: int, side: str, file: UploadFile):
             shutil.copyfileobj(file.file, out)
 
         if existing:
-            old_path = APP_ROOT / existing[0]
-            if old_path.exists() and old_path != library_path:
+            old_path = (APP_ROOT / existing[0]).resolve()
+            if old_path.is_relative_to(IMAGES_DIR.resolve()) and old_path.exists() and old_path != library_path:
                 old_path.unlink()
             db.execute(
                 text("UPDATE tbl_attachments SET file_path = :fp WHERE item_id = :item_id AND attachment_type = :atype"),

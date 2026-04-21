@@ -899,7 +899,7 @@ export default function GraphicNovelsLibraryPage() {
       fetchOwnershipStatuses().then(setOwnershipStatuses),
       fetchBookReadStatuses().then(setReadStatuses),
       fetchTopLevelCategories(GN_COLLECTION_TYPE_CODE).then(setCategories),
-    ]).catch(() => {});
+    ]).catch(err => console.error("Failed to load GN data:", err));
   }, [load]);
 
   function handleSectionChange(key, val) {
