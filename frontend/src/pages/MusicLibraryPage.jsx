@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -20,6 +20,7 @@ import {
   getMusicRelease,
   listMusicReleases,
   updateMusicRelease,
+  uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 
@@ -333,6 +334,20 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [coverPreview, setCoverPreview] = useState(null);
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "music", itemId);
+      set("coverImageUrl", url);
+      setCoverPreview(url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
 
@@ -472,7 +487,11 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
           </div>
           <div>
             <label style={labelStyle}>Cover Image URL</label>
-            <input value={form.coverImageUrl} onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }} style={inputStyle} placeholder="https://…" />
+            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <input value={form.coverImageUrl} onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+            </div>
           </div>
         </div>
 

@@ -283,38 +283,48 @@ up wholesale.
 
 ## Hosting & Mobile Plan
 
-**Hosting direction is not yet decided.** Two paths are under consideration:
+**Hosting decided 2026-04-21: Cloud (Railway + Cloudflare R2).** Canonical detail
+and fallback option in `C:\Dev\ARCHITECTURE.md` Decision A.
 
-**Path A — Unraid self-hosting (leading candidate)**
-Self-hosted on Unraid with remote access via Tailscale and a public reverse proxy
-(Nginx Proxy Manager). SQLite stays — no Postgres migration needed. Images served
-from Unraid. Lower cost, data stays local, infrastructure shared with Calibre/Jellyfin.
-Downside: home uptime dependency (mitigated by existing UPS for brownouts; PWA offline
-cache planned for longer outages — read-only during downtime is acceptable).
+- **Backend:** FastAPI on Railway (user already runs a Discord app there)
+- **Images:** Cloudflare R2; `tbl_attachments.storage_type = 'hosted' | 'local'`
+- **Scope:** CollectCore only. MediaManager, Calibre Content Server, Jellyfin, and
+  other projects still target Unraid.
+- **Fallback:** Unraid self-hosting retained in ARCHITECTURE.md Decision A if the
+  cloud path later proves unworkable.
 
-Multi-user model: separate container per user (Option A — separate SQLite DB per user,
-shared lookup data synced manually). Option B (single instance, multi-user auth, shared
-lookup tables) deferred but not ruled out — worth revisiting if user base grows or
-manual sync becomes burdensome.
+**Prerequisites before Railway deployment** (blocking; see
+`C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` Phase 0c):
+1. Photocard copy/edition sub-table refactor — originally listing tracker Phase 0A
+   in `docs/listing_tracker_dev_plan.md`
+2. Image field schema finalization — Deferred Item #1 above
 
-**Path B — Cloud hosting**
-FastAPI + SQLite (or Postgres) on a cloud provider (Railway, Render, Fly.io, etc.).
-Guaranteed uptime, no hardware dependency. Higher ongoing cost; image storage needs
-solving (S3/R2). Enables collection sharing and native mobile app distribution more
-naturally. Still viable if Unraid setup proves too complex or uptime requirements change.
+Resolve both against local SQLite before the DB leaves the machine; iterating on
+migrations against a live Railway DB is much harder.
 
-**Collection sharing** (deferred regardless of path):
+**Multi-user model** (ARCHITECTURE.md Decision B) is still UNDECIDED. With cloud
+resolved, Option B (single instance + user accounts) fits more naturally than
+per-user Railway services, but not yet committed.
+
+**Collection sharing** (deferred pending multi-user model):
 Ability to share a specific collection (e.g. Graphic Novels) with another user in
 read-only view. The viewer sees the shared collection alongside their own without
-it overriding their own records for the same module. Each user retains full independent
-ownership of their own data. Implementation differs by path: per-instance export/import
-for Unraid Option A; native multi-user feature for cloud or Unraid Option B.
+it overriding their own records for the same module. Each user retains full
+independent ownership of their own data.
 
-**Mobile:** Full plan (Capacitor, thin-client API approach, Android APK, iOS TestFlight
-or PWA via browser) is documented in `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md`.
-Phase 0 (desktop code prep: API base URL externalization, imageUrl.js helper,
-VITE_ENABLED_MODULES config) is complete as of 2026-04-13. Cloudflare R2 references in
-that plan apply to cloud path; Unraid path would serve images from Unraid instead.
+**Mobile:** Full plan (Capacitor, thin-client API approach, Android APK, iOS
+TestFlight or PWA via browser) is documented in
+`C:\Users\world\.claude\plans\fancy-stirring-hollerith.md`.
+- **Phase 0** (desktop code prep: API base URL externalization, imageUrl.js helper,
+  VITE_ENABLED_MODULES config) — complete 2026-04-13
+- **Phase 0b** (R2 bucket setup + seed DB preparation) — not yet started
+- **Phase 0c** (backend schema prerequisites above) — not yet started
+- PWA is viable since the Railway URL is reachable; TestFlight remains optional.
+
+**Listing tracker impact on cloud:** open question — see `docs/listing_tracker_design_plan_v3.md`
+("Open Question: Cloud Hosting Impact" section) for considerations around Playwright
+on Railway, marketplace IP reputation, scheduler architecture, thumbnail storage,
+and the split-deployment fallback.
 
 ---
 

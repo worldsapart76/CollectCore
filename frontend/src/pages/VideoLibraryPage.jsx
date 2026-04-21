@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -21,6 +21,7 @@ import {
   getVideo,
   listVideo,
   updateVideo,
+  uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 
@@ -269,6 +270,19 @@ function EditModal({ item, categories, formatTypes, allGenres, ownershipStatuses
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "video", item.item_id);
+      set("cover_image_url", url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   useEffect(() => {
     getVideo(item.item_id).then(detail => {
@@ -386,9 +400,11 @@ function EditModal({ item, categories, formatTypes, allGenres, ownershipStatuses
 
         <div style={{ marginBottom: 10 }}>
           <label style={labelStyle}>Cover Image URL</label>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
             <input value={form.cover_image_url} onChange={e => set("cover_image_url", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-            {form.cover_image_url && <img src={form.cover_image_url} alt="" style={{ height: 48, width: 32, objectFit: "cover", borderRadius: 2 }} />}
+            <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+            <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+            {form.cover_image_url && <img src={getImageUrl(form.cover_image_url)} alt="" style={{ height: 48, width: 32, objectFit: "cover", borderRadius: 2 }} />}
           </div>
         </div>
 

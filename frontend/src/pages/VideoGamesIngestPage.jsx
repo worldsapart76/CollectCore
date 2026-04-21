@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createVideoGame,
   fetchGameGenres,
@@ -6,6 +6,7 @@ import {
   fetchGamePlayStatuses,
   fetchOwnershipStatuses,
   rawgSearchGames,
+  uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
 
@@ -198,6 +199,20 @@ export default function VideoGamesIngestPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [coverPreview, setCoverPreview] = useState(null);
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "videogames");
+      set("coverImageUrl", url);
+      setCoverPreview(url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   // RAWG search state
   const [rawgQuery, setRawgQuery] = useState("");
@@ -406,6 +421,8 @@ export default function VideoGamesIngestPage() {
                 style={{ ...inputStyle, flex: 1 }}
                 placeholder="https://…"
               />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
               {coverPreview && (
                 <img src={coverPreview} alt="cover preview" style={{ width: 50, height: 70, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => setCoverPreview(null)} />
               )}

@@ -23,7 +23,9 @@ import {
   getBook,
   listBooks,
   updateBook,
+  uploadCover,
 } from "../api";
+import { getImageUrl } from "../utils/imageUrl";
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
@@ -315,7 +317,7 @@ function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, sho
       </div>
       <OwnershipBadge statusName={book.ownership_status} />
       {book.cover_image_url ? (
-        <img src={book.cover_image_url} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
       ) : (
         <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
@@ -347,7 +349,7 @@ function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) 
       {showThumbnails && (
         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
           {book.cover_image_url
-            ? <img src={book.cover_image_url} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+            ? <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
             : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
         </td>
       )}
@@ -407,6 +409,19 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
   const [coverUrl, setCoverUrl] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "books", book.item_id);
+      setCoverUrl(url);
+    } catch (err) {
+      setSaveError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -604,7 +619,9 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
                 <label style={labelStyle}>Cover Image URL</label>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  {coverUrl && <img src={coverUrl} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  {coverUrl && <img src={getImageUrl(coverUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
                 </div>
               </div>
               <div style={{ marginBottom: 10 }}>

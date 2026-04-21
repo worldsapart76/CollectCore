@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -18,6 +18,7 @@ import {
   getBoardgame,
   listBoardgames,
   updateBoardgame,
+  uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 
@@ -163,6 +164,19 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "boardgames", itemId);
+      set("coverImageUrl", url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   useEffect(() => {
     getBoardgame(itemId).then(d => {
@@ -315,7 +329,12 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
 
           <div style={{ marginBottom: 10 }}>
             <label style={labelStyle}>Cover Image URL</label>
-            <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={inputStyle} placeholder="https://…" />
+            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+              {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 48, width: 34, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />}
+            </div>
           </div>
 
           <div style={{ marginBottom: 10 }}>

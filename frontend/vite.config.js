@@ -25,6 +25,7 @@ const PROXY_PATHS = [
   '/export',
   '/admin',
   '/settings',
+  '/upload-cover',
   '/images',
   '/shutdown',
 ]

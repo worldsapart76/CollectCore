@@ -10,15 +10,15 @@ These steps only need to be done the first time, or after a fresh checkout.
 
 ### 1. Install Inno Setup
 
-Double-click `F:\CollectCore-Build\innosetup-6.7.1.exe` and install it.
+Double-click `C:\Dev\CollectCore-Build\innosetup-6.7.1.exe` and install it.
 Accept all defaults. You only ever need to do this once per machine.
 
 ### 2. Verify the build directory exists
 
-Make sure `F:\CollectCore-Build\` exists and contains:
+Make sure `C:\Dev\CollectCore-Build\` exists and contains:
 
 ```
-F:\CollectCore-Build\
+C:\Dev\CollectCore-Build\
   app\
     backend\          ← Python source files
     frontend\dist\    ← Built React app
@@ -42,7 +42,7 @@ Run `build-release.bat` from a terminal — do not double-click it, because
 the window will close before you can read any error output:
 
 ```
-cd F:\CollectCore-Build
+cd C:\Dev\CollectCore-Build
 .\build-release.bat
 ```
 
@@ -53,13 +53,13 @@ Use the format `MAJOR.MINOR.PATCH`:
 
 The script will automatically:
 - Build the React frontend (`npm run build`)
-- Copy all updated source files to `F:\CollectCore-Build\app\`
+- Copy all updated source files to `C:\Dev\CollectCore-Build\app\`
 - Update the version number in the installer script
 - Compile the installer with Inno Setup (~30 seconds)
 - Open the output folder when done
 
 The finished installer is at:
-`F:\CollectCore-Build\output\CollectCore-Setup-X.X.X.exe`
+`C:\Dev\CollectCore-Build\output\CollectCore-Setup-X.X.X.exe`
 
 ---
 
@@ -158,7 +158,7 @@ the one with the useful error. Common causes:
 - `%APPDATA%\CollectCore\backend-out.log` — stdout (startup messages)
 
 **"Inno Setup not found" error when running build-release.bat**
-→ Install Inno Setup from `F:\CollectCore-Build\innosetup-6.7.1.exe`
+→ Install Inno Setup from `C:\Dev\CollectCore-Build\innosetup-6.7.1.exe`
 
 **build-release.bat fails at the frontend build step**
 → Run `npm install` in `C:\Dev\CollectCore\frontend\` first,

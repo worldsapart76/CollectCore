@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createGraphicNovel,
   createGnPublisher,
@@ -10,6 +10,7 @@ import {
   lookupGnIsbn,
   searchGnExternal,
   fetchTopLevelCategories,
+  uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
 
@@ -277,6 +278,19 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
   const [newPublisherName, setNewPublisherName] = useState("");
   const [addingPublisher, setAddingPublisher] = useState(false);
   const [localPublishers, setLocalPublishers] = useState(publishers);
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "gn");
+      set("coverImageUrl", url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   useEffect(() => { setLocalPublishers(publishers); }, [publishers]);
   useEffect(() => {
@@ -529,7 +543,11 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
         </div>
         <div>
           <label style={labelStyle}>Cover Image URL</label>
-          <input value={form.coverImageUrl} onChange={(e) => set("coverImageUrl", e.target.value)} style={inputStyle} />
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+            <input value={form.coverImageUrl} onChange={(e) => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+            <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+            <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+          </div>
         </div>
       </div>
 

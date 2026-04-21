@@ -352,6 +352,31 @@ Filterable by: module, marketplace, priority, status, target hit (yes/no).
 
 ---
 
+## Open Question: Cloud Hosting Impact (added 2026-04-21)
+
+CollectCore's hosting is now Railway + Cloudflare R2 (ARCHITECTURE.md Decision A,
+resolved 2026-04-21). The listing tracker was designed with a local/Unraid
+deployment in mind; re-evaluate the following before implementation begins:
+
+- **Playwright + Chromium on Railway:** feasible via a custom Docker image, but
+  verify Railway's ephemeral filesystem and memory/CPU constraints against scraper
+  workloads (especially Mercari's ~17s/URL Playwright path).
+- **Marketplace IP reputation:** Mercari / Neokyo scraping from Railway IPs may
+  face rate limiting or blocks compared to home IP. Test early against a small URL
+  set before committing to Railway for the scheduler.
+- **Scheduler architecture:** Railway requires a separate worker service for
+  background jobs. Decide between a Railway cron trigger, a long-running worker
+  service, or keeping the scheduler on the home network and hitting the Railway
+  API.
+- **Scraped thumbnails:** listing thumbnails are transient — decide whether they
+  go to R2, Railway's ephemeral disk, or stay as external CDN URLs (with the risk
+  of link rot).
+- **Fallback consideration:** if Railway IPs are blocked by target marketplaces,
+  the listing tracker may need to run on Unraid while the rest of CollectCore stays
+  on Railway. Plan for this split-deployment possibility.
+
+---
+
 ## POC Validation (2026-04-16)
 
 Proof of concept at `C:\Dev\listing-parser-poc\` validated both Phase 1

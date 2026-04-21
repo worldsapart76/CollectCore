@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
-import { deactivateLookups, downloadBackup, fetchSettings, restoreBackup, scanUnusedLookups, updateSetting } from "../api";
+import { deactivateLookups, downloadBackupByToken, fetchSettings, prepareBackup, restoreBackup, scanUnusedLookups, updateSetting } from "../api";
 
 export default function AdminPage() {
   const [enabledIds, setEnabledIds] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const [backupStatus, setBackupStatus] = useState(null); // null | "working" | "done" | "error"
+  const [backupStatus, setBackupStatus] = useState(null); // null | "preparing" | "downloading" | "done" | "error"
   const [backupError, setBackupError] = useState(null);
+  const [backupProgress, setBackupProgress] = useState(0); // 0-100
   const [restoreStatus, setRestoreStatus] = useState(null); // null | "confirming" | "working" | "done" | "error"
   const [restoreError, setRestoreError] = useState(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState(null);
@@ -35,10 +36,42 @@ export default function AdminPage() {
   }, []);
 
   async function handleBackup() {
-    setBackupStatus("working");
+    setBackupStatus("preparing");
     setBackupError(null);
+    setBackupProgress(0);
     try {
-      const { blob, filename } = await downloadBackup();
+      // Step 1: Build the ZIP on the server
+      const { token, filename, size_bytes } = await prepareBackup();
+
+      // Step 2: Download with progress tracking
+      setBackupStatus("downloading");
+      const { blob } = await downloadBackupByToken(token, (received, total) => {
+        setBackupProgress(Math.round((received / total) * 100));
+      });
+
+      // Step 3: Save — try File System Access API for a proper save dialog, fall back to auto-download
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          setBackupStatus("done");
+          return;
+        } catch (pickerErr) {
+          // User cancelled the dialog — don't treat as error, just fall through to auto-download
+          if (pickerErr.name === "AbortError") {
+            setBackupStatus(null);
+            return;
+          }
+          // Other errors (e.g. API not fully supported) — fall through to auto-download
+        }
+      }
+
+      // Fallback: auto-download via hidden link
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -191,19 +224,40 @@ export default function AdminPage() {
         </p>
 
         {/* Backup */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <button
-            onClick={handleBackup}
-            disabled={backupStatus === "working"}
-            style={{ padding: "5px 14px", cursor: backupStatus === "working" ? "default" : "pointer" }}
-          >
-            {backupStatus === "working" ? "Creating backup…" : "Download Backup"}
-          </button>
-          {backupStatus === "done" && (
-            <span style={{ color: "#166534", fontSize: "0.9rem" }}>Backup downloaded.</span>
-          )}
-          {backupStatus === "error" && (
-            <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{backupError}</span>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={handleBackup}
+              disabled={backupStatus === "preparing" || backupStatus === "downloading"}
+              style={{ padding: "5px 14px", cursor: (backupStatus === "preparing" || backupStatus === "downloading") ? "default" : "pointer" }}
+            >
+              {backupStatus === "preparing" ? "Preparing backup…"
+                : backupStatus === "downloading" ? "Downloading…"
+                : "Download Backup"}
+            </button>
+            {backupStatus === "done" && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>Backup complete.</span>
+            )}
+            {backupStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{backupError}</span>
+            )}
+          </div>
+          {(backupStatus === "preparing" || backupStatus === "downloading") && (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ background: "#e5e7eb", borderRadius: 4, height: 14, width: 260, overflow: "hidden" }}>
+                <div style={{
+                  background: backupStatus === "preparing" ? "#6b7280" : "#2563eb",
+                  height: "100%",
+                  width: backupStatus === "preparing" ? "100%" : `${backupProgress}%`,
+                  transition: "width 0.2s",
+                  animation: backupStatus === "preparing" ? "pulse 1.5s ease-in-out infinite" : "none",
+                  opacity: backupStatus === "preparing" ? 0.6 : 1,
+                }} />
+              </div>
+              <span style={{ fontSize: "0.8rem", color: "#666", marginTop: 2, display: "block" }}>
+                {backupStatus === "preparing" ? "Building backup archive…" : `${backupProgress}%`}
+              </span>
+            </div>
           )}
         </div>
 

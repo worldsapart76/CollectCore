@@ -23,6 +23,7 @@ import {
   listGraphicNovels,
   updateGraphicNovel,
   fetchTopLevelCategories,
+  uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 
@@ -277,6 +278,20 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
   const [isbn13, setIsbn13] = useState("");
   const [isbn10, setIsbn10] = useState("");
   const [coverImageUrl, setCoverImageUrl] = useState("");
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "gn", itemId);
+      setCoverImageUrl(url);
+    } catch (err) {
+      setError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
+
   const [editionNotes, setEditionNotes] = useState("");
   const [starRating, setStarRating] = useState("");
   const [review, setReview] = useState("");
@@ -534,6 +549,8 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
               <label style={labelStyle}>Cover Image URL</label>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
                 {coverImageUrl && <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 36, width: "auto", borderRadius: 2, border: "1px solid var(--border-input)", flexShrink: 0 }} />}
               </div>
             </div>

@@ -530,18 +530,61 @@ export async function updateSetting(key, value) {
 
 // --- Admin: Backup & Restore ---
 
+export async function prepareBackup() {
+  const res = await fetch(`${API}/admin/backup/prepare`, { method: "POST" });
+  return handleJsonResponse(res, "Backup preparation failed.");
+}
+
+export async function downloadBackupByToken(token, onProgress) {
+  const res = await fetch(`${API}/admin/backup/download/${token}`);
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || "Backup download failed.");
+  }
+  const contentLength = parseInt(res.headers.get("Content-Length") || "0", 10);
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename=([^\s;]+)/);
+  const filename = match ? match[1] : "collectcore_backup.zip";
+
+  if (!contentLength || !res.body) {
+    const blob = await res.blob();
+    return { blob, filename };
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (onProgress) onProgress(received, contentLength);
+  }
+  const blob = new Blob(chunks);
+  return { blob, filename };
+}
+
 export async function downloadBackup() {
   const res = await fetch(`${API}/admin/backup`);
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(errorText || "Backup failed.");
   }
-  // Extract filename from Content-Disposition header if present
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename=([^\s;]+)/);
   const filename = match ? match[1] : "collectcore_backup.zip";
   const blob = await res.blob();
   return { blob, filename };
+}
+
+export async function uploadCover(file, module, itemId = null) {
+  const form = new FormData();
+  form.append("file", file);
+  let url = `${API}/upload-cover?module=${encodeURIComponent(module)}`;
+  if (itemId != null) url += `&item_id=${itemId}`;
+  const res = await fetch(url, { method: "POST", body: form });
+  return handleJsonResponse(res, "Cover upload failed.");
 }
 
 export async function restoreBackup(file) {

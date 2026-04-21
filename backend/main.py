@@ -81,9 +81,21 @@ LIBRARY_DIR = IMAGES_DIR / "library"
 
 GN_COVERS_DIR = LIBRARY_DIR / "gn"
 
+# Cover directories for all modules (keyed by module code used in URLs)
+COVER_DIRS: dict[str, Path] = {
+    "books": LIBRARY_DIR / "books",
+    "gn": GN_COVERS_DIR,
+    "videogames": LIBRARY_DIR / "videogames",
+    "music": LIBRARY_DIR / "music",
+    "video": LIBRARY_DIR / "video",
+    "boardgames": LIBRARY_DIR / "boardgames",
+    "ttrpg": LIBRARY_DIR / "ttrpg",
+}
+
 INBOX_DIR.mkdir(parents=True, exist_ok=True)
 LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-GN_COVERS_DIR.mkdir(parents=True, exist_ok=True)
+for _d in COVER_DIRS.values():
+    _d.mkdir(parents=True, exist_ok=True)
 
 # ---------- App ----------
 app = FastAPI(title="CollectCore API")
@@ -1627,6 +1639,10 @@ def create_book(payload: BookCreate):
             },
         )
 
+        # Download cover locally so external URLs never go stale
+        if payload.cover_image_url:
+            payload.cover_image_url = _resolve_cover_url(payload.cover_image_url, "books", item_id)
+
         _insert_book_relationships(db, item_id, payload)
         db.commit()
 
@@ -1708,6 +1724,10 @@ def update_book(item_id: int, payload: BookUpdate):
         db.execute(text("DELETE FROM xref_book_item_genres WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_book_item_tags WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_book_copies WHERE item_id = :id"), {"id": item_id})
+
+        # Download cover locally if an external URL was provided
+        if payload.cover_image_url and not payload.cover_image_url.startswith("/images/"):
+            payload.cover_image_url = _resolve_cover_url(payload.cover_image_url, "books", item_id)
 
         _insert_book_relationships(db, item_id, payload)
         db.commit()
@@ -2449,12 +2469,15 @@ def _gn_isbn_from_open_library(isbn: str):
     }
 
 
-def _download_gn_cover(url: str, item_id: int) -> Optional[str]:
-    """Download a cover image, save locally, and return the /images/… URL.
+def _download_cover(url: str, module_code: str, item_id: int) -> Optional[str]:
+    """Download a cover image for any module, save locally, return the /images/… path.
 
     Returns None if the download fails or the image is too small to be real
     (Open Library returns a 1-pixel placeholder for missing covers).
     """
+    cover_dir = COVER_DIRS.get(module_code)
+    if not cover_dir:
+        return None
     MIN_BYTES = 2048  # anything smaller is a placeholder or garbage
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
@@ -2471,11 +2494,53 @@ def _download_gn_cover(url: str, item_id: int) -> Optional[str]:
             ext = "gif"
         else:
             ext = "jpg"
-        filename = f"gn_{item_id:06d}.{ext}"
-        (GN_COVERS_DIR / filename).write_bytes(data)
-        return f"/images/library/gn/{filename}"
+        filename = f"{module_code}_{item_id:06d}.{ext}"
+        (cover_dir / filename).write_bytes(data)
+        return f"/images/library/{module_code}/{filename}"
     except Exception:
         return None
+
+
+def _download_gn_cover(url: str, item_id: int) -> Optional[str]:
+    """Backwards-compatible wrapper for graphic novel covers."""
+    return _download_cover(url, "gn", item_id)
+
+
+def _finalize_staged_cover(staged_path: str, module_code: str, item_id: int) -> Optional[str]:
+    """Rename a staged cover upload to its final name based on item_id."""
+    cover_dir = COVER_DIRS.get(module_code)
+    if not cover_dir:
+        return None
+    try:
+        src = DATA_ROOT / staged_path.lstrip("/")
+        if not src.is_file():
+            return None
+        ext = src.suffix.lstrip(".")
+        filename = f"{module_code}_{item_id:06d}.{ext}"
+        dest = cover_dir / filename
+        src.rename(dest)
+        return f"/images/library/{module_code}/{filename}"
+    except Exception:
+        return None
+
+
+def _resolve_cover_url(url: Optional[str], module_code: str, item_id: int) -> Optional[str]:
+    """Given a cover URL (external http, staged local, or final local), ensure it's local.
+
+    - http/https URLs are downloaded
+    - Staged paths (/images/library/{module}/staging_*) are renamed to final
+    - Already-final local paths (/images/library/...) are left as-is
+    Returns the final local path or the original value if nothing changed.
+    """
+    if not url:
+        return url
+    if url.startswith("http://") or url.startswith("https://"):
+        local = _download_cover(url, module_code, item_id)
+        return local if local else url
+    if "/staging_" in url:
+        local = _finalize_staged_cover(url, module_code, item_id)
+        return local if local else url
+    return url
 
 
 def _gn_isbn_from_ol_search(isbn: str):
@@ -3799,7 +3864,7 @@ def create_videogame(payload: VideoGameCreate):
                 "title_sort": _make_title_sort(payload.title.strip()),
                 "description": payload.description,
                 "release_date": payload.release_date,
-                "cover_image_url": payload.cover_image_url,
+                "cover_image_url": _resolve_cover_url(payload.cover_image_url, "videogames", item_id),
                 "api_source": payload.api_source,
                 "external_work_id": payload.external_work_id,
             },
@@ -3867,7 +3932,7 @@ def update_videogame(item_id: int, payload: VideoGameUpdate):
                 "title_sort": _make_title_sort(payload.title.strip()),
                 "description": payload.description,
                 "release_date": payload.release_date,
-                "cover_image_url": payload.cover_image_url,
+                "cover_image_url": _resolve_cover_url(payload.cover_image_url, "videogames", item_id),
                 "api_source": payload.api_source,
                 "external_work_id": payload.external_work_id,
             },
@@ -4646,7 +4711,7 @@ def create_music_release(payload: MusicReleaseCreate):
                 "sort": title_sort,
                 "desc": payload.description,
                 "date": payload.release_date,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "music", item_id),
                 "api_src": payload.api_source,
                 "ext_id": payload.external_work_id,
             },
@@ -4712,7 +4777,7 @@ def update_music_release(item_id: int, payload: MusicReleaseUpdate):
             detail_params["date"] = payload.release_date
         if payload.cover_image_url is not None:
             detail_updates.append("cover_image_url = :cover")
-            detail_params["cover"] = payload.cover_image_url
+            detail_params["cover"] = _resolve_cover_url(payload.cover_image_url, "music", item_id)
         if payload.api_source is not None:
             detail_updates.append("api_source = :api_src")
             detail_params["api_src"] = payload.api_source
@@ -5572,7 +5637,7 @@ def create_video(payload: VideoCreate):
                 "desc": payload.description,
                 "date": payload.release_date,
                 "runtime": payload.runtime_minutes,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "video", item_id),
                 "api_src": payload.api_source,
                 "ext_id": payload.external_work_id,
             },
@@ -5642,7 +5707,7 @@ def update_video(item_id: int, payload: VideoUpdate):
             detail_params["runtime"] = payload.runtime_minutes
         if payload.cover_image_url is not None:
             detail_updates.append("cover_image_url = :cover")
-            detail_params["cover"] = payload.cover_image_url
+            detail_params["cover"] = _resolve_cover_url(payload.cover_image_url, "video", item_id)
         if payload.api_source is not None:
             detail_updates.append("api_source = :api_src")
             detail_params["api_src"] = payload.api_source
@@ -6318,7 +6383,7 @@ def create_boardgame(payload: BoardgameCreate):
                 "min_p": payload.min_players,
                 "max_p": payload.max_players,
                 "pub_id": publisher_id,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "boardgames", item_id),
                 "api_source": payload.api_source,
                 "ext_id": payload.external_work_id,
             },
@@ -6391,7 +6456,7 @@ def update_boardgame(item_id: int, payload: BoardgameUpdate):
                 "min_p": payload.min_players,
                 "max_p": payload.max_players,
                 "pub_id": publisher_id,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "boardgames", item_id),
                 "api_source": payload.api_source,
                 "ext_id": payload.external_work_id,
             },
@@ -6522,9 +6587,79 @@ def bulk_delete_boardgames(payload: BulkDeletePayload):
         db.close()
 
 
-# ---------- Ingest endpoints ----------
+# ---------- Cover image upload (all modules except photocards) ----------
 
 _ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+_VALID_COVER_MODULES = set(COVER_DIRS.keys()) - {"gn"}  # GN already handled; include all others
+_VALID_COVER_MODULES.add("gn")  # actually include GN too for consistency
+
+
+@app.post("/upload-cover")
+async def upload_cover(
+    file: UploadFile = File(...),
+    module: str = Query(..., description="Module code: books, gn, videogames, music, video, boardgames, ttrpg"),
+    item_id: Optional[int] = Query(None, description="Item ID (omit for staging during new-item creation)"),
+):
+    """Upload a cover image file for any module.
+
+    If item_id is provided, saves directly as the final filename.
+    If item_id is omitted, saves as a staging file and returns the path
+    (the create endpoint will rename it to the final name).
+    """
+    if module not in COVER_DIRS:
+        raise HTTPException(status_code=400, detail=f"Unknown module: {module}")
+    ext = Path(file.filename).suffix.lower() if file.filename else ""
+    if ext not in _ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    data = await file.read()
+    cover_dir = COVER_DIRS[module]
+    ext_clean = ext.lstrip(".")
+
+    if item_id is not None:
+        filename = f"{module}_{item_id:06d}.{ext_clean}"
+    else:
+        import uuid
+        filename = f"staging_{uuid.uuid4().hex[:12]}.{ext_clean}"
+
+    dest = cover_dir / filename
+    dest.write_bytes(data)
+    url_path = f"/images/library/{module}/{filename}"
+
+    # If item_id was provided, update the cover in the DB too
+    if item_id is not None:
+        _update_cover_in_db(module, item_id, url_path)
+
+    return {"url": url_path, "filename": filename}
+
+
+def _update_cover_in_db(module: str, item_id: int, url_path: str):
+    """Update cover_image_url in the appropriate detail table for the given module."""
+    table_map = {
+        "books": "tbl_book_copies",
+        "gn": "tbl_graphicnovel_details",
+        "videogames": "tbl_game_details",
+        "music": "tbl_music_release_details",
+        "video": "tbl_video_details",
+        "boardgames": "tbl_boardgame_details",
+        "ttrpg": "tbl_ttrpg_details",
+    }
+    table = table_map.get(module)
+    if not table:
+        return
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(f"UPDATE {table} SET cover_image_url = :url WHERE item_id = :id"),
+            {"url": url_path, "id": item_id},
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+# ---------- Ingest endpoints ----------
 
 
 @app.get("/ingest/inbox")
@@ -7128,13 +7263,117 @@ def export_photocards(payload: ExportPayload):
 from db import DB_PATH
 
 
+_backup_tokens: dict[str, dict] = {}  # token -> {path, filename, created}
+
+
+@app.post("/admin/backup/prepare")
+def prepare_backup():
+    """Build the backup ZIP to a temp file and return metadata.
+
+    The frontend calls this first to get progress info, then downloads
+    via GET /admin/backup/download/{token}.
+    """
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="Database file not found.")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_filename = f"collectcore_backup_{timestamp}.zip"
+
+    # Count image files first (for progress reporting)
+    image_files = []
+    if LIBRARY_DIR.exists():
+        image_files = [p for p in LIBRARY_DIR.rglob("*") if p.is_file()]
+
+    tmp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp_zip_path = Path(tmp_zip.name)
+    tmp_zip.close()
+
+    try:
+        with zipfile.ZipFile(str(tmp_zip_path), "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # --- Database ---
+            src_conn = sqlite3.connect(str(DB_PATH))
+            dst_conn = sqlite3.connect(":memory:")
+            src_conn.backup(dst_conn)
+            src_conn.close()
+            tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+            tmp_db_path = Path(tmp_db.name)
+            tmp_db.close()
+            try:
+                disk_conn = sqlite3.connect(str(tmp_db_path))
+                dst_conn.backup(disk_conn)
+                disk_conn.close()
+                dst_conn.close()
+                zf.write(tmp_db_path, "collectcore.db")
+            finally:
+                tmp_db_path.unlink(missing_ok=True)
+
+            # --- Images ---
+            for img_path in image_files:
+                arcname = "images/library/" + img_path.relative_to(LIBRARY_DIR).as_posix()
+                zf.write(img_path, arcname)
+
+        size_bytes = tmp_zip_path.stat().st_size
+
+        import uuid as _uuid
+        token = _uuid.uuid4().hex[:16]
+        _backup_tokens[token] = {
+            "path": tmp_zip_path,
+            "filename": zip_filename,
+            "created": datetime.now(),
+        }
+
+        # Clean up old tokens (>30 min)
+        cutoff = datetime.now()
+        for k in list(_backup_tokens):
+            info = _backup_tokens[k]
+            if (cutoff - info["created"]).total_seconds() > 1800:
+                try:
+                    info["path"].unlink(missing_ok=True)
+                except Exception:
+                    pass
+                del _backup_tokens[k]
+
+        return {
+            "token": token,
+            "filename": zip_filename,
+            "size_bytes": size_bytes,
+            "image_count": len(image_files),
+        }
+
+    except Exception:
+        tmp_zip_path.unlink(missing_ok=True)
+        raise
+
+
+@app.get("/admin/backup/download/{token}")
+def download_backup_by_token(token: str):
+    """Stream a previously prepared backup ZIP with Content-Length for progress tracking."""
+    info = _backup_tokens.pop(token, None)
+    if not info or not info["path"].exists():
+        raise HTTPException(status_code=404, detail="Backup not found or expired. Please prepare a new backup.")
+
+    zip_path: Path = info["path"]
+    size = zip_path.stat().st_size
+
+    def iterfile():
+        with open(zip_path, "rb") as f:
+            while chunk := f.read(1024 * 256):
+                yield chunk
+        zip_path.unlink(missing_ok=True)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename={info['filename']}",
+            "Content-Length": str(size),
+        },
+    )
+
+
 @app.get("/admin/backup")
 def download_backup():
-    """
-    Create a backup ZIP containing the SQLite database and all library images.
-    This covers all current and future modules automatically — the DB dump is a
-    complete SQLite copy and the images directory is captured wholesale.
-    """
+    """Legacy single-step backup — kept for backwards compatibility."""
     if not DB_PATH.exists():
         raise HTTPException(status_code=404, detail="Database file not found.")
 
@@ -7143,28 +7382,22 @@ def download_backup():
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # --- Database ---
-        # Use SQLite backup API for a consistent hot-backup (safe while DB is in use)
-        db_buf = io.BytesIO()
         src_conn = sqlite3.connect(str(DB_PATH))
         dst_conn = sqlite3.connect(":memory:")
         src_conn.backup(dst_conn)
         src_conn.close()
-        # Serialize the in-memory copy to bytes
         tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp_db_path = Path(tmp_db.name)
         tmp_db.close()
         try:
-            mem_conn = dst_conn
             disk_conn = sqlite3.connect(str(tmp_db_path))
-            mem_conn.backup(disk_conn)
+            dst_conn.backup(disk_conn)
             disk_conn.close()
-            mem_conn.close()
+            dst_conn.close()
             zf.write(tmp_db_path, "collectcore.db")
         finally:
             tmp_db_path.unlink(missing_ok=True)
 
-        # --- Images ---
         if LIBRARY_DIR.exists():
             for img_path in LIBRARY_DIR.rglob("*"):
                 if img_path.is_file():
@@ -7796,7 +8029,7 @@ def create_ttrpg(payload: TTRPGCreate):
                 "book_type_id": payload.book_type_id,
                 "pub_id": publisher_id,
                 "release_date": payload.release_date,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "ttrpg", item_id),
                 "api_source": payload.api_source,
                 "ext_id": payload.external_work_id,
             },
@@ -7879,7 +8112,7 @@ def update_ttrpg(item_id: int, payload: TTRPGUpdate):
                 "book_type_id": payload.book_type_id,
                 "pub_id": publisher_id,
                 "release_date": payload.release_date,
-                "cover": payload.cover_image_url,
+                "cover": _resolve_cover_url(payload.cover_image_url, "ttrpg", item_id),
                 "api_source": payload.api_source,
                 "ext_id": payload.external_work_id,
             },

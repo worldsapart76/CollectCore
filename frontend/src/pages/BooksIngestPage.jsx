@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createBook,
   fetchBookAgeLevels,
@@ -8,6 +8,7 @@ import {
   fetchOwnershipStatuses,
   lookupBookIsbn,
   searchBooksExternal,
+  uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
 
@@ -163,6 +164,19 @@ function ManualForm({ ownershipStatuses, readStatuses, ageLevels, formatDetails,
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
   const [dupeWarning, setDupeWarning] = useState("");
+  const coverFileRef = useRef(null);
+
+  async function handleCoverFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const { url } = await uploadCover(file, "books");
+      setField("coverImageUrl", url);
+    } catch (err) {
+      setSaveError(err.message || "Cover upload failed.");
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
+  }
 
   useEffect(() => {
     if (initialValues && Object.keys(initialValues).length > 0) {
@@ -388,7 +402,14 @@ function ManualForm({ ownershipStatuses, readStatuses, ageLevels, formatDetails,
       {/* Cover URL */}
       <div style={{ marginBottom: 10 }}>
         <label style={labelStyle}>Cover Image URL</label>
-        <input value={form.coverImageUrl} onChange={(e) => setField("coverImageUrl", e.target.value)} style={inputStyle} placeholder="https://..." />
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+          <input value={form.coverImageUrl} onChange={(e) => setField("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://..." />
+          <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+          <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+          {form.coverImageUrl && (
+            <img src={form.coverImageUrl} alt="cover preview" style={{ width: 50, height: 70, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={(e) => e.target.style.display = "none"} />
+          )}
+        </div>
       </div>
 
       {/* Description */}
