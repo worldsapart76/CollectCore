@@ -171,6 +171,8 @@ These are intentionally not yet built. Do not implement without instruction:
 13. Photocard filter/input state persistence — when navigating between Inbox, Library, and Export tabs, the filter selections and form inputs should be preserved (currently reset on each navigation)
 14. Library pop-up modals — always offer an "Update image" option regardless of whether an image exists
 15. Board Games BGG search — BGG XML API requires an approved API key; search panel is built but non-functional until key is obtained and added to `.env` as `BGG_API_KEY`. The `/boardgames/bgg-search` and `/boardgames/bgg-detail/{id}` endpoints need to be updated to send the key once available.
+16. Graphic Novels ingest — keyword search result selection causes white screen crash. Clicking a Comic Vine search result calls `applyResult()` which crashes React. Needs debugging in `GraphicNovelsIngestPage.jsx`. ISBN lookup and manual entry work fine.
+17. Google Books API rate limiting — external search and ISBN lookup for Books and Graphic Novels modules intermittently return HTTP 429 (Too Many Requests). Consider adding retry-with-backoff, caching recent lookups, or switching to a different primary source.
 
 ---
 
