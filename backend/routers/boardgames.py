@@ -72,6 +72,7 @@ def _get_boardgame_detail(db, item_id: int):
                 bd.min_players,
                 bd.max_players,
                 bd.publisher_id,
+                pub.publisher_name,
                 bd.cover_image_url,
                 bd.api_source,
                 bd.external_work_id
@@ -79,6 +80,7 @@ def _get_boardgame_detail(db, item_id: int):
             JOIN tbl_boardgame_details bd ON i.item_id = bd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
             JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+            LEFT JOIN lkup_boardgame_publishers pub ON bd.publisher_id = pub.publisher_id
             WHERE i.item_id = :item_id AND i.collection_type_id = :ct
         """),
         {"item_id": item_id, "ct": BOARDGAMES_COLLECTION_TYPE_ID},
@@ -87,16 +89,9 @@ def _get_boardgame_detail(db, item_id: int):
     if not row:
         return None
 
-    publisher = None
-    publisher_name = None
-    if row[14]:
-        pub_row = db.execute(
-            text("SELECT publisher_id, publisher_name FROM lkup_boardgame_publishers WHERE publisher_id = :id"),
-            {"id": row[14]},
-        ).fetchone()
-        if pub_row:
-            publisher = {"publisher_id": pub_row[0], "publisher_name": pub_row[1]}
-            publisher_name = pub_row[1]
+    publisher_id = row[14]
+    publisher_name = row[15]
+    publisher = {"publisher_id": publisher_id, "publisher_name": publisher_name} if publisher_id else None
 
     designers = db.execute(
         text("""
@@ -138,9 +133,9 @@ def _get_boardgame_detail(db, item_id: int):
         "publisher_id": row[14],
         "publisher_name": publisher_name,
         "publisher": publisher,
-        "cover_image_url": row[15],
-        "api_source": row[16],
-        "external_work_id": row[17],
+        "cover_image_url": row[16],
+        "api_source": row[17],
+        "external_work_id": row[18],
         "designers": [{"designer_id": d[0], "designer_name": d[1]} for d in designers],
         "designer_names": [d[1] for d in designers],
         "expansions": [
@@ -405,9 +400,13 @@ def create_boardgame(payload: BoardgameCreate, db=Depends(get_db)):
         },
     )
 
-    _insert_boardgame_designers(db, item_id, payload.designer_names or [])
-    _insert_boardgame_expansions(db, item_id, payload.expansions or [])
-    db.commit()
+    try:
+        _insert_boardgame_designers(db, item_id, payload.designer_names or [])
+        _insert_boardgame_expansions(db, item_id, payload.expansions or [])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     game = _get_boardgame_detail(db, item_id)
     return {"item_id": item_id, "status": "created", "boardgame": game}
@@ -468,12 +467,16 @@ def update_boardgame(item_id: int, payload: BoardgameUpdate, db=Depends(get_db))
         },
     )
 
-    db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
-    db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
-    _insert_boardgame_designers(db, item_id, payload.designer_names or [])
-    _insert_boardgame_expansions(db, item_id, payload.expansions or [])
+    try:
+        db.execute(text("DELETE FROM xref_boardgame_designers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_boardgame_expansions WHERE item_id = :id"), {"id": item_id})
+        _insert_boardgame_designers(db, item_id, payload.designer_names or [])
+        _insert_boardgame_expansions(db, item_id, payload.expansions or [])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    db.commit()
     game = _get_boardgame_detail(db, item_id)
     return {"item_id": item_id, "status": "updated", "boardgame": game}
 

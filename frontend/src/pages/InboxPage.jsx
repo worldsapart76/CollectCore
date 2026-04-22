@@ -17,8 +17,9 @@ import {
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
 import { API_BASE } from "../utils/imageUrl";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
-const COLLECTION_TYPE_ID = 1;
+const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
 function inboxImageUrl(filename, mtime) {
   return `${API_BASE}/images/inbox/${encodeURIComponent(filename)}?v=${mtime}`;

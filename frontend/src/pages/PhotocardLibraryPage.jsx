@@ -15,8 +15,9 @@ import {
   applySection,
 } from "../components/library/FilterSidebar";
 import { libraryState } from "../photocardPageState";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
-const COLLECTION_TYPE_ID = 1;
+const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
 // Stray Kids canonical member order — cards with multiple members sort to bottom
 const MEMBER_ORDER = [

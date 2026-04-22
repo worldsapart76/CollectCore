@@ -423,9 +423,13 @@ def create_videogame(payload: VideoGameCreate, db=Depends(get_db)):
         },
     )
 
-    _insert_game_relationships(db, item_id, payload)
-    _insert_game_copies(db, item_id, payload.copies or [])
-    db.commit()
+    try:
+        _insert_game_relationships(db, item_id, payload)
+        _insert_game_copies(db, item_id, payload.copies or [])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     game = _get_game_detail(db, item_id)
     return {"item_id": item_id, "status": "created", "videogame": game}
@@ -481,15 +485,19 @@ def update_videogame(item_id: int, payload: VideoGameUpdate, db=Depends(get_db))
         },
     )
 
-    # Replace all relationships
-    db.execute(text("DELETE FROM xref_game_developers WHERE item_id = :id"), {"id": item_id})
-    db.execute(text("DELETE FROM xref_game_publishers WHERE item_id = :id"), {"id": item_id})
-    db.execute(text("DELETE FROM xref_game_genres WHERE item_id = :id"), {"id": item_id})
-    db.execute(text("DELETE FROM tbl_game_copies WHERE item_id = :id"), {"id": item_id})
-    _insert_game_relationships(db, item_id, payload)
-    _insert_game_copies(db, item_id, payload.copies or [])
+    try:
+        # Replace all relationships
+        db.execute(text("DELETE FROM xref_game_developers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_game_publishers WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_game_genres WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM tbl_game_copies WHERE item_id = :id"), {"id": item_id})
+        _insert_game_relationships(db, item_id, payload)
+        _insert_game_copies(db, item_id, payload.copies or [])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    db.commit()
     game = _get_game_detail(db, item_id)
     return {"item_id": item_id, "status": "updated", "videogame": game}
 

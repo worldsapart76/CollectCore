@@ -6,6 +6,32 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-21 — Code quality overhaul Wave 4 complete
+
+**Completed (Wave 4 — Query Optimization & Consistency):**
+- **4A — TTRPG detail query consolidation:** `_get_ttrpg_detail()` reduced from 8 queries to 3 — folded 4 conditional single-row lookups (system_edition, line, book_type, publisher) into LEFT JOINs on the main query. Column indices updated in the return dict.
+- **4A — BoardGames detail query consolidation:** `_get_boardgame_detail()` reduced from 4 queries to 3 — folded conditional publisher lookup into a LEFT JOIN on the main query.
+- **4B — Photocards POST/PUT full object return:** Added `_get_photocard()` helper; `create_photocard` and `update_photocard` now return `{"item_id": ..., "status": ..., "photocard": <full object>}`, matching all other modules. Frontend only reads `item_id` so this is backwards-compatible.
+- **4C — Videogames error handling:** Wrapped multi-step writes in `create_videogame` and `update_videogame` with `try/except + db.rollback()`, preventing partial writes on error.
+- **4C — Boardgames error handling:** Same pattern applied to `create_boardgame` and `update_boardgame`.
+- **4D — React.memo on library item components:** `BookGridItem`, `BookRow` (BooksLibraryPage), and `GnGridItem` (GraphicNovelsLibraryPage) wrapped with `memo()` to skip re-renders when props are unchanged. Added `memo` to named React imports in both files.
+
+**Next:**
+- CLAUDE.md Deferred Items #1 (image field schema finalization) and #3 (photocard copy/edition sub-table refactor) are the blocking prerequisites for Railway deployment
+
+### 2026-04-22 — Code quality overhaul Waves 1-3 complete
+
+**Completed (Wave 3 — Frontend Structural Refactor):**
+- **3A — Shared style constants:** Created `frontend/src/styles/commonStyles.js` with 14 shared style objects (labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, alertWarn, row2, sectionStyle, sectionLabel, GRID_SIZES). Removed duplicate definitions from 14 pages (7 library + 7 ingest).
+- **3B — Shared NameList component:** Created `frontend/src/components/shared/NameList.jsx` with unified `addLabel` + `placeholder` props (defaults to "+ Add"). Replaced 12 local definitions (NameList, AuthorList, ArtistList) across library and ingest pages.
+- **3C — Shared SegmentedButtons/ToggleButton:** Created `frontend/src/components/shared/SegmentedButtons.jsx` using CSS variables (adopted the GN variant over Books' hard-coded colors). Removed duplicates from BooksLibraryPage and GraphicNovelsLibraryPage.
+- **3D — Collection type constants:** Created `frontend/src/constants/collectionTypes.js` with `COLLECTION_TYPE_IDS` map. Updated PhotocardLibraryPage, InboxPage, ExportPage, InboxManager, and BooksIngestPage to use centralized constants.
+- **3E — Hidden status sets:** Created `frontend/src/constants/hiddenStatuses.js` with `HIDDEN_OWNERSHIP_NAMES`, `HIDDEN_READ_STATUS_NAMES`, `HIDDEN_ERA_NAMES`. Removed 14 duplicate definitions across library and ingest pages.
+- InboxPage retains its own style block (uses hard-coded colors, not CSS variables — intentional photocard-specific variant).
+
+**Next:**
+- Wave 4: Query optimization & consistency (N+1 queries, standardize API responses, error handling)
+
 ### 2026-04-22 — Code quality overhaul Wave 1 complete
 
 **Completed (Wave 1 — Safety & Cleanup):**

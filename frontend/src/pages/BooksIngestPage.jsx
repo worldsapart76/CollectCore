@@ -11,20 +11,11 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, alertWarn } from "../styles/commonStyles";
+import NameList from "../components/shared/NameList";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const labelStyle = { display: "block", fontSize: 12, fontWeight: "bold", marginBottom: 3, color: "var(--text-secondary)" };
-const inputStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid var(--border-input)", width: "100%", boxSizing: "border-box" };
-const selectStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid var(--border-input)", width: "100%" };
-const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "var(--btn-primary-bg)", color: "var(--btn-primary-text)", border: "none", borderRadius: 4, cursor: "pointer" };
-const btnSecondary = { fontSize: 13, padding: "5px 12px", background: "var(--btn-secondary-bg)", color: "var(--btn-secondary-text)", border: "1px solid var(--btn-secondary-border)", borderRadius: 4, cursor: "pointer" };
-const btnSm = { fontSize: 11, padding: "2px 7px", background: "var(--btn-secondary-bg)", border: "1px solid var(--btn-secondary-border)", borderRadius: 3, cursor: "pointer" };
-const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--error-border)", background: "var(--error-bg)", fontSize: 13, borderRadius: 3 };
-const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
-const alertWarn = { marginBottom: 10, padding: "8px 10px", border: "1px solid #e65100", background: "#fff3e0", fontSize: 13, borderRadius: 3 };
-
-const BOOK_COLLECTION_TYPE_ID = 2;
+const BOOK_COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.books;
 
 const categoryOptions = [
   { id: 3, label: "Fiction" },
@@ -125,36 +116,6 @@ function GenrePicker({ genres, selected, onChange }) {
   );
 }
 
-// ─── Author list editor ───────────────────────────────────────────────────────
-
-function AuthorList({ names, onChange }) {
-  function update(idx, val) {
-    const next = [...names];
-    next[idx] = val;
-    onChange(next);
-  }
-  function add() { onChange([...names, ""]); }
-  function remove(idx) { onChange(names.filter((_, i) => i !== idx)); }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {names.map((n, i) => (
-        <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <input
-            value={n}
-            onChange={(e) => update(i, e.target.value)}
-            placeholder={i === 0 ? "Primary author" : "Additional author"}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          {names.length > 1 && (
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕</button>
-          )}
-        </div>
-      ))}
-      <button type="button" onClick={add} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Author</button>
-    </div>
-  );
-}
 
 // ─── Manual form ─────────────────────────────────────────────────────────────
 
@@ -287,7 +248,7 @@ function ManualForm({ ownershipStatuses, readStatuses, ageLevels, formatDetails,
       {/* Authors */}
       <div style={{ marginBottom: 10 }}>
         <label style={labelStyle}>Author(s) *</label>
-        <AuthorList names={form.authorNames} onChange={(v) => setField("authorNames", v)} />
+        <NameList names={form.authorNames} onChange={(v) => setField("authorNames", v)} addLabel="+ Author" placeholder="Author name" />
       </div>
 
       {/* 3-col grid */}

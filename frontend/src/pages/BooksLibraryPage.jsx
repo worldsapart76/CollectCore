@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
   cycleItem,
@@ -26,18 +26,9 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const labelStyle = { display: "block", fontSize: 12, fontWeight: "bold", marginBottom: 3, color: "var(--text-secondary)" };
-const inputStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid var(--border-input)", width: "100%", boxSizing: "border-box" };
-const selectStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid var(--border-input)", width: "100%" };
-const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "var(--btn-primary-bg)", color: "var(--btn-primary-text)", border: "none", borderRadius: 4, cursor: "pointer" };
-const btnSecondary = { fontSize: 13, padding: "5px 12px", background: "var(--btn-secondary-bg)", color: "var(--btn-secondary-text)", border: "1px solid var(--btn-secondary-border)", borderRadius: 4, cursor: "pointer" };
-const btnSm = { fontSize: 11, padding: "2px 7px", background: "var(--btn-secondary-bg)", border: "1px solid var(--btn-secondary-border)", borderRadius: 3, cursor: "pointer" };
-const btnDanger = { fontSize: 13, padding: "5px 12px", background: "#c62828", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
-const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--error-border)", background: "var(--error-bg)", fontSize: 13, borderRadius: 3 };
-const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "var(--green-light)", fontSize: 13, borderRadius: 3 };
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, GRID_SIZES } from "../styles/commonStyles";
+import NameList from "../components/shared/NameList";
+import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 
 const FORMAT_COLORS_LIGHT = {
   Physical: { background: "#f5f5f5", color: "#555",     border: "1px solid #ccc" },
@@ -56,12 +47,6 @@ function getFormatColors(format) {
   const map = isDark ? FORMAT_COLORS_DARK : FORMAT_COLORS_LIGHT;
   return map[format] || map.Physical;
 }
-
-const GRID_SIZES = {
-  s: { w: 80, h: 120 },
-  m: { w: 120, h: 180 },
-  l: { w: 160, h: 240 },
-};
 
 const OWNERSHIP_BADGE_COLORS = {
   O: "#4caf50", W: "#ff9800", T: "#2196f3", B: "#9c27b0",
@@ -247,25 +232,6 @@ function GenrePicker({ genres, selected, onChange }) {
   );
 }
 
-// ─── Author list ──────────────────────────────────────────────────────────────
-
-function AuthorList({ names, onChange }) {
-  function update(idx, val) { const next = [...names]; next[idx] = val; onChange(next); }
-  function add() { onChange([...names, ""]); }
-  function remove(idx) { onChange(names.filter((_, i) => i !== idx)); }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {names.map((n, i) => (
-        <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <input value={n} onChange={(e) => update(i, e.target.value)} placeholder={i === 0 ? "Primary author" : "Additional author"} style={{ ...inputStyle, flex: 1 }} />
-          {names.length > 1 && <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕</button>}
-        </div>
-      ))}
-      <button type="button" onClick={add} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Author</button>
-    </div>
-  );
-}
-
 // ─── Display components ───────────────────────────────────────────────────────
 
 function OwnershipBadge({ statusName }) {
@@ -302,7 +268,7 @@ function FormatBadges({ formats }) {
 
 // ─── Grid view item ───────────────────────────────────────────────────────────
 
-function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+const BookGridItem = memo(function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
@@ -331,11 +297,11 @@ function BookGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, sho
       )}
     </div>
   );
-}
+});
 
 // ─── Table row ────────────────────────────────────────────────────────────────
 
-function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) {
+const BookRow = memo(function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) {
   const genreText = book.genres?.length ? book.genres.join(", ") : null;
   const subgenreText = book.subgenres?.length ? book.subgenres.join(", ") : null;
   return (
@@ -374,7 +340,7 @@ function BookRow({ book, isSelected, onToggleSelect, onClick, showThumbnails }) 
       <td style={{ padding: "3px 8px", whiteSpace: "nowrap" }}><StarRatingDisplay rating={book.star_rating} /></td>
     </tr>
   );
-}
+});
 
 // ─── Book detail modal ────────────────────────────────────────────────────────
 
@@ -545,7 +511,7 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
               </div>
               <div style={{ marginBottom: 10 }}>
                 <label style={labelStyle}>Author(s) *</label>
-                <AuthorList names={authorNames} onChange={setAuthorNames} />
+                <NameList names={authorNames} onChange={setAuthorNames} addLabel="+ Author" placeholder="Author name" />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px", marginBottom: 10 }}>
                 <div>
@@ -803,38 +769,6 @@ const DEFAULT_FILTERS = {
   series: emptySection(),
   tag: emptySection(),
 };
-
-
-function ToggleButton({ active, onClick, children }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      ...btnSm,
-      background: active ? "#e3f2fd" : "#f5f5f5",
-      color: active ? "#1976d2" : "#333",
-      border: active ? "1px solid #90caf9" : "1px solid #ccc",
-    }}>
-      {children}
-    </button>
-  );
-}
-
-function SegmentedButtons({ options, value, onChange }) {
-  return (
-    <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden" }}>
-      {options.map((opt, i) => (
-        <button key={opt.value} type="button" onClick={() => onChange(opt.value)} style={{
-          fontSize: 11, padding: "2px 8px", cursor: "pointer",
-          background: value === opt.value ? "#1976d2" : "#fff",
-          color: value === opt.value ? "#fff" : "#333",
-          border: "none",
-          borderRight: i < options.length - 1 ? "1px solid #ccc" : "none",
-        }}>
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function BooksLibraryPage() {
   const [books, setBooks] = useState([]);

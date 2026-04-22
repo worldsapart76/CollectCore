@@ -67,9 +67,13 @@ def _get_ttrpg_detail(db, item_id: int):
                 td.title_sort,
                 td.description,
                 td.system_edition_id,
+                se.edition_name,
                 td.line_id,
+                ln.line_name,
                 td.book_type_id,
+                bt.book_type_name,
                 td.publisher_id,
+                pub.publisher_name,
                 td.release_date,
                 td.cover_image_url,
                 td.api_source,
@@ -78,6 +82,10 @@ def _get_ttrpg_detail(db, item_id: int):
             JOIN tbl_ttrpg_details td ON i.item_id = td.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
             JOIN lkup_top_level_categories ltc ON i.top_level_category_id = ltc.top_level_category_id
+            LEFT JOIN lkup_ttrpg_system_editions se ON td.system_edition_id = se.edition_id
+            LEFT JOIN lkup_ttrpg_lines ln ON td.line_id = ln.line_id
+            LEFT JOIN lkup_ttrpg_book_types bt ON td.book_type_id = bt.book_type_id
+            LEFT JOIN lkup_ttrpg_publishers pub ON td.publisher_id = pub.publisher_id
             WHERE i.item_id = :item_id AND i.collection_type_id = :ct
         """),
         {"item_id": item_id, "ct": TTRPG_COLLECTION_TYPE_ID},
@@ -85,46 +93,6 @@ def _get_ttrpg_detail(db, item_id: int):
 
     if not row:
         return None
-
-    # system edition
-    system_edition_name = None
-    if row[11]:
-        se_row = db.execute(
-            text("SELECT edition_name FROM lkup_ttrpg_system_editions WHERE edition_id = :id"),
-            {"id": row[11]},
-        ).fetchone()
-        if se_row:
-            system_edition_name = se_row[0]
-
-    # line
-    line_name = None
-    if row[12]:
-        ln_row = db.execute(
-            text("SELECT line_name FROM lkup_ttrpg_lines WHERE line_id = :id"),
-            {"id": row[12]},
-        ).fetchone()
-        if ln_row:
-            line_name = ln_row[0]
-
-    # book type
-    book_type_name = None
-    if row[13]:
-        bt_row = db.execute(
-            text("SELECT book_type_name FROM lkup_ttrpg_book_types WHERE book_type_id = :id"),
-            {"id": row[13]},
-        ).fetchone()
-        if bt_row:
-            book_type_name = bt_row[0]
-
-    # publisher
-    publisher_name = None
-    if row[14]:
-        pub_row = db.execute(
-            text("SELECT publisher_name FROM lkup_ttrpg_publishers WHERE publisher_id = :id"),
-            {"id": row[14]},
-        ).fetchone()
-        if pub_row:
-            publisher_name = pub_row[0]
 
     authors = db.execute(
         text("""
@@ -163,17 +131,17 @@ def _get_ttrpg_detail(db, item_id: int):
         "title_sort": row[9],
         "description": row[10],
         "system_edition_id": row[11],
-        "system_edition_name": system_edition_name,
-        "line_id": row[12],
-        "line_name": line_name,
-        "book_type_id": row[13],
-        "book_type_name": book_type_name,
-        "publisher_id": row[14],
-        "publisher_name": publisher_name,
-        "release_date": row[15],
-        "cover_image_url": row[16],
-        "api_source": row[17],
-        "external_work_id": row[18],
+        "system_edition_name": row[12],
+        "line_id": row[13],
+        "line_name": row[14],
+        "book_type_id": row[15],
+        "book_type_name": row[16],
+        "publisher_id": row[17],
+        "publisher_name": row[18],
+        "release_date": row[19],
+        "cover_image_url": row[20],
+        "api_source": row[21],
+        "external_work_id": row[22],
         "authors": [{"author_id": a[0], "author_name": a[1]} for a in authors],
         "author_names": [a[1] for a in authors],
         "copies": [

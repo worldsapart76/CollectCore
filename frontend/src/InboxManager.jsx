@@ -9,9 +9,10 @@ import {
   listPhotocards,
   createPhotocardSourceOrigin,
 } from "./api";
+import { COLLECTION_TYPE_IDS } from "./constants/collectionTypes";
 
 export default function InboxManager() {
-  const COLLECTION_TYPE_ID = 1;
+  const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
   const [groups, setGroups] = useState([]);
   const [categories, setCategories] = useState([]);

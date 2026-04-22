@@ -120,6 +120,23 @@ _PHOTOCARD_GROUP_BY = """
 """
 
 
+def _get_photocard(db, item_id: int):
+    """Return full photocard dict for a single item, or None if not found."""
+    row = db.execute(
+        text(
+            _PHOTOCARD_SELECT
+            + " AND i.item_id = :item_id"
+            + _PHOTOCARD_GROUP_BY
+        ),
+        {"item_id": item_id},
+    ).fetchone()
+    if not row:
+        return None
+    card = _photocard_row_to_dict(row)
+    _attach_copies(db, [card])
+    return card
+
+
 def _check_owned_wanted_conflict(db, item_id: int, new_status_id: int, exclude_copy_id: int = None):
     """Raise 400 if adding/changing to Owned when Wanted exists, or vice versa."""
     if new_status_id not in (OWNED_STATUS_ID, WANTED_STATUS_ID):
@@ -315,7 +332,8 @@ def create_photocard(payload: PhotocardCreate, db=Depends(get_db)):
 
     db.commit()
 
-    return {"item_id": item_id, "status": "created"}
+    card = _get_photocard(db, item_id)
+    return {"item_id": item_id, "status": "created", "photocard": card}
 
 
 @router.put("/{item_id}")
@@ -373,7 +391,8 @@ def update_photocard(item_id: int, payload: PhotocardUpdate, db=Depends(get_db))
 
     db.commit()
 
-    return {"item_id": item_id, "status": "updated"}
+    card = _get_photocard(db, item_id)
+    return {"item_id": item_id, "status": "updated", "photocard": card}
 
 
 @router.delete("/{item_id}")
