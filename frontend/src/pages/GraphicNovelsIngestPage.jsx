@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createGraphicNovel,
   createGnPublisher,
-  fetchBookReadStatuses,
+  fetchConsumptionStatuses,
   fetchGnEras,
   fetchGnFormatTypes,
   fetchGnPublishers,
@@ -15,7 +15,7 @@ import {
 import PageContainer from "../components/layout/PageContainer";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, alertWarn, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES, HIDDEN_READ_STATUS_NAMES, HIDDEN_ERA_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
@@ -233,11 +233,7 @@ function blankForm(ownershipStatuses) {
 // ─── Manual entry form ────────────────────────────────────────────────────────
 
 function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStatuses, categories, initialValues, onCreated }) {
-  const visibleOwnership = ownershipStatuses.filter((s) => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
-  const visibleReadStatuses = readStatuses.filter((s) => !HIDDEN_READ_STATUS_NAMES.has(s.status_name));
-  const visibleEras = eras.filter((e) => !HIDDEN_ERA_NAMES.has(e.era_name));
-
-  const [form, setForm] = useState(() => ({ ...blankForm(visibleOwnership), ...initialValues }));
+  const [form, setForm] = useState(() => ({ ...blankForm(ownershipStatuses), ...initialValues }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -335,7 +331,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
         external_work_id: form.externalWorkId || null,
       });
       setSuccess(`Created: "${result.graphicnovel?.title || form.title}" (ID: ${result.item_id})`);
-      setForm(blankForm(visibleOwnership));
+      setForm(blankForm(ownershipStatuses));
       onCreated?.();
     } catch (e) {
       setError(e.message);
@@ -382,7 +378,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
           <label style={labelStyle}>Ownership *</label>
           <select value={form.ownershipStatusId} onChange={(e) => set("ownershipStatusId", e.target.value)} required style={selectStyle}>
             <option value="">-- Select --</option>
-            {visibleOwnership.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
           </select>
         </div>
       </div>
@@ -399,7 +395,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
           <label style={labelStyle}>Era</label>
           <select value={form.eraId} onChange={(e) => set("eraId", e.target.value)} style={selectStyle}>
             <option value="">-- None --</option>
-            {visibleEras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
+            {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
           </select>
         </div>
       </div>
@@ -409,7 +405,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
           <label style={labelStyle}>Read Status</label>
           <select value={form.readingStatusId} onChange={(e) => set("readingStatusId", e.target.value)} style={selectStyle}>
             <option value="">-- None --</option>
-            {visibleReadStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+            {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
           </select>
         </div>
         <div>
@@ -529,7 +525,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
 
       <div style={{ display: "flex", gap: 8 }}>
         <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Add Graphic Novel"}</button>
-        <button type="button" onClick={() => setForm(blankForm(visibleOwnership))} style={btnSecondary}>Clear</button>
+        <button type="button" onClick={() => setForm(blankForm(ownershipStatuses))} style={btnSecondary}>Clear</button>
       </div>
     </form>
   );
@@ -846,8 +842,8 @@ export default function GraphicNovelsIngestPage() {
       fetchGnPublishers().then(setPublishers),
       fetchGnFormatTypes().then(setFormatTypes),
       fetchGnEras().then(setEras),
-      fetchOwnershipStatuses().then(setOwnershipStatuses),
-      fetchBookReadStatuses().then(setReadStatuses),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.graphicnovels).then(setOwnershipStatuses),
+      fetchConsumptionStatuses(COLLECTION_TYPE_IDS.graphicnovels).then(setReadStatuses),
       fetchTopLevelCategories(GN_COLLECTION_TYPE_CODE).then(setCategories),
     ]).catch(() => {});
   }, []);

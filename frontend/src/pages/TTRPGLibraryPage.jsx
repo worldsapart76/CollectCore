@@ -27,12 +27,12 @@ import {
 import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function TTRPGFilters({ items, systems, bookTypes, ownershipStatuses, filters, onSectionChange, onClearAll }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   const allAuthors = useMemo(() => {
     const seen = new Set();
@@ -63,7 +63,7 @@ function TTRPGFilters({ items, systems, bookTypes, ownershipStatuses, filters, o
     >
       <TriStateFilterSection
         title="Ownership"
-        items={visibleOwnership.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
+        items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
       />
@@ -277,7 +277,7 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
     </div>
   );
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -312,7 +312,7 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
             <div>
               <label style={labelStyle}>Ownership *</label>
               <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
               </select>
             </div>
           </div>
@@ -380,7 +380,7 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
 
           <div style={{ marginBottom: 16 }}>
             <label style={{ ...labelStyle, marginBottom: 6 }}>Copies / Formats</label>
-            <CopiesEditor copies={form.copies} formatTypes={formatTypes} ownershipStatuses={visibleOwnership} onChange={v => set("copies", v)} />
+            <CopiesEditor copies={form.copies} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} onChange={v => set("copies", v)} />
           </div>
 
           {/* Actions */}
@@ -414,7 +414,7 @@ function BulkEditModal({ selectedIds, systems, ownershipStatuses, onClose, onSav
   const [systemId, setSystemId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   async function handleSave() {
     if (!ownershipId && !systemId) { setError("Select at least one field to update."); return; }
@@ -445,7 +445,7 @@ function BulkEditModal({ selectedIds, systems, ownershipStatuses, onClose, onSav
             <label style={labelStyle}>Set Ownership</label>
             <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={selectStyle}>
               <option value="">No change</option>
-              {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
           </div>
           <div style={{ marginBottom: 16 }}>
@@ -531,7 +531,7 @@ export default function TTRPGLibraryPage() {
       fetchTtrpgSystems(),
       fetchTtrpgBookTypes(),
       fetchTtrpgFormatTypes(),
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.ttrpg),
     ]).then(([books, sys, bt, ft, own]) => {
       setItems(books);
       setSystems(sys);

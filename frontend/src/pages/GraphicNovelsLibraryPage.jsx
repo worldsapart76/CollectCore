@@ -13,7 +13,7 @@ import {
   bulkDeleteGraphicNovels,
   bulkUpdateGraphicNovels,
   deleteGraphicNovel,
-  fetchBookReadStatuses,
+  fetchConsumptionStatuses,
   fetchGnEras,
   fetchGnFormatTypes,
   fetchGnPublishers,
@@ -29,7 +29,7 @@ import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
-import { HIDDEN_OWNERSHIP_NAMES, HIDDEN_READ_STATUS_NAMES, HIDDEN_ERA_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
@@ -37,9 +37,7 @@ const GN_COLLECTION_TYPE_CODE = "graphicnovels";
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function GnFilters({ items, publishers, formatTypes, eras, ownershipStatuses, readStatuses, categories, filters, onSectionChange, onClearAll }) {
-  const visibleOwnership = ownershipStatuses.filter((s) => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
-  const visibleReadStatuses = readStatuses.filter((s) => !HIDDEN_READ_STATUS_NAMES.has(s.status_name));
-  const visibleEras = eras.filter((e) => !HIDDEN_ERA_NAMES.has(e.era_name));
+
 
   const allWriters = useMemo(() => {
     const seen = new Set();
@@ -101,9 +99,9 @@ function GnFilters({ items, publishers, formatTypes, eras, ownershipStatuses, re
           items={formatTypes.map((f) => ({ id: String(f.format_type_id), label: f.format_type_name }))}
           section={filters.formatType} onChange={(s) => onSectionChange("formatType", s)} />
       )}
-      {visibleEras.length > 0 && (
+      {eras.length > 0 && (
         <TriStateFilterSection title="Era"
-          items={visibleEras.map((e) => ({ id: String(e.era_id), label: e.era_name }))}
+          items={eras.map((e) => ({ id: String(e.era_id), label: e.era_name }))}
           section={filters.era} onChange={(s) => onSectionChange("era", s)} />
       )}
       {allWriters.length > 0 && (
@@ -115,10 +113,10 @@ function GnFilters({ items, publishers, formatTypes, eras, ownershipStatuses, re
           section={filters.artist} onChange={(s) => onSectionChange("artist", s)} />
       )}
       <TriStateFilterSection title="Read Status"
-        items={visibleReadStatuses.map((s) => ({ id: String(s.read_status_id), label: s.status_name }))}
+        items={readStatuses.map((s) => ({ id: String(s.read_status_id), label: s.status_name }))}
         section={filters.readStatus} onChange={(s) => onSectionChange("readStatus", s)} />
       <TriStateFilterSection title="Ownership" defaultShown={2}
-        items={visibleOwnership.map((s) => ({ id: String(s.ownership_status_id), label: s.status_name }))}
+        items={ownershipStatuses.map((s) => ({ id: String(s.ownership_status_id), label: s.status_name }))}
         section={filters.ownership} onChange={(s) => onSectionChange("ownership", s)} />
       {allSeries.length > 0 && (
         <SearchableTriStateSection title="Series" items={allSeries} selectedOnly
@@ -217,9 +215,7 @@ function SourceSeriesList({ entries, onChange }) {
 // ─── Detail / Edit modal ──────────────────────────────────────────────────────
 
 function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuses, readStatuses, categories, onClose, onSaved, onDeleted }) {
-  const visibleOwnership = ownershipStatuses.filter((s) => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
-  const visibleReadStatuses = readStatuses.filter((s) => !HIDDEN_READ_STATUS_NAMES.has(s.status_name));
-  const visibleEras = eras.filter((e) => !HIDDEN_ERA_NAMES.has(e.era_name));
+
 
   const [gn, setGn] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -411,7 +407,7 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
                 <label style={labelStyle}>Ownership *</label>
                 <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} required style={selectStyle}>
                   <option value="">-- Select --</option>
-                  {visibleOwnership.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
                 </select>
               </div>
             </div>
@@ -438,14 +434,14 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
                 <label style={labelStyle}>Era</label>
                 <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={selectStyle}>
                   <option value="">-- None --</option>
-                  {visibleEras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
+                  {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
                 </select>
               </div>
               <div>
                 <label style={labelStyle}>Read Status</label>
                 <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={selectStyle}>
                   <option value="">-- None --</option>
-                  {visibleReadStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+                  {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
                 </select>
               </div>
             </div>
@@ -578,9 +574,7 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
 // ─── Bulk edit panel ──────────────────────────────────────────────────────────
 
 function BulkEditPanel({ selectedIds, publishers, formatTypes, eras, ownershipStatuses, readStatuses, onBulkSave, onBulkDelete, onClearSelection }) {
-  const visibleOwnership = ownershipStatuses.filter((s) => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
-  const visibleReadStatuses = readStatuses.filter((s) => !HIDDEN_READ_STATUS_NAMES.has(s.status_name));
-  const visibleEras = eras.filter((e) => !HIDDEN_ERA_NAMES.has(e.era_name));
+
 
   const [ownershipId, setOwnershipId] = useState("");
   const [readStatusId, setReadStatusId] = useState("");
@@ -635,11 +629,11 @@ function BulkEditPanel({ selectedIds, publishers, formatTypes, eras, ownershipSt
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
         <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
           <option value="">Ownership…</option>
-          {visibleOwnership.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+          {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
         </select>
         <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
           <option value="">Read Status…</option>
-          {visibleReadStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+          {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
         </select>
         <select value={publisherId} onChange={(e) => setPublisherId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
           <option value="">Publisher…</option>
@@ -651,7 +645,7 @@ function BulkEditPanel({ selectedIds, publishers, formatTypes, eras, ownershipSt
         </select>
         <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
           <option value="">Era…</option>
-          {visibleEras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}</option>)}
+          {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}</option>)}
         </select>
         <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Apply"}</button>
       </div>
@@ -831,8 +825,8 @@ export default function GraphicNovelsLibraryPage() {
       fetchGnPublishers().then(setPublishers),
       fetchGnFormatTypes().then(setFormatTypes),
       fetchGnEras().then(setEras),
-      fetchOwnershipStatuses().then(setOwnershipStatuses),
-      fetchBookReadStatuses().then(setReadStatuses),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.graphicnovels).then(setOwnershipStatuses),
+      fetchConsumptionStatuses(COLLECTION_TYPE_IDS.graphicnovels).then(setReadStatuses),
       fetchTopLevelCategories(GN_COLLECTION_TYPE_CODE).then(setCategories),
     ]).catch(err => console.error("Failed to load GN data:", err));
   }, [load]);

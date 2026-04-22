@@ -4,7 +4,7 @@ import {
   fetchBookAgeLevels,
   fetchBookFormatDetails,
   fetchBookGenres,
-  fetchBookReadStatuses,
+  fetchConsumptionStatuses,
   fetchOwnershipStatuses,
   lookupBookIsbn,
   searchBooksExternal,
@@ -608,8 +608,8 @@ export default function BooksIngestPage() {
 
   useEffect(() => {
     Promise.all([
-      fetchOwnershipStatuses(),
-      fetchBookReadStatuses(),
+      fetchOwnershipStatuses(BOOK_COLLECTION_TYPE_ID),
+      fetchConsumptionStatuses(BOOK_COLLECTION_TYPE_ID),
       fetchBookAgeLevels(),
       fetchBookFormatDetails(),
       fetchBookGenres(),

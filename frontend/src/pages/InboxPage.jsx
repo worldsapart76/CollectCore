@@ -345,7 +345,7 @@ export default function InboxPage() {
     Promise.all([
       fetchPhotocardGroups(),
       fetchTopLevelCategories(COLLECTION_TYPE_ID),
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_ID),
       fetchInbox(),
     ])
       .then(([g, c, os, inbox]) => {

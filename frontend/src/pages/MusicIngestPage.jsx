@@ -12,7 +12,7 @@ import {
 import PageContainer from "../components/layout/PageContainer";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2, sectionStyle, sectionLabel } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 
 // ─── Genre picker ─────────────────────────────────────────────────────────────
@@ -292,17 +292,16 @@ export default function MusicIngestPage() {
 
   useEffect(() => {
     Promise.all([
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.music),
       fetchMusicReleaseTypes(),
       fetchMusicFormatTypes(),
       fetchMusicGenres(),
     ]).then(([own, types, fmts, genres]) => {
-      const filteredOwn = own.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
-      setOwnershipStatuses(filteredOwn);
+      setOwnershipStatuses(own);
       setReleaseTypes(types);
       setFormatTypes(fmts);
       setAllGenres(genres);
-      setForm(blankForm(filteredOwn, types));
+      setForm(blankForm(own, types));
     }).catch(err => {
       setError(err.message || "Failed to load page data. Has the music migration been run?");
       setForm({});
@@ -416,7 +415,7 @@ export default function MusicIngestPage() {
   if (!form) return <PageContainer><p style={{ padding: 20, fontSize: 13 }}>Loading…</p></PageContainer>;
   if (error && !form.title && form.title !== "") return <PageContainer><div style={{ ...alertError, margin: 20 }}>{error}</div></PageContainer>;
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   return (
     <PageContainer>
@@ -489,7 +488,7 @@ export default function MusicIngestPage() {
               <label style={labelStyle}>Ownership *</label>
               <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
                 <option value="">Select…</option>
-                {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
               </select>
             </div>
           </div>
@@ -554,7 +553,7 @@ export default function MusicIngestPage() {
             <EditionsEditor
               editions={form.editions}
               formatTypes={formatTypes}
-              ownershipStatuses={visibleOwnership}
+              ownershipStatuses={ownershipStatuses}
               onChange={v => set("editions", v)}
             />
           </div>

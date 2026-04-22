@@ -131,7 +131,7 @@ def _get_book_detail(db, item_id: int):
             JOIN tbl_book_details bd ON i.item_id = bd.item_id
             JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             LEFT JOIN lkup_book_age_levels al ON bd.age_level_id = al.age_level_id
             WHERE i.item_id = :item_id AND i.collection_type_id = :ct
         """),
@@ -349,17 +349,6 @@ def get_book_age_levels(db=Depends(get_db)):
     return [{"age_level_id": row[0], "age_level_name": row[1]} for row in rows]
 
 
-@router.get("/read-statuses")
-def get_book_read_statuses(db=Depends(get_db)):
-    rows = db.execute(text("""
-        SELECT read_status_id, status_name
-        FROM lkup_book_read_statuses
-        WHERE is_active = 1
-        ORDER BY sort_order
-    """)).fetchall()
-    return [{"read_status_id": row[0], "status_name": row[1]} for row in rows]
-
-
 @router.get("/authors")
 def get_book_authors(q: Optional[str] = None, db=Depends(get_db)):
     if q:
@@ -511,7 +500,7 @@ def list_books(db=Depends(get_db)):
             JOIN tbl_book_details bd ON i.item_id = bd.item_id
             JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             LEFT JOIN lkup_book_age_levels al ON bd.age_level_id = al.age_level_id
             WHERE i.collection_type_id = :ct
             ORDER BY COALESCE(bd.title_sort, bd.title)

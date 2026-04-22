@@ -95,7 +95,7 @@ def _get_game_detail(db, item_id: int):
             FROM tbl_items i
             JOIN tbl_game_details gd ON i.item_id = gd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             WHERE i.item_id = :item_id AND i.collection_type_id = :ct
         """),
         {"item_id": item_id, "ct": VIDEOGAMES_COLLECTION_TYPE_ID},
@@ -241,17 +241,6 @@ def get_game_publishers(q: Optional[str] = None, db=Depends(get_db)):
     return [{"publisher_id": r[0], "publisher_name": r[1]} for r in rows]
 
 
-@router.get("/play-statuses")
-def get_game_play_statuses(db=Depends(get_db)):
-    """Returns play-status rows from the shared consumption status table."""
-    rows = db.execute(text("""
-        SELECT read_status_id, status_name FROM lkup_book_read_statuses
-        WHERE status_name IN ('Played', 'Playing', 'Want to Play', 'Abandoned')
-        ORDER BY sort_order
-    """)).fetchall()
-    return [{"play_status_id": r[0], "status_name": r[1]} for r in rows]
-
-
 @router.get("/platforms")
 def get_game_platforms(db=Depends(get_db)):
     """Returns all active platforms from lkup_game_platforms."""
@@ -330,7 +319,7 @@ def list_videogames(db=Depends(get_db)):
             FROM tbl_items i
             JOIN tbl_game_details gd ON i.item_id = gd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             WHERE i.collection_type_id = :ct
             ORDER BY COALESCE(gd.title_sort, gd.title)
         """),

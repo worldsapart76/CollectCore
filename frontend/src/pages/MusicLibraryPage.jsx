@@ -24,12 +24,12 @@ import {
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, sectionStyle, sectionLabel } from "../styles/commonStyles";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function MusicFilters({ items, ownershipStatuses, releaseTypes, filters, onSectionChange, onClearAll }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   const allArtists = useMemo(() => {
     const seen = new Set();
@@ -66,7 +66,7 @@ function MusicFilters({ items, ownershipStatuses, releaseTypes, filters, onSecti
     >
       <TriStateFilterSection
         title="Ownership"
-        items={visibleOwnership.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
+        items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
       />
@@ -335,7 +335,7 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
     if (coverFileRef.current) coverFileRef.current.value = "";
   }
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   useEffect(() => {
     getMusicRelease(itemId).then(d => {
@@ -464,7 +464,7 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
           <div>
             <label style={labelStyle}>Ownership</label>
             <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-              {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
           </div>
           <div>
@@ -519,7 +519,7 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
           <EditionsEditor
             editions={form.editions}
             formatTypes={formatTypes}
-            ownershipStatuses={visibleOwnership}
+            ownershipStatuses={ownershipStatuses}
             onChange={v => set("editions", v)}
           />
         </div>
@@ -551,7 +551,7 @@ function BulkEditPanel({ selectedIds, ownershipStatuses, releaseTypes, onDone, o
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   async function handleUpdate() {
     const fields = {};
@@ -586,7 +586,7 @@ function BulkEditPanel({ selectedIds, ownershipStatuses, releaseTypes, onDone, o
       <span style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)" }}>{selectedIds.length} selected</span>
       <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130, fontSize: 12 }}>
         <option value="">Ownership…</option>
-        {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+        {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
       </select>
       <select value={releaseTypeId} onChange={e => setReleaseTypeId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130, fontSize: 12 }}>
         <option value="">Release Type…</option>
@@ -638,7 +638,7 @@ export default function MusicLibraryPage() {
     setLoading(true);
     Promise.all([
       listMusicReleases(),
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.music),
       fetchMusicReleaseTypes(),
       fetchMusicFormatTypes(),
       fetchMusicGenres(),

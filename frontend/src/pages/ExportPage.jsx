@@ -82,7 +82,7 @@ export default function ExportPage() {
           listPhotocards(),
           fetchPhotocardGroups(),
           fetchTopLevelCategories(COLLECTION_TYPE_ID),
-          fetchOwnershipStatuses(),
+          fetchOwnershipStatuses(COLLECTION_TYPE_IDS.photocards),
         ]);
         setCards(cardData);
         setGroups(groupData);

@@ -23,9 +23,36 @@ export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
   return handleJsonResponse(res, "Failed to fetch top-level categories");
 }
 
-export async function fetchOwnershipStatuses() {
-  const res = await fetch(`${API}/ownership-statuses`);
+export async function fetchOwnershipStatuses(collectionTypeId = null) {
+  const url = collectionTypeId
+    ? `${API}/ownership-statuses?collection_type_id=${collectionTypeId}`
+    : `${API}/ownership-statuses`;
+  const res = await fetch(url);
   return handleJsonResponse(res, "Failed to fetch ownership statuses");
+}
+
+export async function fetchConsumptionStatuses(collectionTypeId) {
+  const res = await fetch(`${API}/consumption-statuses?collection_type_id=${collectionTypeId}`);
+  return handleJsonResponse(res, "Failed to fetch consumption statuses");
+}
+
+export async function fetchStatusVisibility() {
+  const res = await fetch(`${API}/admin/status-visibility`);
+  return handleJsonResponse(res, "Failed to fetch status visibility");
+}
+
+export async function toggleStatusVisibility(statusType, statusId, collectionTypeId, visible) {
+  const res = await fetch(`${API}/admin/status-visibility`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      status_type: statusType,
+      status_id: statusId,
+      collection_type_id: collectionTypeId,
+      visible,
+    }),
+  });
+  return handleJsonResponse(res, "Failed to update status visibility");
 }
 
 // --- Photocard lookups ---
@@ -321,10 +348,6 @@ export async function fetchBookAgeLevels() {
   return handleJsonResponse(res, "Failed to fetch book age levels");
 }
 
-export async function fetchBookReadStatuses() {
-  const res = await fetch(`${API}/books/read-statuses`);
-  return handleJsonResponse(res, "Failed to fetch book read statuses");
-}
 
 export async function searchBookAuthors(q) {
   const url = q
@@ -662,10 +685,6 @@ export async function rawgSearchGames(q) {
   return handleJsonResponse(res, "Failed to search RAWG");
 }
 
-export async function fetchGamePlayStatuses() {
-  const res = await fetch(`${API}/videogames/play-statuses`);
-  return handleJsonResponse(res, "Failed to fetch play statuses");
-}
 
 export async function listVideoGames() {
   const res = await fetch(`${API}/videogames`);
@@ -828,10 +847,6 @@ export async function fetchVideoGenres() {
   return handleJsonResponse(res, "Failed to fetch video genres");
 }
 
-export async function fetchVideoWatchStatuses() {
-  const res = await fetch(`${API}/video/watch-statuses`);
-  return handleJsonResponse(res, "Failed to fetch watch statuses");
-}
 
 export async function tmdbSearch(q, mediaType = "movie") {
   const params = new URLSearchParams({ q, media_type: mediaType });

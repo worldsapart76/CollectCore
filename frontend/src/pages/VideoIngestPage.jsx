@@ -5,7 +5,7 @@ import {
   fetchVideoCategories,
   fetchVideoFormatTypes,
   fetchVideoGenres,
-  fetchVideoWatchStatuses,
+  fetchConsumptionStatuses,
   tmdbDetail,
   tmdbSearch,
   uploadCover,
@@ -13,7 +13,7 @@ import {
 import PageContainer from "../components/layout/PageContainer";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2, sectionStyle, sectionLabel } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 // TV Series uses seasons sub-table; all others use copies
 const TV_CATEGORY = "TV Series";
@@ -77,7 +77,7 @@ function GenrePicker({ allGenres, selected, onChange }) {
 // ─── Copies editor (Movie / Miniseries / Concert) ─────────────────────────────
 
 function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   function addCopy() {
     onChange([...copies, { format_type_id: null, ownership_status_id: null, notes: "" }]);
@@ -107,7 +107,7 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
             <label style={labelStyle}>Ownership</label>
             <select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
               <option value="">— Status —</option>
-              {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
           </div>
           <div>
@@ -125,7 +125,7 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
 // ─── Seasons editor (TV Series) ───────────────────────────────────────────────
 
 function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   function addSeason() {
     const nextNum = seasons.length > 0 ? Math.max(...seasons.map(s => s.season_number)) + 1 : 1;
@@ -164,7 +164,7 @@ function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
             <label style={labelStyle}>Ownership</label>
             <select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
               <option value="">— Status —</option>
-              {visibleOwnership.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
+              {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
             </select>
           </div>
           <button type="button" onClick={() => removeSeason(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
@@ -307,8 +307,8 @@ export default function VideoIngestPage() {
       fetchVideoCategories(),
       fetchVideoFormatTypes(),
       fetchVideoGenres(),
-      fetchOwnershipStatuses(),
-      fetchVideoWatchStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.video),
+      fetchConsumptionStatuses(COLLECTION_TYPE_IDS.video),
     ]).then(([cats, fmts, genres, own, watch]) => {
       setCategories(cats);
       setFormatTypes(fmts);
@@ -319,7 +319,7 @@ export default function VideoIngestPage() {
     }).catch(e => setError(e.message || "Failed to load lookup data. Is the backend running?"));
   }, []);
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   const selectedCategory = categories.find(c => String(c.top_level_category_id) === String(form.top_level_category_id));
   const isTV = selectedCategory?.category_name === TV_CATEGORY;
@@ -423,7 +423,7 @@ export default function VideoIngestPage() {
               <label style={labelStyle}>Ownership *</label>
               <select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)} style={selectStyle} required>
                 <option value="">— Status —</option>
-                {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
               </select>
             </div>
           </div>

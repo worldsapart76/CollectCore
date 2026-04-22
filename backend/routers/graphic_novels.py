@@ -132,7 +132,7 @@ def _get_gn_detail(db, item_id: int):
             JOIN tbl_graphicnovel_details gd ON i.item_id = gd.item_id
             JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             LEFT JOIN lkup_graphicnovel_publishers pub ON gd.publisher_id = pub.publisher_id
             LEFT JOIN lkup_graphicnovel_format_types ft ON gd.format_type_id = ft.format_type_id
             LEFT JOIN lkup_graphicnovel_eras era ON gd.era_id = era.era_id
@@ -752,7 +752,7 @@ def list_graphicnovels(db=Depends(get_db)):
             JOIN tbl_graphicnovel_details gd ON i.item_id = gd.item_id
             JOIN lkup_top_level_categories c ON i.top_level_category_id = c.top_level_category_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             LEFT JOIN lkup_graphicnovel_publishers pub ON gd.publisher_id = pub.publisher_id
             LEFT JOIN lkup_graphicnovel_format_types ft ON gd.format_type_id = ft.format_type_id
             LEFT JOIN lkup_graphicnovel_eras era ON gd.era_id = era.era_id

@@ -23,12 +23,12 @@ import {
 import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function BoardgameFilters({ items, categories, ownershipStatuses, filters, onSectionChange, onClearAll }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   const allDesigners = useMemo(() => {
     const seen = new Set();
@@ -58,7 +58,7 @@ function BoardgameFilters({ items, categories, ownershipStatuses, filters, onSec
     >
       <TriStateFilterSection
         title="Ownership"
-        items={visibleOwnership.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
+        items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
       />
@@ -231,7 +231,7 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
     </div>
   );
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -267,7 +267,7 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
             <div>
               <label style={labelStyle}>Ownership *</label>
               <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
               </select>
             </div>
           </div>
@@ -321,7 +321,7 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
             <label style={{ ...labelStyle, marginBottom: 6 }}>Expansions</label>
             <ExpansionsEditor
               expansions={form.expansions}
-              ownershipStatuses={visibleOwnership}
+              ownershipStatuses={ownershipStatuses}
               onChange={v => set("expansions", v)}
             />
           </div>
@@ -357,7 +357,7 @@ function BulkEditPanel({ selectedIds, categories, ownershipStatuses, onDone, onD
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   async function handleApply() {
     if (!ownershipId && !categoryId) return;
@@ -390,7 +390,7 @@ function BulkEditPanel({ selectedIds, categories, ownershipStatuses, onDone, onD
       <span style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)" }}>{selectedIds.length} selected</span>
       <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 120, fontSize: 12 }}>
         <option value="">Ownership…</option>
-        {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+        {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
       </select>
       <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 150, fontSize: 12 }}>
         <option value="">Player Count…</option>
@@ -454,7 +454,7 @@ export default function BoardgamesLibraryPage() {
     Promise.all([
       listBoardgames(),
       fetchBoardgameCategories(),
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.boardgames),
     ]).then(([gs, cats, own]) => {
       setGames(gs);
       setCategories(cats);

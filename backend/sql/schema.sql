@@ -26,6 +26,33 @@ CREATE TABLE IF NOT EXISTS lkup_ownership_statuses (
     is_active           INTEGER NOT NULL DEFAULT 1
 );
 
+-- Shared consumption/read statuses (Books, Graphic Novels, Video, Video Games)
+-- Formerly named lkup_book_read_statuses; renamed as it now serves multiple modules.
+CREATE TABLE IF NOT EXISTS lkup_consumption_statuses (
+    read_status_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    status_name     TEXT NOT NULL UNIQUE,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_active       INTEGER NOT NULL DEFAULT 1
+);
+
+-- Module visibility for ownership statuses: controls which statuses appear in each module
+CREATE TABLE IF NOT EXISTS xref_ownership_status_modules (
+    ownership_status_id INTEGER NOT NULL,
+    collection_type_id  INTEGER NOT NULL,
+    PRIMARY KEY (ownership_status_id, collection_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id),
+    FOREIGN KEY (collection_type_id)  REFERENCES lkup_collection_types(collection_type_id)
+);
+
+-- Module visibility for consumption statuses: controls which statuses appear in each module
+CREATE TABLE IF NOT EXISTS xref_consumption_status_modules (
+    read_status_id     INTEGER NOT NULL,
+    collection_type_id INTEGER NOT NULL,
+    PRIMARY KEY (read_status_id, collection_type_id),
+    FOREIGN KEY (read_status_id)       REFERENCES lkup_consumption_statuses(read_status_id),
+    FOREIGN KEY (collection_type_id)   REFERENCES lkup_collection_types(collection_type_id)
+);
+
 CREATE TABLE IF NOT EXISTS lkup_top_level_categories (
     top_level_category_id INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_type_id    INTEGER NOT NULL,
@@ -54,7 +81,7 @@ CREATE TABLE IF NOT EXISTS tbl_items (
     FOREIGN KEY (collection_type_id) REFERENCES lkup_collection_types(collection_type_id),
     FOREIGN KEY (top_level_category_id) REFERENCES lkup_top_level_categories(top_level_category_id),
     FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id),
-    FOREIGN KEY (reading_status_id) REFERENCES lkup_book_read_statuses(read_status_id)
+    FOREIGN KEY (reading_status_id) REFERENCES lkup_consumption_statuses(read_status_id)
 );
 
 CREATE TABLE IF NOT EXISTS tbl_attachments (
@@ -134,13 +161,6 @@ CREATE TABLE IF NOT EXISTS xref_photocard_members (
 -- ============================================================
 -- BOOKS LOOKUP TABLES
 -- ============================================================
-
-CREATE TABLE IF NOT EXISTS lkup_book_read_statuses (
-    read_status_id  INTEGER PRIMARY KEY AUTOINCREMENT,
-    status_name     TEXT NOT NULL UNIQUE,
-    sort_order      INTEGER NOT NULL DEFAULT 0,
-    is_active       INTEGER NOT NULL DEFAULT 1
-);
 
 CREATE TABLE IF NOT EXISTS lkup_book_format_details (
     format_detail_id  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -505,11 +525,11 @@ WHERE NOT EXISTS (
     WHERE lct.collection_type_code = 'books' AND ltc.category_name = 'Non-Fiction'
 );
 
--- read statuses
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Read',              1);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Currently Reading', 2);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Want to Read',      3);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('DNF',               4);
+-- consumption statuses (books)
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Read',              1);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Currently Reading', 2);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Want to Read',      3);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('DNF',               4);
 
 -- format details
 INSERT OR IGNORE INTO lkup_book_format_details (format_name, top_level_format, sort_order) VALUES ('Hardcover',             'Physical', 1);
@@ -843,7 +863,6 @@ INSERT OR IGNORE INTO lkup_graphicnovel_format_types (format_type_name, sort_ord
 INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Golden Age', '1938–1956', 10);
 INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Silver Age', '1956–1970', 20);
 INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Bronze Age', '1970–1985', 30);
-INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Copper Age', '1985–1991', 40);
 INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Modern Era', '1991+', 50);
 INSERT OR IGNORE INTO lkup_graphicnovel_eras (era_name, era_years, sort_order) VALUES ('Multi-Era', NULL, 60);
 
@@ -1003,11 +1022,11 @@ WHERE NOT EXISTS (
     WHERE lct.collection_type_code = 'videogames' AND ltc.category_name = 'Video Games'
 );
 
--- play statuses (added to shared lkup_book_read_statuses)
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Played',          10);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Playing',         11);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Want to Play',    12);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Abandoned',       13);
+-- consumption statuses (video games)
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Played',          10);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Playing',         11);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Want to Play',    12);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Abandoned',       13);
 
 -- top genres
 INSERT OR IGNORE INTO lkup_game_top_genres (genre_name, sort_order) VALUES ('RPG',         1);
@@ -1389,9 +1408,10 @@ INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('An
 INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('K-drama',     9);
 INSERT OR IGNORE INTO lkup_video_top_genres (genre_name, sort_order) VALUES ('Other',      10);
 
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Watched',            20);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Currently Watching', 21);
-INSERT OR IGNORE INTO lkup_book_read_statuses (status_name, sort_order) VALUES ('Want to Watch',      22);
+-- consumption statuses (video)
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Watched',            20);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Currently Watching', 21);
+INSERT OR IGNORE INTO lkup_consumption_statuses (status_name, sort_order) VALUES ('Want to Watch',      22);
 
 INSERT OR IGNORE INTO lkup_collection_types (collection_type_code, collection_type_name, sort_order)
 VALUES ('video', 'Video', 6);
@@ -1674,3 +1694,44 @@ INSERT OR IGNORE INTO lkup_ttrpg_book_types (book_type_name, sort_order) VALUES 
 INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('Physical', 1);
 INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('PDF', 2);
 INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES ('Other', 99);
+
+
+-- ============================================================
+-- STATUS VISIBILITY SEED DATA (xref tables)
+-- All modules get all ownership statuses by default (editable via Admin > Status Visibility).
+-- Consumption statuses are seeded per-module matching their actual usage.
+-- ============================================================
+
+-- Ownership: all active statuses × all active modules
+INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
+SELECT s.ownership_status_id, c.collection_type_id
+FROM lkup_ownership_statuses s, lkup_collection_types c
+WHERE s.is_active = 1 AND c.is_active = 1;
+
+-- Consumption: Books
+INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+SELECT cs.read_status_id, ct.collection_type_id
+FROM lkup_consumption_statuses cs, lkup_collection_types ct
+WHERE ct.collection_type_code = 'books'
+  AND cs.status_name IN ('Read', 'Currently Reading', 'Want to Read', 'DNF');
+
+-- Consumption: Graphic Novels (excludes Currently Reading and DNF per historical hidden set)
+INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+SELECT cs.read_status_id, ct.collection_type_id
+FROM lkup_consumption_statuses cs, lkup_collection_types ct
+WHERE ct.collection_type_code = 'graphicnovels'
+  AND cs.status_name IN ('Read', 'Want to Read');
+
+-- Consumption: Video Games
+INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+SELECT cs.read_status_id, ct.collection_type_id
+FROM lkup_consumption_statuses cs, lkup_collection_types ct
+WHERE ct.collection_type_code = 'videogames'
+  AND cs.status_name IN ('Played', 'Playing', 'Want to Play', 'Abandoned');
+
+-- Consumption: Video
+INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+SELECT cs.read_status_id, ct.collection_type_id
+FROM lkup_consumption_statuses cs, lkup_collection_types ct
+WHERE ct.collection_type_code = 'video'
+  AND cs.status_name IN ('Watched', 'Currently Watching', 'Want to Watch', 'Abandoned');

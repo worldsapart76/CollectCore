@@ -127,7 +127,7 @@ def _get_video_detail(db, item_id: int):
             JOIN tbl_video_details vd ON i.item_id = vd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
             JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             WHERE i.item_id = :item_id AND i.collection_type_id = :ct
         """),
         {"item_id": item_id, "ct": VIDEO_COLLECTION_TYPE_ID},
@@ -321,17 +321,6 @@ def search_video_cast(q: Optional[str] = None, db=Depends(get_db)):
     return [{"cast_id": r[0], "cast_name": r[1]} for r in rows]
 
 
-@router.get("/watch-statuses")
-def get_video_watch_statuses(db=Depends(get_db)):
-    rows = db.execute(
-        text("""
-            SELECT read_status_id, status_name
-            FROM lkup_book_read_statuses
-            WHERE status_name IN ('Watched', 'Currently Watching', 'Want to Watch', 'Abandoned')
-            ORDER BY sort_order
-        """)
-    ).fetchall()
-    return [{"read_status_id": r[0], "status_name": r[1]} for r in rows]
 
 
 @router.get("/tmdb-search")
@@ -502,7 +491,7 @@ def list_video(
             JOIN tbl_video_details vd ON i.item_id = vd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
             JOIN lkup_top_level_categories tlc ON i.top_level_category_id = tlc.top_level_category_id
-            LEFT JOIN lkup_book_read_statuses rs ON i.reading_status_id = rs.read_status_id
+            LEFT JOIN lkup_consumption_statuses rs ON i.reading_status_id = rs.read_status_id
             WHERE {where_clause}
             ORDER BY vd.title_sort, vd.title
         """),

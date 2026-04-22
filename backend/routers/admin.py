@@ -400,6 +400,106 @@ def deactivate_unused_lookups(req: DeactivateLookupRequest, db=Depends(get_db)):
     return {"deactivated": len(safe_ids)}
 
 
+# ---------- Admin: Status Visibility ----------
+
+
+@router.get("/admin/status-visibility")
+def get_status_visibility(db=Depends(get_db)):
+    modules = db.execute(text("""
+        SELECT collection_type_id, collection_type_code, collection_type_name
+        FROM lkup_collection_types
+        WHERE is_active = 1
+        ORDER BY sort_order
+    """)).fetchall()
+
+    ownership = db.execute(text("""
+        SELECT s.ownership_status_id, s.status_name, s.sort_order,
+               GROUP_CONCAT(x.collection_type_id) AS module_ids
+        FROM lkup_ownership_statuses s
+        LEFT JOIN xref_ownership_status_modules x ON s.ownership_status_id = x.ownership_status_id
+        WHERE s.is_active = 1
+        GROUP BY s.ownership_status_id
+        ORDER BY s.sort_order
+    """)).fetchall()
+
+    consumption = db.execute(text("""
+        SELECT cs.read_status_id, cs.status_name, cs.sort_order,
+               GROUP_CONCAT(x.collection_type_id) AS module_ids
+        FROM lkup_consumption_statuses cs
+        LEFT JOIN xref_consumption_status_modules x ON cs.read_status_id = x.read_status_id
+        WHERE cs.is_active = 1
+        GROUP BY cs.read_status_id
+        ORDER BY cs.sort_order
+    """)).fetchall()
+
+    def parse_ids(raw):
+        if not raw:
+            return []
+        return [int(i) for i in raw.split(",")]
+
+    return {
+        "modules": [
+            {"collection_type_id": r[0], "code": r[1], "name": r[2]}
+            for r in modules
+        ],
+        "ownership": [
+            {
+                "ownership_status_id": r[0],
+                "status_name": r[1],
+                "sort_order": r[2],
+                "module_ids": parse_ids(r[3]),
+            }
+            for r in ownership
+        ],
+        "consumption": [
+            {
+                "read_status_id": r[0],
+                "status_name": r[1],
+                "sort_order": r[2],
+                "module_ids": parse_ids(r[3]),
+            }
+            for r in consumption
+        ],
+    }
+
+
+class StatusVisibilityToggle(BaseModel):
+    status_type: str   # "ownership" | "consumption"
+    status_id: int
+    collection_type_id: int
+    visible: bool
+
+
+@router.put("/admin/status-visibility")
+def toggle_status_visibility(payload: StatusVisibilityToggle, db=Depends(get_db)):
+    if payload.status_type == "ownership":
+        if payload.visible:
+            db.execute(text("""
+                INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
+                VALUES (:sid, :ctid)
+            """), {"sid": payload.status_id, "ctid": payload.collection_type_id})
+        else:
+            db.execute(text("""
+                DELETE FROM xref_ownership_status_modules
+                WHERE ownership_status_id = :sid AND collection_type_id = :ctid
+            """), {"sid": payload.status_id, "ctid": payload.collection_type_id})
+    elif payload.status_type == "consumption":
+        if payload.visible:
+            db.execute(text("""
+                INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+                VALUES (:sid, :ctid)
+            """), {"sid": payload.status_id, "ctid": payload.collection_type_id})
+        else:
+            db.execute(text("""
+                DELETE FROM xref_consumption_status_modules
+                WHERE read_status_id = :sid AND collection_type_id = :ctid
+            """), {"sid": payload.status_id, "ctid": payload.collection_type_id})
+    else:
+        raise HTTPException(status_code=400, detail="status_type must be 'ownership' or 'consumption'")
+    db.commit()
+    return {"ok": True}
+
+
 # ---------- Frontend static files (production) ----------
 # Serve the pre-built React app so the frontend dev server is not needed.
 # The /assets mount and /vite.svg route must be registered before the catch-all

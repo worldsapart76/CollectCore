@@ -28,6 +28,24 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _run_migrations(conn) -> None:
+    """Apply incremental schema migrations for existing databases."""
+    raw = conn.connection
+
+    # Migration: rename lkup_book_read_statuses -> lkup_consumption_statuses
+    tables = {r[0] for r in raw.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if "lkup_book_read_statuses" in tables and "lkup_consumption_statuses" not in tables:
+        raw.execute("ALTER TABLE lkup_book_read_statuses RENAME TO lkup_consumption_statuses")
+        logger.info("Migration: renamed lkup_book_read_statuses -> lkup_consumption_statuses")
+
+    # Migration: deactivate Copper Age era (data quality — era was never used in GN module)
+    raw.execute(
+        "UPDATE lkup_graphicnovel_eras SET is_active = 0 WHERE era_name = 'Copper Age'"
+    )
+
+
 def init_db() -> None:
     if not SCHEMA_PATH.exists():
         raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
@@ -36,5 +54,6 @@ def init_db() -> None:
 
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys = ON"))
+        _run_migrations(conn)
         raw_conn = conn.connection
         raw_conn.executescript(schema_sql)

@@ -12,7 +12,7 @@ import {
 import PageContainer from "../components/layout/PageContainer";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 
 // ─── Copies editor ────────────────────────────────────────────────────────────
@@ -128,16 +128,15 @@ export default function TTRPGIngestPage() {
   useEffect(() => {
     Promise.all([
       fetchTtrpgSystems(),
-      fetchOwnershipStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.ttrpg),
       fetchTtrpgBookTypes(),
       fetchTtrpgFormatTypes(),
     ]).then(([sys, own, bt, ft]) => {
-      const filteredOwn = own.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
       setSystems(sys);
-      setOwnershipStatuses(filteredOwn);
+      setOwnershipStatuses(own);
       setBookTypes(bt);
       setFormatTypes(ft);
-      setForm(blankForm(filteredOwn));
+      setForm(blankForm(own));
     });
   }, []);
 

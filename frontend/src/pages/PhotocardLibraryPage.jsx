@@ -100,7 +100,7 @@ export default function PhotocardLibraryPage() {
           listPhotocards(),
           fetchPhotocardGroups(),
           fetchTopLevelCategories(COLLECTION_TYPE_ID),
-          fetchOwnershipStatuses(),
+          fetchOwnershipStatuses(COLLECTION_TYPE_ID),
         ]);
         setCards(cardData);
         setGroups(groupData);

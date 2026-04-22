@@ -17,7 +17,7 @@ import {
   fetchVideoCategories,
   fetchVideoFormatTypes,
   fetchVideoGenres,
-  fetchVideoWatchStatuses,
+  fetchConsumptionStatuses,
   getVideo,
   listVideo,
   updateVideo,
@@ -26,13 +26,13 @@ import {
 import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
-import { HIDDEN_OWNERSHIP_NAMES } from "../constants/hiddenStatuses";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 const TV_CATEGORY = "TV Series";
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, allGenres, filters, onSectionChange, onClearAll }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   const allDirectors = useMemo(() => {
     const seen = new Set();
@@ -72,7 +72,7 @@ function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, all
       />
       <TriStateFilterSection
         title="Ownership"
-        items={visibleOwnership.map(s => ({ id: String(s.ownership_status_id), label: s.status_name }))}
+        items={ownershipStatuses.map(s => ({ id: String(s.ownership_status_id), label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
       />
@@ -156,7 +156,7 @@ function GenrePicker({ allGenres, selected, onChange }) {
 // ─── Copies editor ────────────────────────────────────────────────────────────
 
 function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
   function addCopy() { onChange([...copies, { format_type_id: null, ownership_status_id: null, notes: "" }]); }
   function updateCopy(idx, field, val) { onChange(copies.map((c, i) => i === idx ? { ...c, [field]: val } : c)); }
   function removeCopy(idx) { onChange(copies.filter((_, i) => i !== idx)); }
@@ -175,7 +175,7 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
             <label style={labelStyle}>Ownership</label>
             <select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
               <option value="">— Status —</option>
-              {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
           </div>
           <div>
@@ -193,7 +193,7 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
 // ─── Seasons editor ───────────────────────────────────────────────────────────
 
 function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
   function addSeason() {
     const nextNum = seasons.length > 0 ? Math.max(...seasons.map(s => s.season_number)) + 1 : 1;
     onChange([...seasons, { season_number: nextNum, episode_count: null, format_type_id: null, ownership_status_id: null, notes: "" }]);
@@ -223,7 +223,7 @@ function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
             <label style={labelStyle}>Ownership</label>
             <select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
               <option value="">— Status —</option>
-              {visibleOwnership.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
+              {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
             </select>
           </div>
           <button type="button" onClick={() => removeSeason(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
@@ -284,7 +284,7 @@ function EditModal({ item, categories, formatTypes, allGenres, ownershipStatuses
     </div>
   );
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
   const selectedCategory = categories.find(c => String(c.top_level_category_id) === String(form.top_level_category_id));
   const isTV = selectedCategory?.category_name === TV_CATEGORY;
   function set(field, val) { setForm(f => ({ ...f, [field]: val })); }
@@ -338,7 +338,7 @@ function EditModal({ item, categories, formatTypes, allGenres, ownershipStatuses
           <div>
             <label style={labelStyle}>Ownership</label>
             <select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)} style={selectStyle}>
-              {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
           </div>
         </div>
@@ -460,8 +460,8 @@ export default function VideoLibraryPage() {
       fetchVideoCategories(),
       fetchVideoFormatTypes(),
       fetchVideoGenres(),
-      fetchOwnershipStatuses(),
-      fetchVideoWatchStatuses(),
+      fetchOwnershipStatuses(COLLECTION_TYPE_IDS.video),
+      fetchConsumptionStatuses(COLLECTION_TYPE_IDS.video),
     ]).then(([cats, fmts, genres, own, watch]) => {
       setCategories(cats);
       setFormatTypes(fmts);
@@ -600,7 +600,7 @@ export default function VideoLibraryPage() {
     return v.copy_formats?.length ? v.copy_formats.join(", ") : (v.copy_count > 0 ? `${v.copy_count} copy` : "—");
   }
 
-  const visibleOwnership = ownershipStatuses.filter(s => !HIDDEN_OWNERSHIP_NAMES.has(s.status_name));
+
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -743,7 +743,7 @@ export default function VideoLibraryPage() {
               <label style={labelStyle}>Ownership Status</label>
               <select value={bulkFields.ownership_status_id} onChange={e => setBulkFields(f => ({ ...f, ownership_status_id: e.target.value }))} style={selectStyle}>
                 <option value="">— No change —</option>
-                {visibleOwnership.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
               </select>
             </div>
             <div style={{ marginBottom: 14 }}>

@@ -16,13 +16,22 @@ def health():
 # --- Lookup endpoints ---
 
 @router.get("/ownership-statuses")
-def get_ownership_statuses(db=Depends(get_db)):
-    result = db.execute(text("""
-        SELECT ownership_status_id, status_name, sort_order
-        FROM lkup_ownership_statuses
-        WHERE is_active = 1
-        ORDER BY sort_order
-    """)).fetchall()
+def get_ownership_statuses(collection_type_id: Optional[int] = None, db=Depends(get_db)):
+    if collection_type_id is not None:
+        result = db.execute(text("""
+            SELECT s.ownership_status_id, s.status_name, s.sort_order
+            FROM lkup_ownership_statuses s
+            JOIN xref_ownership_status_modules x ON s.ownership_status_id = x.ownership_status_id
+            WHERE s.is_active = 1 AND x.collection_type_id = :ctid
+            ORDER BY s.sort_order
+        """), {"ctid": collection_type_id}).fetchall()
+    else:
+        result = db.execute(text("""
+            SELECT ownership_status_id, status_name, sort_order
+            FROM lkup_ownership_statuses
+            WHERE is_active = 1
+            ORDER BY sort_order
+        """)).fetchall()
     return [
         {
             "ownership_status_id": row[0],
@@ -31,6 +40,18 @@ def get_ownership_statuses(db=Depends(get_db)):
         }
         for row in result
     ]
+
+
+@router.get("/consumption-statuses")
+def get_consumption_statuses(collection_type_id: int, db=Depends(get_db)):
+    result = db.execute(text("""
+        SELECT cs.read_status_id, cs.status_name
+        FROM lkup_consumption_statuses cs
+        JOIN xref_consumption_status_modules x ON cs.read_status_id = x.read_status_id
+        WHERE cs.is_active = 1 AND x.collection_type_id = :ctid
+        ORDER BY cs.sort_order
+    """), {"ctid": collection_type_id}).fetchall()
+    return [{"read_status_id": row[0], "status_name": row[1]} for row in result]
 
 
 @router.get("/categories")

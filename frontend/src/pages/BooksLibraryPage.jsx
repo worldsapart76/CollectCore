@@ -18,7 +18,7 @@ import {
   fetchBookAgeLevels,
   fetchBookFormatDetails,
   fetchBookGenres,
-  fetchBookReadStatuses,
+  fetchConsumptionStatuses,
   fetchOwnershipStatuses,
   getBook,
   listBooks,
@@ -29,6 +29,9 @@ import { getImageUrl } from "../utils/imageUrl";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
+import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+
+const BOOK_COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.books;
 
 const FORMAT_COLORS_LIGHT = {
   Physical: { background: "#f5f5f5", color: "#555",     border: "1px solid #ccc" },
@@ -834,7 +837,7 @@ export default function BooksLibraryPage() {
       setLoading(true); setError("");
       try {
         const [bookData, os, rs, al, fd, g] = await Promise.all([
-          listBooks(), fetchOwnershipStatuses(), fetchBookReadStatuses(),
+          listBooks(), fetchOwnershipStatuses(BOOK_COLLECTION_TYPE_ID), fetchConsumptionStatuses(BOOK_COLLECTION_TYPE_ID),
           fetchBookAgeLevels(), fetchBookFormatDetails(), fetchBookGenres(),
         ]);
         setBooks(bookData); setOwnershipStatuses(os); setReadStatuses(rs);
