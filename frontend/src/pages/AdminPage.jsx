@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
 import {
   deactivateLookups,
+  deleteLookupRow,
   downloadBackupByToken,
+  fetchLookupRegistry,
+  fetchLookupRows,
   fetchSettings,
   fetchStatusVisibility,
+  mergeLookupRows,
+  patchLookupRow,
   prepareBackup,
   restoreBackup,
   scanUnusedLookups,
@@ -13,8 +18,14 @@ import {
   updateSetting,
 } from "../api";
 
-const TAB_IDS = ["modules", "backup", "cleanup", "visibility"];
-const TAB_LABELS = { modules: "Modules", backup: "Backup & Restore", cleanup: "Lookup Cleanup", visibility: "Status Visibility" };
+const TAB_IDS = ["modules", "backup", "cleanup", "management", "visibility"];
+const TAB_LABELS = {
+  modules: "Modules",
+  backup: "Backup & Restore",
+  cleanup: "Lookup Cleanup",
+  management: "Lookup Management",
+  visibility: "Status Visibility",
+};
 
 const tabBarStyle = { display: "flex", gap: 0, borderBottom: "1px solid #d1d5db", marginBottom: 20 };
 function tabStyle(active) {
@@ -364,6 +375,9 @@ export default function AdminPage() {
         </section>
       )}
 
+      {/* ── Lookup Management tab ── */}
+      {activeTab === "management" && <LookupManagementTab />}
+
       {/* ── Status Visibility tab ── */}
       {activeTab === "visibility" && (
         <section>
@@ -401,6 +415,482 @@ export default function AdminPage() {
     </PageContainer>
   );
 }
+
+// ── Lookup Management tab component ──────────────────────────────────────────
+
+function LookupManagementTab() {
+  const [registry, setRegistry] = useState(null);
+  const [registryError, setRegistryError] = useState(null);
+  const [selectedTable, setSelectedTable] = useState("");
+  const [tableData, setTableData] = useState(null);       // { rows, scope_options, ... }
+  const [tableLoading, setTableLoading] = useState(false);
+  const [tableError, setTableError] = useState(null);
+  const [filter, setFilter] = useState("");
+  const [showInactive, setShowInactive] = useState(true);
+  const [scopeFilter, setScopeFilter] = useState({});      // { scope_col: scope_id or "" }
+  const [editingId, setEditingId] = useState(null);        // row id being edited
+  const [editDraft, setEditDraft] = useState(null);        // { name, sort_order, secondary }
+  const [rowBusy, setRowBusy] = useState(null);            // row id currently saving/deleting
+  const [mergeState, setMergeState] = useState(null);      // { sourceId, targetId } or null
+  const [merging, setMerging] = useState(false);
+  const [toast, setToast] = useState(null);                // { kind, msg }
+
+  useEffect(() => {
+    fetchLookupRegistry()
+      .then(data => {
+        setRegistry(data);
+        if (data.length > 0) setSelectedTable(data[0].table);
+      })
+      .catch(e => setRegistryError(e.message || "Failed to load registry."));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTable) return;
+    loadTable(selectedTable);
+    setFilter("");
+    setScopeFilter({});
+    setEditingId(null);
+    setEditDraft(null);
+  }, [selectedTable]);
+
+  async function loadTable(table) {
+    setTableLoading(true);
+    setTableError(null);
+    try {
+      const data = await fetchLookupRows(table);
+      setTableData(data);
+    } catch (e) {
+      setTableError(e.message || "Failed to load rows.");
+      setTableData(null);
+    } finally {
+      setTableLoading(false);
+    }
+  }
+
+  const selectedEntry = useMemo(
+    () => registry?.find(e => e.table === selectedTable),
+    [registry, selectedTable]
+  );
+
+  const filteredRows = useMemo(() => {
+    if (!tableData) return [];
+    const q = filter.trim().toLowerCase();
+    return tableData.rows.filter(row => {
+      if (!showInactive && !row.is_active) return false;
+      if (q && !row.name.toLowerCase().includes(q)) return false;
+      for (const [col, val] of Object.entries(scopeFilter)) {
+        if (val === "" || val == null) continue;
+        if (String(row.scope?.[col]?.id) !== String(val)) return false;
+      }
+      return true;
+    });
+  }, [tableData, filter, showInactive, scopeFilter]);
+
+  function beginEdit(row) {
+    setEditingId(row.id);
+    setEditDraft({
+      name: row.name || "",
+      sort_order: row.sort_order ?? "",
+      secondary: { ...(row.secondary || {}) },
+    });
+  }
+  function cancelEdit() { setEditingId(null); setEditDraft(null); }
+
+  async function saveEdit(row) {
+    if (!editDraft) return;
+    const patch = {};
+    if (editDraft.name.trim() !== (row.name || "")) patch.name = editDraft.name.trim();
+    if (selectedEntry.sort_col) {
+      const n = editDraft.sort_order === "" ? null : Number(editDraft.sort_order);
+      if (n !== row.sort_order && n !== null && !Number.isNaN(n)) patch.sort_order = n;
+    }
+    const secPatch = {};
+    for (const { col } of selectedEntry.secondary_cols) {
+      const a = editDraft.secondary[col] ?? null;
+      const b = row.secondary?.[col] ?? null;
+      if (a !== b) secPatch[col] = a === "" ? null : a;
+    }
+    if (Object.keys(secPatch).length > 0) patch.secondary = secPatch;
+
+    if (Object.keys(patch).length === 0) { cancelEdit(); return; }
+
+    setRowBusy(row.id);
+    try {
+      await patchLookupRow(selectedTable, row.id, patch);
+      await loadTable(selectedTable);
+      cancelEdit();
+      setToast({ kind: "ok", msg: "Saved." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Save failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function toggleActive(row) {
+    setRowBusy(row.id);
+    try {
+      await patchLookupRow(selectedTable, row.id, { is_active: !row.is_active });
+      await loadTable(selectedTable);
+      setToast({ kind: "ok", msg: row.is_active ? "Deactivated." : "Re-activated." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Toggle failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function hardDelete(row) {
+    if (!confirm(`Permanently delete "${row.name}"? This cannot be undone.`)) return;
+    setRowBusy(row.id);
+    try {
+      await deleteLookupRow(selectedTable, row.id);
+      await loadTable(selectedTable);
+      setToast({ kind: "ok", msg: "Row hard-deleted." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Delete failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  function startMerge(row) { setMergeState({ sourceId: row.id, targetId: "" }); }
+  function cancelMerge() { setMergeState(null); }
+  async function confirmMerge() {
+    if (!mergeState?.sourceId || !mergeState?.targetId) return;
+    const src = tableData.rows.find(r => r.id === mergeState.sourceId);
+    const tgt = tableData.rows.find(r => r.id === Number(mergeState.targetId));
+    if (!tgt) return;
+    if (!confirm(
+      `Merge "${src.name}" into "${tgt.name}"?\n\n` +
+      `All references will be rewritten to "${tgt.name}" and "${src.name}" will be deactivated. ` +
+      `Items linked to both will collapse into one link.`
+    )) return;
+    setMerging(true);
+    try {
+      const res = await mergeLookupRows(selectedTable, src.id, tgt.id);
+      await loadTable(selectedTable);
+      setMergeState(null);
+      setToast({ kind: "ok", msg: `Merged. Rewrote ${res.rewritten}, deduped ${res.deduped}.` });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Merge failed." });
+    } finally {
+      setMerging(false);
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  if (registryError) {
+    return <p style={{ color: "#9b1c1c" }}>{registryError}</p>;
+  }
+  if (!registry) {
+    return <p style={{ color: "#444" }}>Loading…</p>;
+  }
+
+  return (
+    <section>
+      <h2 style={{ fontSize: "1rem", fontWeight: 600, margin: "0 0 10px" }}>Lookup Management</h2>
+      <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 12px" }}>
+        View, rename, re-activate, merge, and hard-delete lookup values. Merging rewrites
+        every reference from the source value to the target value, then deactivates the source.
+        Hard-delete is only allowed on deactivated rows with zero remaining references.
+      </p>
+
+      {/* Table picker + global filters */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <label style={{ fontSize: "0.85rem", color: "#333" }}>
+          Lookup:&nbsp;
+          <select
+            value={selectedTable}
+            onChange={e => setSelectedTable(e.target.value)}
+            style={{ padding: "3px 6px", fontSize: "0.85rem" }}
+          >
+            {registry.map(e => (
+              <option key={e.table} value={e.table}>{e.label}</option>
+            ))}
+          </select>
+        </label>
+        <input
+          type="text"
+          placeholder="Filter by name…"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          style={{ padding: "3px 6px", fontSize: "0.85rem", minWidth: 180 }}
+        />
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.85rem" }}>
+          <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+          Show inactive
+        </label>
+      </div>
+
+      {/* Per-scope dropdowns */}
+      {tableData?.scope && tableData.scope.length > 0 && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          {tableData.scope.map((s, i) => {
+            const opts = tableData.scope_options[i]?.options || [];
+            return (
+              <label key={s.col} style={{ fontSize: "0.85rem", color: "#333" }}>
+                {s.label}:&nbsp;
+                <select
+                  value={scopeFilter[s.col] ?? ""}
+                  onChange={e => setScopeFilter(prev => ({ ...prev, [s.col]: e.target.value }))}
+                  style={{ padding: "3px 6px", fontSize: "0.85rem" }}
+                >
+                  <option value="">(all)</option>
+                  {opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      {tableLoading && <p style={{ color: "#444" }}>Loading…</p>}
+      {tableError && <p style={{ color: "#9b1c1c" }}>{tableError}</p>}
+
+      {toast && (
+        <div style={{
+          padding: "4px 10px", marginBottom: 8, borderRadius: 3, fontSize: "0.85rem",
+          background: toast.kind === "ok" ? "#dcfce7" : "#fee2e2",
+          color: toast.kind === "ok" ? "#166534" : "#9b1c1c",
+          display: "inline-block",
+        }}>
+          {toast.msg}
+          <button onClick={() => setToast(null)} style={{ marginLeft: 8, border: "none", background: "none", cursor: "pointer" }}>×</button>
+        </div>
+      )}
+
+      {tableData && !tableLoading && (
+        <LookupRowTable
+          entry={selectedEntry}
+          tableData={tableData}
+          rows={filteredRows}
+          editingId={editingId}
+          editDraft={editDraft}
+          setEditDraft={setEditDraft}
+          rowBusy={rowBusy}
+          onBeginEdit={beginEdit}
+          onCancelEdit={cancelEdit}
+          onSaveEdit={saveEdit}
+          onToggleActive={toggleActive}
+          onHardDelete={hardDelete}
+          onStartMerge={startMerge}
+        />
+      )}
+
+      {/* Merge modal */}
+      {mergeState && tableData && (
+        <MergeModal
+          sourceRow={tableData.rows.find(r => r.id === mergeState.sourceId)}
+          candidates={tableData.rows.filter(r =>
+            r.id !== mergeState.sourceId
+            && r.is_active
+            && scopesMatch(tableData.rows.find(rr => rr.id === mergeState.sourceId), r)
+          )}
+          targetId={mergeState.targetId}
+          setTargetId={id => setMergeState(s => ({ ...s, targetId: id }))}
+          merging={merging}
+          onConfirm={confirmMerge}
+          onCancel={cancelMerge}
+        />
+      )}
+    </section>
+  );
+}
+
+function scopesMatch(a, b) {
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a.scope || {});
+  for (const k of aKeys) {
+    if (String(a.scope?.[k]?.id ?? "") !== String(b.scope?.[k]?.id ?? "")) return false;
+  }
+  return true;
+}
+
+function LookupRowTable({
+  entry, tableData, rows, editingId, editDraft, setEditDraft,
+  rowBusy, onBeginEdit, onCancelEdit, onSaveEdit, onToggleActive, onHardDelete, onStartMerge,
+}) {
+  const th = { padding: "4px 8px", fontSize: "0.8rem", fontWeight: 600, color: "#444", textAlign: "left", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" };
+  const td = { padding: "4px 8px", fontSize: "0.85rem", borderBottom: "1px solid #f3f4f6", verticalAlign: "middle" };
+  const hasScope = entry.scope.length > 0;
+  const hasSort = !!entry.sort_col;
+  const secondary = entry.secondary_cols;
+
+  if (rows.length === 0) {
+    return <p style={{ color: "#666", fontSize: "0.9rem" }}>No rows match.</p>;
+  }
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: "0.85rem", background: "#fff", width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={th}>Name</th>
+            {secondary.map(c => <th key={c.col} style={th}>{c.label}</th>)}
+            {hasScope && entry.scope.map(s => <th key={s.col} style={th}>{s.label}</th>)}
+            {hasSort && <th style={th}>Sort</th>}
+            <th style={{ ...th, textAlign: "center" }}>Usage</th>
+            <th style={{ ...th, textAlign: "center" }}>Active</th>
+            <th style={{ ...th, textAlign: "right" }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => {
+            const editing = editingId === row.id;
+            const busy = rowBusy === row.id;
+            return (
+              <tr key={row.id} style={{ opacity: row.is_active ? 1 : 0.55 }}>
+                <td style={td}>
+                  {editing ? (
+                    <input
+                      type="text"
+                      value={editDraft.name}
+                      onChange={e => setEditDraft(d => ({ ...d, name: e.target.value }))}
+                      style={{ padding: "2px 6px", fontSize: "0.85rem", width: "100%", minWidth: 160 }}
+                    />
+                  ) : row.name}
+                </td>
+                {secondary.map(c => (
+                  <td key={c.col} style={td}>
+                    {editing ? (
+                      <input
+                        type="text"
+                        value={editDraft.secondary[c.col] ?? ""}
+                        onChange={e => setEditDraft(d => ({
+                          ...d, secondary: { ...d.secondary, [c.col]: e.target.value }
+                        }))}
+                        style={{ padding: "2px 6px", fontSize: "0.85rem", minWidth: 100 }}
+                      />
+                    ) : (row.secondary?.[c.col] ?? "")}
+                  </td>
+                ))}
+                {hasScope && entry.scope.map(s => (
+                  <td key={s.col} style={{ ...td, color: "#666" }}>
+                    {row.scope?.[s.col]?.name ?? ""}
+                  </td>
+                ))}
+                {hasSort && (
+                  <td style={{ ...td, width: 60 }}>
+                    {editing ? (
+                      <input
+                        type="number"
+                        value={editDraft.sort_order}
+                        onChange={e => setEditDraft(d => ({ ...d, sort_order: e.target.value }))}
+                        style={{ padding: "2px 6px", fontSize: "0.85rem", width: 50 }}
+                      />
+                    ) : (row.sort_order ?? "")}
+                  </td>
+                )}
+                <td style={{ ...td, textAlign: "center", color: row.usage_count > 0 ? "#111" : "#999" }}>
+                  {row.usage_count}
+                </td>
+                <td style={{ ...td, textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={row.is_active}
+                    disabled={busy}
+                    onChange={() => onToggleActive(row)}
+                    title={row.is_active ? "Click to deactivate" : "Click to re-activate"}
+                  />
+                </td>
+                <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                  {editing ? (
+                    <>
+                      <button onClick={() => onSaveEdit(row)} disabled={busy} style={btnStyle}>Save</button>
+                      <button onClick={onCancelEdit} disabled={busy} style={btnStyle}>Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => onBeginEdit(row)} disabled={busy} style={btnStyle}>Edit</button>
+                      {entry.mergeable && row.is_active && (
+                        <button onClick={() => onStartMerge(row)} disabled={busy} style={btnStyle}>Merge…</button>
+                      )}
+                      {!row.is_active && row.usage_count === 0 && (
+                        <button
+                          onClick={() => onHardDelete(row)}
+                          disabled={busy}
+                          style={{ ...btnStyle, color: "#9b1c1c" }}
+                        >Delete</button>
+                      )}
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p style={{ color: "#666", fontSize: "0.8rem", marginTop: 6 }}>
+        Showing {rows.length} of {tableData.rows.length} rows.
+        {!entry.mergeable && " (Merging disabled for this lookup — changes would cascade into other tables.)"}
+      </p>
+    </div>
+  );
+}
+
+const btnStyle = {
+  padding: "2px 8px",
+  fontSize: "0.8rem",
+  marginLeft: 4,
+  cursor: "pointer",
+  border: "1px solid #d1d5db",
+  background: "#fff",
+  borderRadius: 3,
+};
+
+function MergeModal({ sourceRow, candidates, targetId, setTargetId, merging, onConfirm, onCancel }) {
+  const overlay = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 50,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  };
+  const modal = {
+    background: "#fff", padding: 20, borderRadius: 6, minWidth: 380, maxWidth: 520,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  };
+  return (
+    <div style={overlay} onClick={onCancel}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 10px" }}>
+          Merge "{sourceRow?.name}"
+        </h3>
+        <p style={{ fontSize: "0.85rem", color: "#444", margin: "0 0 10px" }}>
+          Choose the target. All references to "{sourceRow?.name}" will be rewritten to the target,
+          and "{sourceRow?.name}" will be deactivated. Items linked to both will collapse into one link.
+        </p>
+        {candidates.length === 0 ? (
+          <p style={{ color: "#9b1c1c", fontSize: "0.85rem" }}>
+            No eligible target (must share the same scope and be active).
+          </p>
+        ) : (
+          <select
+            value={targetId}
+            onChange={e => setTargetId(e.target.value)}
+            style={{ width: "100%", padding: "4px 6px", fontSize: "0.9rem", marginBottom: 12 }}
+          >
+            <option value="">Select target…</option>
+            {candidates.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name} {c.usage_count ? `(${c.usage_count} refs)` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onCancel} disabled={merging} style={btnStyle}>Cancel</button>
+          <button
+            onClick={onConfirm}
+            disabled={merging || !targetId}
+            style={{ ...btnStyle, background: "#b91c1c", color: "#fff", borderColor: "#b91c1c" }}
+          >
+            {merging ? "Merging…" : "Merge"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ── Status visibility grid component ─────────────────────────────────────────
 

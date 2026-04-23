@@ -16,7 +16,7 @@ export const MODULE_DEFS = {
     primaryPath: '/books/library',
     description: 'Track your book collection',
     links: [
-      { label: 'Add Book', to: '/books/add' },
+      { label: 'Add', to: '/books/add' },
       { label: 'Library',  to: '/books/library' },
     ],
   },

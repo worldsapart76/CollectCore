@@ -124,11 +124,9 @@ instructed:
 
 These are intentionally not yet built. Do not implement without instruction:
 
-1. Return full object on create endpoints (photocards done in Wave 4; other modules still return minimal response).
-2. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred.
-3. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
+1. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
     - **Sub-item: Dark mode** — current implementation is not usable; requires the design system foundation before a full revision is practical.
-4. Library interaction consistency — review how record selection, bulk edit, bulk delete, and similar shared functionality is implemented inconsistently across each module's library page. Pull common patterns into a shared template/component where possible.
+    - **Sub-item: Admin UI polish** — the Admin page (especially the new Lookup Management tab) is functional but clunky. Layout, density, and interaction patterns need a design pass; likely easier after the design-system consolidation lands.
 
 ---
 

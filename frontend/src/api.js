@@ -656,6 +656,50 @@ export async function deactivateLookups(table, ids) {
   return handleJsonResponse(res, "Failed to deactivate lookups.");
 }
 
+// --- Admin: Lookup Management ---
+
+export async function fetchLookupRegistry() {
+  const res = await fetch(`${API}/admin/lookups/registry`);
+  return handleJsonResponse(res, "Failed to fetch lookup registry.");
+}
+
+export async function fetchLookupRows(table) {
+  const res = await fetch(`${API}/admin/lookups/${encodeURIComponent(table)}`);
+  return handleJsonResponse(res, "Failed to fetch lookup rows.");
+}
+
+export async function patchLookupRow(table, rowId, patch) {
+  const res = await fetch(
+    `${API}/admin/lookups/${encodeURIComponent(table)}/${rowId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }
+  );
+  return handleJsonResponse(res, "Failed to update lookup row.");
+}
+
+export async function mergeLookupRows(table, sourceId, targetId) {
+  const res = await fetch(
+    `${API}/admin/lookups/${encodeURIComponent(table)}/merge`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }
+  );
+  return handleJsonResponse(res, "Failed to merge lookup rows.");
+}
+
+export async function deleteLookupRow(table, rowId) {
+  const res = await fetch(
+    `${API}/admin/lookups/${encodeURIComponent(table)}/${rowId}`,
+    { method: "DELETE" }
+  );
+  return handleJsonResponse(res, "Failed to hard-delete lookup row.");
+}
+
 // --- Video Games ---
 
 export async function fetchGameGenres() {
@@ -1072,20 +1116,20 @@ export async function deleteTtrpg(itemId) {
   return handleJsonResponse(res, "Failed to delete TTRPG book");
 }
 
-export async function bulkUpdateTtrpg(payload) {
+export async function bulkUpdateTtrpg(itemIds, fields) {
   const res = await fetch(`${API}/ttrpg/bulk`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ item_ids: itemIds, fields }),
   });
   return handleJsonResponse(res, "Failed to bulk update TTRPG");
 }
 
-export async function bulkDeleteTtrpg(payload) {
+export async function bulkDeleteTtrpg(itemIds) {
   const res = await fetch(`${API}/ttrpg/bulk-delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ item_ids: itemIds }),
   });
   return handleJsonResponse(res, "Failed to bulk delete TTRPG");
 }

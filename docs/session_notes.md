@@ -6,6 +6,21 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-23 — Lookup admin/management UI (deferred #1)
+
+**Completed:**
+- **Deferred item #1 — Lookup admin/management UI.** Added view/edit/merge/re-activate/hard-delete for 38 managed lookup tables behind a new "Lookup Management" tab on the Admin page.
+  - **New file:** [backend/routers/admin_lookups.py](backend/routers/admin_lookups.py) with a single `_LOOKUP_REGISTRY_LIST` (38 entries) as the source of truth for both the new management endpoints and the existing Unused Lookup Cleanup scanner. Each entry carries PK/name/sort/secondary columns, scope chain, refs (with per-ref `dedupe_cols` for xref uniqueness), and `cleanable`/`mergeable` flags.
+  - **Endpoints:** `GET /admin/lookups/registry`, `GET /admin/lookups/{table}` (rows with usage counts + resolved scope names + scope_options), `PATCH /admin/lookups/{table}/{id}` (rename/sort/re-activate/secondary), `POST /admin/lookups/{table}/merge` (transactional FK rewrite with NULL-safe `IS` dedup), `DELETE /admin/lookups/{table}/{id}` (guarded: must be inactive + 0 refs).
+  - **Merge guards:** 6 tables are flagged `mergeable=False` because a merge would cascade into child lookup tables or destroy rich copy-row data — `lkup_photocard_groups`, `lkup_book_format_details`, and the four top-level genre tables (book/game/music/video). Cross-scope merges return 400; UNIQUE rename conflicts return 409 with a "Consider merging" hint.
+  - **Refactor:** `admin.py` scan/deactivate now derive their cleanable list from `cleanable_lookups_for_scan()` — the original Unused Lookup Cleanup behavior is preserved (verified: same 9 groups returned pre/post refactor).
+  - **Frontend:** New "Lookup Management" tab in [AdminPage.jsx](frontend/src/pages/AdminPage.jsx) — table picker, name filter, show-inactive toggle, per-scope dropdowns, inline edit, active toggle, hard-delete button (gated on inactive + 0 refs), and a merge modal that only offers same-scope active candidates.
+  - **E2E verified** against live SQLite: list/PATCH round-trip, UNIQUE conflict → 409, merge (unused→unused) rewrites+deactivates source, hard-delete of just-merged row succeeds, non-mergeable table → 400, cross-scope merge → 400, hard-delete of active row → 409.
+- **CLAUDE.md:** Removed item #1; added a new deferred item for Admin UI polish — current layout is functional but clunky and needs design-pass after the broader CSS/design-system consolidation.
+
+**Next:**
+- Continue deferred items triage.
+
 ### 2026-04-21 — GN ingest fix, deferred list cleanup, collection type canonicalization
 
 **Completed:**

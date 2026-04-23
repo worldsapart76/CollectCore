@@ -52,7 +52,7 @@ function getFormatColors(format) {
 }
 
 const OWNERSHIP_BADGE_COLORS = {
-  O: "#4caf50", W: "#ff9800", T: "#2196f3", B: "#9c27b0",
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
 };
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
@@ -240,12 +240,13 @@ function GenrePicker({ genres, selected, onChange }) {
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const bg = OWNERSHIP_BADGE_COLORS[initial] || "#607d8b";
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
   return (
     <div style={{
-      position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 3,
-      background: bg, color: "#fff", fontSize: 11, fontWeight: "bold", zIndex: 1,
-      display: "flex", alignItems: "center", justifyContent: "center",
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
     }}>
       {initial}
     </div>
@@ -279,19 +280,21 @@ const BookGridItem = memo(function BookGridItem({ book, isSelected, onToggleSele
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: 3, boxSizing: "border-box",
     }}>
-      <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
-        <input type="checkbox" checked={isSelected}
-          onChange={() => onToggleSelect(book.item_id)}
-          style={{ margin: 0, cursor: "pointer" }} />
-      </div>
-      <OwnershipBadge statusName={book.ownership_status} />
-      {book.cover_image_url ? (
-        <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
-      ) : (
-        <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(book.item_id)}
+            style={{ margin: 0, cursor: "pointer" }} />
         </div>
-      )}
+        <OwnershipBadge statusName={book.ownership_status} />
+        {book.cover_image_url ? (
+          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
           <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
@@ -965,7 +968,7 @@ export default function BooksLibraryPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid #ddd", background: "#f5f5f5", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 12, color: "#888" }}>{sortedBooks.length} book{sortedBooks.length !== 1 ? "s" : ""}</span>
           {selectedIds.size > 0 && (
@@ -991,7 +994,6 @@ export default function BooksLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions((p) => !p)}>Captions</ToggleButton>
             </>
           )}
-          <a href="/books/add" style={{ fontSize: 12, color: "#1976d2", textDecoration: "none", marginLeft: 4 }}>+ Add Book</a>
         </div>
       </div>
 
@@ -1036,13 +1038,13 @@ export default function BooksLibraryPage() {
                 <col style={{ width: colWidths.rating }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
-                <tr style={{ background: "#f5f5f5", borderBottom: "1px solid #ddd" }}>
-                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid #d0d0d0" }}>
+                <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid var(--border)" }}>
                     <input type="checkbox" checked={allVisibleSelected}
                       onChange={() => allVisibleSelected ? clearSelection() : selectAll()}
                       style={{ margin: 0, cursor: "pointer" }} />
                   </th>
-                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid #d0d0d0" }} />}
+                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
                   {[
                     { key: "title", label: "Title" },
                     { key: "author", label: "Author" },
@@ -1066,7 +1068,7 @@ export default function BooksLibraryPage() {
                           cursor: key ? "pointer" : "default",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
-                          borderRight: "1px solid #d0d0d0",
+                          borderRight: "1px solid var(--border)",
                         }}
                       >
                         {label}{key ? sortIndicator(key) : ""}

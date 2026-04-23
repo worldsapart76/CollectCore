@@ -1,8 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -33,6 +31,26 @@ import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
+};
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  return (
+    <div style={{
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
@@ -364,207 +382,212 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
     }
   }
 
-  const overlay = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" };
-  const modal = { background: "var(--bg-surface)", border: "1px solid var(--border-card)", borderRadius: 6, width: 640, maxHeight: "90vh", overflowY: "auto", padding: 20, position: "relative" };
   const row2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 };
 
   return (
-    <div style={overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={modal}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <strong style={{ fontSize: 15 }}>Edit Graphic Novel</strong>
-          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer" }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{loading ? "Loading..." : title || "Graphic Novel Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
         </div>
-        {loading && <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Loading…</p>}
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {loading && <div style={{ color: "#999" }}>Loading…</div>}
+          {error && <div style={alertError}>{error}</div>}
+          {success && <div style={alertSuccess}>{success}</div>}
+
+          {!loading && (
+            <form id="gn-edit-form" onSubmit={handleSave}>
+              {coverImageUrl && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{writers.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Title *</label>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} required style={inputStyle} />
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Publisher Group *</label>
+                  <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required style={selectStyle}>
+                    <option value="">-- Select --</option>
+                    {categories.map((c) => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ownership *</label>
+                  <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} required style={selectStyle}>
+                    <option value="">-- Select --</option>
+                    {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Publisher</label>
+                  <select value={publisherId} onChange={(e) => setPublisherId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {publishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Format Type</label>
+                  <select value={formatTypeId} onChange={(e) => setFormatTypeId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Era</label>
+                  <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Read Status</label>
+                  <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
+                    <label style={{ ...labelStyle, marginBottom: 0 }}>Series Name</label>
+                    {title.trim() && (
+                      <button type="button" onClick={() => setSeriesName(title.trim())} style={{ ...btnSm, fontSize: 10 }} title="Copy title to series name">
+                        ← Copy Title
+                      </button>
+                    )}
+                  </div>
+                  <input value={seriesName} onChange={(e) => setSeriesName(e.target.value)} placeholder="e.g. Amazing Spider-Man Omnibus" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Volume #</label>
+                  <input type="number" min="0" step="0.5" value={seriesNumber} onChange={(e) => setSeriesNumber(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Source Series (comic run collected)</label>
+                <SourceSeriesList entries={sourceSeries} onChange={setSourceSeries} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Issue Notes (annuals, crossovers, etc.)</label>
+                <input value={issueNotes} onChange={(e) => setIssueNotes(e.target.value)} placeholder="e.g. + Annual #1, King-Size Special #1" style={inputStyle} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Writer(s)</label>
+                <NameList names={writers} onChange={setWriters} placeholder="Writer name" />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Artist(s)</label>
+                <NameList names={artists} onChange={setArtists} placeholder="Artist name" />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Tags (characters, teams, arcs)</label>
+                <TagInput tags={tags} onChange={setTags} />
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Published Date</label>
+                  <input value={publishedDate} onChange={(e) => setPublishedDate(e.target.value)} placeholder="YYYY or YYYY-MM-DD" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Page Count</label>
+                  <input type="number" min="0" value={pageCount} onChange={(e) => setPageCount(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>ISBN-13</label>
+                  <input value={isbn13} onChange={(e) => setIsbn13(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>ISBN-10</label>
+                  <input value={isbn10} onChange={(e) => setIsbn10(e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Cover Image URL</label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  {coverImageUrl && <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Edition Notes</label>
+                <input value={editionNotes} onChange={(e) => setEditionNotes(e.target.value)} placeholder="e.g. First Printing, 2019 Reprint" style={inputStyle} />
+              </div>
+
+              <div style={{ ...row2, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Star Rating</label>
+                  <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={selectStyle}>
+                    <option value="">-- None --</option>
+                    {HALF_STAR_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Review</label>
+                <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </form>
+          )}
+        </div>
+
         {!loading && (
-          <form onSubmit={handleSave}>
-            {error && <div style={alertError}>{error}</div>}
-            {success && <div style={alertSuccess}>{success}</div>}
-
-            {coverImageUrl && (
-              <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 90, width: "auto", borderRadius: 3, border: "1px solid var(--border-card)", flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{title}</div>
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Title *</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} required style={inputStyle} />
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              {!confirmDelete
+                ? <button type="button" onClick={handleDelete} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this item?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
             </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>Publisher Group *</label>
-                <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required style={selectStyle}>
-                  <option value="">-- Select --</option>
-                  {categories.map((c) => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Ownership *</label>
-                <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} required style={selectStyle}>
-                  <option value="">-- Select --</option>
-                  {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                </select>
-              </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="submit" form="gn-edit-form" disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
             </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>Publisher</label>
-                <select value={publisherId} onChange={(e) => setPublisherId(e.target.value)} style={selectStyle}>
-                  <option value="">-- None --</option>
-                  {publishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Format Type</label>
-                <select value={formatTypeId} onChange={(e) => setFormatTypeId(e.target.value)} style={selectStyle}>
-                  <option value="">-- None --</option>
-                  {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>Era</label>
-                <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={selectStyle}>
-                  <option value="">-- None --</option>
-                  {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Read Status</label>
-                <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={selectStyle}>
-                  <option value="">-- None --</option>
-                  {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
-                  <label style={{ ...labelStyle, marginBottom: 0 }}>Series Name</label>
-                  {title.trim() && (
-                    <button type="button" onClick={() => setSeriesName(title.trim())} style={{ ...btnSm, fontSize: 10 }} title="Copy title to series name">
-                      ← Copy Title
-                    </button>
-                  )}
-                </div>
-                <input value={seriesName} onChange={(e) => setSeriesName(e.target.value)} placeholder="e.g. Amazing Spider-Man Omnibus" style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Volume #</label>
-                <input type="number" min="0" step="0.5" value={seriesNumber} onChange={(e) => setSeriesNumber(e.target.value)} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Source Series (comic run collected)</label>
-              <SourceSeriesList entries={sourceSeries} onChange={setSourceSeries} />
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Issue Notes (annuals, crossovers, etc.)</label>
-              <input value={issueNotes} onChange={(e) => setIssueNotes(e.target.value)} placeholder="e.g. + Annual #1, King-Size Special #1" style={inputStyle} />
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Writer(s)</label>
-              <NameList names={writers} onChange={setWriters} placeholder="Writer name" />
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Artist(s)</label>
-              <NameList names={artists} onChange={setArtists} placeholder="Artist name" />
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Tags (characters, teams, arcs)</label>
-              <TagInput tags={tags} onChange={setTags} />
-            </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>Published Date</label>
-                <input value={publishedDate} onChange={(e) => setPublishedDate(e.target.value)} placeholder="YYYY or YYYY-MM-DD" style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Page Count</label>
-                <input type="number" min="0" value={pageCount} onChange={(e) => setPageCount(e.target.value)} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>ISBN-13</label>
-                <input value={isbn13} onChange={(e) => setIsbn13(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>ISBN-10</label>
-                <input value={isbn10} onChange={(e) => setIsbn10(e.target.value)} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Cover Image URL</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                {coverImageUrl && <img src={getImageUrl(coverImageUrl)} alt="cover" style={{ height: 36, width: "auto", borderRadius: 2, border: "1px solid var(--border-input)", flexShrink: 0 }} />}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Edition Notes</label>
-              <input value={editionNotes} onChange={(e) => setEditionNotes(e.target.value)} placeholder="e.g. First Printing, 2019 Reprint" style={inputStyle} />
-            </div>
-
-            <div style={{ ...row2, marginBottom: 10 }}>
-              <div>
-                <label style={labelStyle}>Star Rating</label>
-                <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={selectStyle}>
-                  <option value="">-- None --</option>
-                  {HALF_STAR_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Review</label>
-              <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Description</label>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                {!confirmDelete
-                  ? <button type="button" onClick={handleDelete} style={btnDanger}>Delete</button>
-                  : <span style={{ fontSize: 13 }}>
-                      <strong>Confirm?</strong>{" "}
-                      <button type="button" onClick={handleDelete} disabled={deleting} style={{ ...btnDanger, marginRight: 6 }}>{deleting ? "Deleting…" : "Yes, delete"}</button>
-                      <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                    </span>
-                }
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-                <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save"}</button>
-              </div>
-            </div>
-          </form>
+          </div>
         )}
       </div>
     </div>
@@ -573,91 +596,113 @@ function GnDetailModal({ itemId, publishers, formatTypes, eras, ownershipStatuse
 
 // ─── Bulk edit panel ──────────────────────────────────────────────────────────
 
-function BulkEditPanel({ selectedIds, publishers, formatTypes, eras, ownershipStatuses, readStatuses, onBulkSave, onBulkDelete, onClearSelection }) {
+function BulkField({ label, enabled, onToggle, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
+      </label>
+      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
+    </div>
+  );
+}
 
+function GnBulkEdit({ selectedIds, publishers, formatTypes, eras, ownershipStatuses, readStatuses, onClose, onSaved, onDeleted }) {
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
 
-  const [ownershipId, setOwnershipId] = useState("");
-  const [readStatusId, setReadStatusId] = useState("");
-  const [publisherId, setPublisherId] = useState("");
-  const [formatTypeId, setFormatTypeId] = useState("");
-  const [eraId, setEraId] = useState("");
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updateReadStatus, setUpdateReadStatus] = useState(false);
+  const [readStatusId, setReadStatusId] = useState(String(readStatuses[0]?.read_status_id || ""));
+  const [updatePublisher, setUpdatePublisher] = useState(false);
+  const [publisherId, setPublisherId] = useState(String(publishers[0]?.publisher_id || ""));
+  const [updateFormat, setUpdateFormat] = useState(false);
+  const [formatTypeId, setFormatTypeId] = useState(String(formatTypes[0]?.format_type_id || ""));
+  const [updateEra, setUpdateEra] = useState(false);
+  const [eraId, setEraId] = useState(String(eras[0]?.era_id || ""));
+
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
+
+  const anyEnabled = updateOwnership || updateReadStatus || updatePublisher || updateFormat || updateEra;
 
   async function handleSave() {
+    if (!anyEnabled) { setError("Select at least one field to update."); return; }
     const fields = {};
-    if (ownershipId) fields.ownership_status_id = Number(ownershipId);
-    if (readStatusId) fields.reading_status_id = Number(readStatusId);
-    if (publisherId) fields.publisher_id = Number(publisherId);
-    if (formatTypeId) fields.format_type_id = Number(formatTypeId);
-    if (eraId) fields.era_id = Number(eraId);
-    if (!Object.keys(fields).length) { setError("Select at least one field to update."); return; }
-    setSaving(true);
-    setError(null);
-    try {
-      await bulkUpdateGraphicNovels(selectedIds, fields);
-      onBulkSave?.();
-      setOwnershipId(""); setReadStatusId(""); setPublisherId(""); setFormatTypeId(""); setEraId("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipId);
+    if (updateReadStatus) fields.reading_status_id = Number(readStatusId);
+    if (updatePublisher) fields.publisher_id = Number(publisherId);
+    if (updateFormat) fields.format_type_id = Number(formatTypeId);
+    if (updateEra) fields.era_id = Number(eraId);
+    setSaving(true); setError("");
+    try { await bulkUpdateGraphicNovels(selectedIds, fields); onSaved(); }
+    catch (e) { setError(e.message || "Failed to update"); }
+    finally { setSaving(false); }
   }
 
   async function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
-    try {
-      await bulkDeleteGraphicNovels(selectedIds);
-      onBulkDelete?.();
-    } catch (e) {
-      setError(e.message);
-      setDeleting(false);
-    }
+    try { await bulkDeleteGraphicNovels(selectedIds); onDeleted(); }
+    catch (e) { setError(e.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
   }
 
   return (
-    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-card)", borderRadius: 5, padding: "10px 14px", marginBottom: 10, fontSize: 13 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong>{selectedIds.length} selected</strong>
-        <button onClick={onClearSelection} style={btnSm}>Clear</button>
-      </div>
-      {error && <div style={alertError}>{error}</div>}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-        <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-          <option value="">Ownership…</option>
-          {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-        </select>
-        <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-          <option value="">Read Status…</option>
-          {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-        </select>
-        <select value={publisherId} onChange={(e) => setPublisherId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-          <option value="">Publisher…</option>
-          {publishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
-        </select>
-        <select value={formatTypeId} onChange={(e) => setFormatTypeId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-          <option value="">Format…</option>
-          {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
-        </select>
-        <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-          <option value="">Era…</option>
-          {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}</option>)}
-        </select>
-        <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Apply"}</button>
-      </div>
-      <div>
-        {!confirmDelete
-          ? <button onClick={handleDelete} style={btnDanger}>Delete {selectedIds.length} item{selectedIds.length !== 1 ? "s" : ""}</button>
-          : <span>
-              <strong style={{ marginRight: 6 }}>Confirm delete?</strong>
-              <button onClick={handleDelete} disabled={deleting} style={{ ...btnDanger, marginRight: 6 }}>{deleting ? "Deleting…" : "Yes"}</button>
-              <button onClick={() => setConfirmDelete(false)} style={btnSecondary}>No</button>
-            </span>
-        }
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} items</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
+        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
+          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
+              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Read Status" enabled={updateReadStatus} onToggle={() => setUpdateReadStatus((p) => !p)}>
+            <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={fieldStyle}>
+              {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Publisher" enabled={updatePublisher} onToggle={() => setUpdatePublisher((p) => !p)}>
+            <select value={publisherId} onChange={(e) => setPublisherId(e.target.value)} style={fieldStyle}>
+              {publishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Format" enabled={updateFormat} onToggle={() => setUpdateFormat((p) => !p)}>
+            <select value={formatTypeId} onChange={(e) => setFormatTypeId(e.target.value)} style={fieldStyle}>
+              {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Era" enabled={updateEra} onToggle={() => setUpdateEra((p) => !p)}>
+            <select value={eraId} onChange={(e) => setEraId(e.target.value)} style={fieldStyle}>
+              {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}</option>)}
+            </select>
+          </BulkField>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} item{selectedIds.length !== 1 ? "s" : ""}</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -692,19 +737,22 @@ const GnGridItem = memo(function GnGridItem({ gn, isSelected, onToggleSelect, on
       outline: isSelected ? "2px solid var(--btn-primary-bg)" : "2px solid transparent",
       borderRadius: 3, boxSizing: "border-box",
     }}>
-      <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
-        <input type="checkbox" checked={isSelected}
-          onChange={() => onToggleSelect(gn.item_id)}
-          onClick={(e) => e.stopPropagation()}
-          style={{ margin: 0, cursor: "pointer" }} />
-      </div>
-      {gn.cover_image_url ? (
-        <img src={getImageUrl(gn.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
-      ) : (
-        <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>No Cover</span>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(gn.item_id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ margin: 0, cursor: "pointer" }} />
         </div>
-      )}
+        <OwnershipBadge statusName={gn.ownership_status} />
+        {gn.cover_image_url ? (
+          <img src={getImageUrl(gn.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
           <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{gn.title}</div>
@@ -752,7 +800,8 @@ export default function GraphicNovelsLibraryPage() {
   const [filters, setFilters] = useState(makeEmptyFilters);
   const [sortKey, setSortKey] = useState("title");
   const [sortDir, setSortDir] = useState("asc");
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [activeItemId, setActiveItemId] = useState(null);
 
   const [pageTab, setPageTab] = useState("library"); // "library" | "sourceSeries"
@@ -939,13 +988,21 @@ export default function GraphicNovelsLibraryPage() {
   }
 
   function toggleSelect(id) {
-    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
+  function clearSelection() { setSelectedIds(new Set()); }
+
   function toggleSelectAll() {
-    if (selectedIds.length === sorted.length) setSelectedIds([]);
-    else setSelectedIds(sorted.map((g) => g.item_id));
+    if (sorted.length > 0 && sorted.every((g) => selectedIds.has(g.item_id))) clearSelection();
+    else setSelectedIds(new Set(sorted.map((g) => g.item_id)));
   }
+
+  const allVisibleSelected = sorted.length > 0 && sorted.every((g) => selectedIds.has(g.item_id));
 
   function sortArrow(key) {
     if (sortKey !== key) return null;
@@ -962,11 +1019,11 @@ export default function GraphicNovelsLibraryPage() {
     padding: "4px 8px",
     whiteSpace: "nowrap",
     userSelect: "none",
-    background: "#f5f5f5",
-    borderBottom: "1px solid #ddd",
+    background: "var(--bg-sidebar)",
+    borderBottom: "1px solid var(--border)",
     position: "relative",
     overflow: "hidden",
-    borderRight: "1px solid #d0d0d0",
+    borderRight: "1px solid var(--border)",
   };
 
   const tdStyle = { fontSize: 12, padding: "4px 8px", verticalAlign: "top", borderBottom: "1px solid var(--border)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
@@ -996,8 +1053,12 @@ export default function GraphicNovelsLibraryPage() {
               ? `${sorted.length} of ${items.length} items`
               : `${visibleSourceSeriesRows.length} entries`}
           </span>
-          {pageTab === "library" && selectedIds.length > 0 && (
-            <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.length} selected</span>
+          {pageTab === "library" && selectedIds.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1023,7 +1084,6 @@ export default function GraphicNovelsLibraryPage() {
             {fixingCovers ? "Fixing…" : "Fix Covers"}
           </button>
           {fixCoversResult && <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{fixCoversResult}</span>}
-          <a href="/graphicnovels/add" style={{ ...btnPrimary, textDecoration: "none", display: "inline-block", fontSize: 12, padding: "3px 10px" }}>+ Add</a>
         </div>
       </div>
 
@@ -1050,20 +1110,6 @@ export default function GraphicNovelsLibraryPage() {
           <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
             {error && <div style={alertError}>{error}</div>}
 
-            {selectedIds.length > 0 && (
-              <BulkEditPanel
-                selectedIds={selectedIds}
-                publishers={publishers}
-                formatTypes={formatTypes}
-                eras={eras}
-                ownershipStatuses={ownershipStatuses}
-                readStatuses={readStatuses}
-                onBulkSave={() => { load(); setSelectedIds([]); }}
-                onBulkDelete={() => { load(); setSelectedIds([]); }}
-                onClearSelection={() => setSelectedIds([])}
-              />
-            )}
-
             {!loading && sorted.length === 0 && (
               <div style={{ color: "var(--text-secondary)", fontSize: 13, padding: "20px 0" }}>No items match the current filters.</div>
             )}
@@ -1072,7 +1118,7 @@ export default function GraphicNovelsLibraryPage() {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignContent: "flex-start" }}>
                 {sorted.map((g) => (
                   <GnGridItem key={g.item_id} gn={g}
-                    isSelected={selectedIds.includes(g.item_id)}
+                    isSelected={selectedIds.has(g.item_id)}
                     onToggleSelect={toggleSelect}
                     onClick={() => setActiveItemId(g.item_id)}
                     gridSize={gridSize} showCaptions={showCaptions} />
@@ -1090,7 +1136,7 @@ export default function GraphicNovelsLibraryPage() {
                 <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                   <tr>
                     <th style={{ ...thBase, width: 28, padding: "4px 6px" }}>
-                      <input type="checkbox" checked={selectedIds.length === sorted.length && sorted.length > 0} onChange={toggleSelectAll} style={{ margin: 0 }} />
+                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ margin: 0, cursor: "pointer" }} />
                     </th>
                     {showThumbnails && <th style={{ ...thBase, width: 50 }} />}
                     {headers.map((h) => (
@@ -1109,57 +1155,61 @@ export default function GraphicNovelsLibraryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((g) => (
-                    <tr
-                      key={g.item_id}
-                      style={{ cursor: "pointer", background: selectedIds.includes(g.item_id) ? "var(--row-selected)" : "transparent" }}
-                      onMouseEnter={(e) => { if (!selectedIds.includes(g.item_id)) e.currentTarget.style.background = "var(--row-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = selectedIds.includes(g.item_id) ? "var(--row-selected)" : "transparent"; }}
-                    >
-                      <td style={{ ...tdStyle, width: 28 }} onClick={(e) => { e.stopPropagation(); toggleSelect(g.item_id); }}>
-                        <input type="checkbox" checked={selectedIds.includes(g.item_id)} onChange={() => {}} style={{ margin: 0 }} />
-                      </td>
-                      {showThumbnails && (
-                        <td style={{ ...tdStyle, width: 50, verticalAlign: "middle" }} onClick={() => setActiveItemId(g.item_id)}>
-                          {g.cover_image_url
-                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 34, height: 50, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-                            : <div style={{ width: 34, height: 50, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)" }} />}
+                  {sorted.map((g) => {
+                    const isSelected = selectedIds.has(g.item_id);
+                    return (
+                      <tr
+                        key={g.item_id}
+                        onClick={() => setActiveItemId(g.item_id)}
+                        style={{ cursor: "pointer", background: isSelected ? "var(--row-selected)" : "transparent" }}
+                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--row-hover)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "var(--row-selected)" : "transparent"; }}
+                      >
+                        <td style={{ ...tdStyle, width: 28 }} onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(g.item_id)} style={{ margin: 0, cursor: "pointer" }} />
                         </td>
-                      )}
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        <div style={{ fontWeight: "bold", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</div>
-                        {g.series_name && (
-                          <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {g.series_name}{g.series_number != null ? ` Vol. ${g.series_number}` : ""}
-                          </div>
+                        {showThumbnails && (
+                          <td style={{ ...tdStyle, width: 50, verticalAlign: "middle" }}>
+                            {g.cover_image_url
+                              ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 34, height: 50, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                              : <div style={{ width: 34, height: 50, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)" }} />}
+                          </td>
                         )}
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        {g.writers?.length ? g.writers.join(", ") : <span style={{ color: "var(--text-label)" }}>—</span>}
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        {g.artists?.length ? g.artists.join(", ") : <span style={{ color: "var(--text-label)" }}>—</span>}
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        {g.publisher_name || <span style={{ color: "var(--text-label)" }}>—</span>}
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        {g.format_type_name || <span style={{ color: "var(--text-label)" }}>—</span>}
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        {g.era_name || <span style={{ color: "var(--text-label)" }}>—</span>}
-                      </td>
-                      <td style={{ ...tdStyle, whiteSpace: "normal" }} onClick={() => setActiveItemId(g.item_id)}>
-                        <SourceSeriesDisplay sourceSeries={g.source_series} issueNotes={g.issue_notes} />
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{g.reading_status || "—"}</span>
-                      </td>
-                      <td style={tdStyle} onClick={() => setActiveItemId(g.item_id)}>
-                        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{g.ownership_status || "—"}</span>
-                      </td>
-                    </tr>
-                  ))}
+                        <td style={tdStyle}>
+                          <div style={{ fontWeight: "bold", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</div>
+                          {g.series_name && (
+                            <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {g.series_name}{g.series_number != null ? ` Vol. ${g.series_number}` : ""}
+                            </div>
+                          )}
+                        </td>
+                        <td style={tdStyle}>
+                          {g.writers?.length ? g.writers.join(", ") : <span style={{ color: "var(--text-label)" }}>—</span>}
+                        </td>
+                        <td style={tdStyle}>
+                          {g.artists?.length ? g.artists.join(", ") : <span style={{ color: "var(--text-label)" }}>—</span>}
+                        </td>
+                        <td style={tdStyle}>
+                          {g.publisher_name || <span style={{ color: "var(--text-label)" }}>—</span>}
+                        </td>
+                        <td style={tdStyle}>
+                          {g.format_type_name || <span style={{ color: "var(--text-label)" }}>—</span>}
+                        </td>
+                        <td style={tdStyle}>
+                          {g.era_name || <span style={{ color: "var(--text-label)" }}>—</span>}
+                        </td>
+                        <td style={{ ...tdStyle, whiteSpace: "normal" }}>
+                          <SourceSeriesDisplay sourceSeries={g.source_series} issueNotes={g.issue_notes} />
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{g.reading_status || "—"}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{g.ownership_status || "—"}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -1264,7 +1314,25 @@ export default function GraphicNovelsLibraryPage() {
           categories={categories}
           onClose={() => setActiveItemId(null)}
           onSaved={() => { load(); setActiveItemId(null); }}
-          onDeleted={() => { load(); setActiveItemId(null); setSelectedIds(prev => prev.filter(id => id !== activeItemId)); }}
+          onDeleted={() => {
+            load();
+            setActiveItemId(null);
+            setSelectedIds((prev) => { const next = new Set(prev); next.delete(activeItemId); return next; });
+          }}
+        />
+      )}
+
+      {bulkEditOpen && (
+        <GnBulkEdit
+          selectedIds={[...selectedIds]}
+          publishers={publishers}
+          formatTypes={formatTypes}
+          eras={eras}
+          ownershipStatuses={ownershipStatuses}
+          readStatuses={readStatuses}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); await load(); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); await load(); }}
         />
       )}
     </div>

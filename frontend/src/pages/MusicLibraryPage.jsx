@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -23,14 +21,33 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, sectionStyle, sectionLabel } from "../styles/commonStyles";
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, sectionStyle, sectionLabel, GRID_SIZES } from "../styles/commonStyles";
+import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
+};
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  return (
+    <div style={{
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function MusicFilters({ items, ownershipStatuses, releaseTypes, filters, onSectionChange, onClearAll }) {
-
-
   const allArtists = useMemo(() => {
     const seen = new Set();
     const result = [];
@@ -66,6 +83,7 @@ function MusicFilters({ items, ownershipStatuses, releaseTypes, filters, onSecti
     >
       <TriStateFilterSection
         title="Ownership"
+        defaultShown={2}
         items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
@@ -312,11 +330,48 @@ function EditionsEditor({ editions, formatTypes, ownershipStatuses, onChange }) 
   );
 }
 
-// ─── Edit modal ───────────────────────────────────────────────────────────────
+// ─── Grid item ────────────────────────────────────────────────────────────────
 
-function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGenres, onClose, onSaved, onDeleted }) {
+const MusicGridItem = memo(function MusicGridItem({ release, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+  const { w, h } = GRID_SIZES[gridSize];
+  return (
+    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+      position: "relative", cursor: "pointer", width: w, flexShrink: 0,
+      outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
+      borderRadius: 3, boxSizing: "border-box",
+    }}>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(release.item_id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ margin: 0, cursor: "pointer" }} />
+        </div>
+        <OwnershipBadge statusName={release.ownership_status} />
+        {release.cover_image_url ? (
+          <img src={getImageUrl(release.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
+      {showCaptions && (
+        <div style={{ padding: "3px 2px 0", maxWidth: w }}>
+          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{release.title}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(release.artists || []).join(", ")}</div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Detail modal ─────────────────────────────────────────────────────────────
+
+function MusicDetailModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGenres, onClose, onSaved, onDeleted }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [coverPreview, setCoverPreview] = useState(null);
@@ -334,8 +389,6 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
     }
     if (coverFileRef.current) coverFileRef.current.value = "";
   }
-
-
 
   useEffect(() => {
     getMusicRelease(itemId).then(d => {
@@ -407,134 +460,136 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
   }
 
   async function handleDelete() {
+    setDeleting(true);
     try {
       await deleteMusicRelease(itemId);
       onDeleted(itemId);
     } catch (err) {
       setError(err.message || "Delete failed.");
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  const overlayStyle = {
-    position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-    display: "flex", alignItems: "flex-start", justifyContent: "center",
-    zIndex: 1000, overflowY: "auto", padding: "20px 0",
-  };
-  const modalStyle = {
-    background: "var(--bg-surface)", borderRadius: 6, padding: 20,
-    width: 680, maxWidth: "95vw", position: "relative",
-  };
-
-  if (!form) return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
-        {error ? <div style={alertError}>{error}</div> : <p style={{ fontSize: 13 }}>Loading…</p>}
-      </div>
-    </div>
-  );
-
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Edit Release</h3>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, lineHeight: 1 }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Release Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
         </div>
 
-        {error && <div style={alertError}>{error}</div>}
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
+          {error && <div style={alertError}>{error}</div>}
 
-        {/* Cover preview banner */}
-        {coverPreview && (
-          <div style={{ marginBottom: 12, textAlign: "center" }}>
-            <img src={coverPreview} alt="cover" style={{ maxHeight: 80, maxWidth: 80, objectFit: "cover", borderRadius: 3, border: "1px solid var(--border)" }} onError={() => setCoverPreview(null)} />
-          </div>
-        )}
+          {form && (
+            <>
+              {coverPreview && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={getImageUrl(coverPreview)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} onError={() => setCoverPreview(null)} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{form.artists.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-          </div>
-          <div>
-            <label style={labelStyle}>Release Type</label>
-            <select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)} style={selectStyle}>
-              {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Release Date</label>
-            <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY-MM-DD" />
-          </div>
-          <div>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input value={form.coverImageUrl} onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>Artist(s)</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {form.artists.map((a, i) => (
-              <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <input value={a} onChange={e => { const next = [...form.artists]; next[i] = e.target.value; set("artists", next); }} style={{ ...inputStyle, flex: 1 }} placeholder="Artist name" />
-                {form.artists.length > 1 && <button type="button" onClick={() => set("artists", form.artists.filter((_, x) => x !== i))} style={{ ...btnSm, color: "#c62828" }}>✕</button>}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={labelStyle}>Title *</label>
+                  <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Release Type</label>
+                  <select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)} style={selectStyle}>
+                    {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ownership</label>
+                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Release Date</label>
+                  <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY-MM-DD" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Cover Image URL</label>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <input value={form.coverImageUrl} onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+                    <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                    <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  </div>
+                </div>
               </div>
-            ))}
-            <button type="button" onClick={() => set("artists", [...form.artists, ""])} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Artist</button>
-          </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Artist(s)</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {form.artists.map((a, i) => (
+                    <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <input value={a} onChange={e => { const next = [...form.artists]; next[i] = e.target.value; set("artists", next); }} style={{ ...inputStyle, flex: 1 }} placeholder="Artist name" />
+                      {form.artists.length > 1 && <button type="button" onClick={() => set("artists", form.artists.filter((_, x) => x !== i))} style={{ ...btnSm, color: "#c62828" }}>✕</button>}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => set("artists", [...form.artists, ""])} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Artist</button>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Genre</label>
+                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 40, resize: "vertical" }} />
+              </div>
+
+              <div style={sectionStyle}>
+                <div style={sectionLabel}>Track List</div>
+                <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
+              </div>
+
+              <div style={sectionStyle}>
+                <div style={sectionLabel}>Editions / Versions</div>
+                <EditionsEditor
+                  editions={form.editions}
+                  formatTypes={formatTypes}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("editions", v)}
+                />
+              </div>
+            </>
+          )}
         </div>
 
-        <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>Genre</label>
-          <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>Description</label>
-          <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>Notes</label>
-          <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 40, resize: "vertical" }} />
-        </div>
-
-        <div style={sectionStyle}>
-          <div style={sectionLabel}>Track List</div>
-          <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
-        </div>
-
-        <div style={sectionStyle}>
-          <div style={sectionLabel}>Editions / Versions</div>
-          <EditionsEditor
-            editions={form.editions}
-            formatTypes={formatTypes}
-            ownershipStatuses={ownershipStatuses}
-            onChange={v => set("editions", v)}
-          />
-        </div>
-
-        {!confirmDelete ? (
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save"}</button>
-            <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-            <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...btnDanger, marginLeft: "auto" }}>Delete</button>
-          </div>
-        ) : (
-          <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-            <span style={{ fontSize: 13, color: "#c62828" }}>Delete this release?</span>
-            <button type="button" onClick={handleDelete} style={btnDanger}>Yes, delete</button>
-            <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+        {form && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              {!confirmDelete
+                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this release?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            </div>
           </div>
         )}
       </div>
@@ -542,72 +597,97 @@ function EditModal({ itemId, ownershipStatuses, releaseTypes, formatTypes, allGe
   );
 }
 
-// ─── Bulk edit panel ──────────────────────────────────────────────────────────
+// ─── Bulk edit modal ──────────────────────────────────────────────────────────
 
-function BulkEditPanel({ selectedIds, ownershipStatuses, releaseTypes, onDone, onDeleted }) {
-  const [ownershipId, setOwnershipId] = useState("");
-  const [releaseTypeId, setReleaseTypeId] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
+function BulkField({ label, enabled, onToggle, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
+      </label>
+      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
+    </div>
+  );
+}
+
+function MusicBulkEdit({ selectedIds, ownershipStatuses, releaseTypes, onClose, onSaved, onDeleted }) {
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
+
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updateReleaseType, setUpdateReleaseType] = useState(false);
+  const [releaseTypeId, setReleaseTypeId] = useState(String(releaseTypes[0]?.top_level_category_id || ""));
+
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
+  const anyEnabled = updateOwnership || updateReleaseType;
 
-
-  async function handleUpdate() {
+  async function handleSave() {
+    if (!anyEnabled) { setError("Select at least one field to update."); return; }
     const fields = {};
-    if (ownershipId) fields.ownership_status_id = parseInt(ownershipId, 10);
-    if (releaseTypeId) fields.top_level_category_id = parseInt(releaseTypeId, 10);
-    if (!Object.keys(fields).length) return;
-    setSaving(true);
-    try {
-      await bulkUpdateMusic(selectedIds, fields);
-      onDone();
-    } catch (err) {
-      setError(err.message || "Update failed.");
-    } finally {
-      setSaving(false);
-    }
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipId);
+    if (updateReleaseType) fields.top_level_category_id = Number(releaseTypeId);
+    setSaving(true); setError("");
+    try { await bulkUpdateMusic(selectedIds, fields); onSaved(); }
+    catch (err) { setError(err.message || "Failed to update"); }
+    finally { setSaving(false); }
   }
 
   async function handleDelete() {
-    setSaving(true);
-    try {
-      await bulkDeleteMusic(selectedIds);
-      onDeleted(selectedIds);
-    } catch (err) {
-      setError(err.message || "Delete failed.");
-    } finally {
-      setSaving(false);
-    }
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try { await bulkDeleteMusic(selectedIds); onDeleted(); }
+    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
   }
 
   return (
-    <div style={{ padding: "8px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-      <span style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)" }}>{selectedIds.length} selected</span>
-      <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130, fontSize: 12 }}>
-        <option value="">Ownership…</option>
-        {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-      </select>
-      <select value={releaseTypeId} onChange={e => setReleaseTypeId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130, fontSize: 12 }}>
-        <option value="">Release Type…</option>
-        {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
-      </select>
-      <button type="button" onClick={handleUpdate} disabled={saving || (!ownershipId && !releaseTypeId)} style={{ ...btnSecondary, fontSize: 12 }}>Apply</button>
-      {error && <span style={{ fontSize: 12, color: "var(--error)" }}>{error}</span>}
-      {!confirmDelete ? (
-        <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...btnDanger, fontSize: 12, marginLeft: "auto" }}>Delete {selectedIds.length}</button>
-      ) : (
-        <>
-          <span style={{ fontSize: 12, color: "#c62828", marginLeft: "auto" }}>Delete {selectedIds.length} releases?</span>
-          <button type="button" onClick={handleDelete} disabled={saving} style={{ ...btnDanger, fontSize: 12 }}>Confirm</button>
-          <button type="button" onClick={() => setConfirmDelete(false)} style={{ ...btnSecondary, fontSize: 12 }}>Cancel</button>
-        </>
-      )}
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} release{selectedIds.length !== 1 ? "s" : ""}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
+        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
+          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
+              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Release Type" enabled={updateReleaseType} onToggle={() => setUpdateReleaseType((p) => !p)}>
+            <select value={releaseTypeId} onChange={(e) => setReleaseTypeId(e.target.value)} style={fieldStyle}>
+              {releaseTypes.map((r) => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
+            </select>
+          </BulkField>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} release{selectedIds.length !== 1 ? "s" : ""}</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Empty section helper ─────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 function emptyFilters() {
   return {
@@ -620,8 +700,6 @@ function emptyFilters() {
   };
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-
 export default function MusicLibraryPage() {
   const [releases, setReleases] = useState([]);
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
@@ -630,9 +708,49 @@ export default function MusicLibraryPage() {
   const [allGenres, setAllGenres] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(emptyFilters);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
+  const [gridSize, setGridSize] = useState("m");
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  const [sortField, setSortField] = useState("title");
+  const [sortDir, setSortDir] = useState("asc");
+
+  const [colWidths, setColWidths] = useState({
+    title: 220, artist: 160, type: 100, date: 70, editions: 150, genre: 150, ownership: 110,
+  });
+  const colResizingRef = useRef(false);
+
+  const makeResizeHandler = useCallback((col) => (e) => {
+    e.preventDefault();
+    colResizingRef.current = true;
+    const startX = e.clientX;
+    const startW = colWidths[col];
+    function onMove(ev) {
+      setColWidths((prev) => ({ ...prev, [col]: Math.max(50, startW + ev.clientX - startX) }));
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setTimeout(() => { colResizingRef.current = false; }, 0);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [colWidths]);
+
+  function handleHeaderSort(field) {
+    if (field === sortField) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
+
+  function sortIndicator(field) {
+    if (field !== sortField) return " ⇅";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
 
   const load = useCallback(() => {
     setLoading(true);
@@ -656,95 +774,118 @@ export default function MusicLibraryPage() {
 
   function handleSectionChange(key, val) {
     setFilters(f => ({ ...f, [key]: val }));
-    setSelectedIds([]);
   }
 
   function handleClearAll() {
     setFilters(emptyFilters());
-    setSelectedIds([]);
   }
 
   const filtered = useMemo(() => {
     return releases.filter(r => {
       const search = filters.search.trim().toLowerCase();
-      if (search && !r.title.toLowerCase().includes(search)) return false;
+      if (search && !r.title.toLowerCase().includes(search)
+          && !(r.artists || []).some(a => a.toLowerCase().includes(search))) return false;
 
       if (sectionActive(filters.ownership)) {
-        const match = applySection(filters.ownership, [r.ownership_status_id]);
-        if (!match) return false;
+        if (!applySection(filters.ownership, [r.ownership_status_id])) return false;
       }
       if (sectionActive(filters.releaseType)) {
-        const match = applySection(filters.releaseType, [r.top_level_category_id]);
-        if (!match) return false;
+        if (!applySection(filters.releaseType, [r.top_level_category_id])) return false;
       }
       if (sectionActive(filters.format)) {
-        const match = applySection(filters.format, r.formats || []);
-        if (!match) return false;
+        if (!applySection(filters.format, r.formats || [])) return false;
       }
       if (sectionActive(filters.genre)) {
-        const match = applySection(filters.genre, r.genres || []);
-        if (!match) return false;
+        if (!applySection(filters.genre, r.genres || [])) return false;
       }
       if (sectionActive(filters.artist)) {
-        const match = applySection(filters.artist, r.artists || []);
-        if (!match) return false;
+        if (!applySection(filters.artist, r.artists || [])) return false;
       }
       return true;
     });
   }, [releases, filters]);
 
-  function toggleSelect(id) {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  }
-
-  function toggleSelectAll() {
-    if (selectedIds.length === filtered.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(filtered.map(r => r.item_id));
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const flip = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "artist":
+        return arr.sort((a, b) =>
+          flip * ((a.artists?.[0] || "").localeCompare(b.artists?.[0] || ""))
+        );
+      case "type":
+        return arr.sort((a, b) =>
+          flip * ((a.release_type || "").localeCompare(b.release_type || ""))
+        );
+      case "date":
+        return arr.sort((a, b) =>
+          flip * ((a.release_date || "").localeCompare(b.release_date || ""))
+        );
+      case "ownership":
+        return arr.sort((a, b) =>
+          flip * ((a.ownership_status || "").localeCompare(b.ownership_status || ""))
+        );
+      default: // title
+        return arr.sort((a, b) =>
+          flip * ((a.title_sort || a.title || "").localeCompare(b.title_sort || b.title || ""))
+        );
     }
+  }, [filtered, sortField, sortDir]);
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
-  const allSelected = filtered.length > 0 && selectedIds.length === filtered.length;
+  function clearSelection() { setSelectedIds(new Set()); }
+  function selectAll() { setSelectedIds(new Set(sorted.map(r => r.item_id))); }
 
-  const tdStyle = { padding: "4px 8px", fontSize: 12, borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
-  const thStyle = { padding: "5px 8px", fontSize: 11, fontWeight: "bold", textAlign: "left", borderBottom: "2px solid var(--border)", background: "#f5f5f5", color: "var(--text-secondary)", whiteSpace: "nowrap" };
+  const allVisibleSelected = sorted.length > 0 && sorted.every(r => selectedIds.has(r.item_id));
+
+  const selectedReleases = useMemo(
+    () => sorted.filter(r => selectedIds.has(r.item_id)),
+    [sorted, selectedIds]
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
       {/* Controls bar */}
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          {loading ? "Loading…" : `${filtered.length} release${filtered.length !== 1 ? "s" : ""}${selectedIds.length > 0 ? ` · ${selectedIds.length} selected` : ""}`}
-        </span>
-        <button
-          type="button"
-          onClick={() => setShowThumbnails(v => !v)}
-          style={{ ...btnSm, marginLeft: "auto", background: showThumbnails ? "var(--green-light)" : undefined, borderColor: showThumbnails ? "var(--green)" : undefined }}
-        >
-          Thumbnails
-        </button>
-        <a href="/music/add" style={{ ...btnPrimary, textDecoration: "none", fontSize: 12 }}>+ Add</a>
-      </div>
-
-      {/* Bulk edit panel */}
-      {selectedIds.length > 0 && (
-        <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <BulkEditPanel
-            selectedIds={selectedIds}
-            ownershipStatuses={ownershipStatuses}
-            releaseTypes={releaseTypes}
-            onDone={() => { setSelectedIds([]); load(); }}
-            onDeleted={ids => { setSelectedIds([]); setReleases(prev => prev.filter(r => !ids.includes(r.item_id))); }}
-          />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {loading ? "Loading…" : `${sorted.length} release${sorted.length !== 1 ? "s" : ""}`}
+          </span>
+          {selectedIds.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
+          )}
         </div>
-      )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <SegmentedButtons
+            options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
+            value={viewMode} onChange={setViewMode} />
+          {viewMode === "table" && (
+            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+          )}
+          {viewMode === "grid" && (
+            <>
+              <SegmentedButtons
+                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                value={gridSize} onChange={setGridSize} />
+              <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Main layout */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Sidebar */}
         <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--border)", overflowY: "auto" }}>
           <MusicFilters
             items={releases}
@@ -756,56 +897,103 @@ export default function MusicLibraryPage() {
           />
         </div>
 
-        {/* Table */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {loading ? (
             <p style={{ padding: 20, fontSize: 13 }}>Loading…</p>
-          ) : filtered.length === 0 ? (
+          ) : sorted.length === 0 ? (
             <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No releases found.</p>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+              {sorted.map(r => (
+                <MusicGridItem key={r.item_id} release={r}
+                  isSelected={selectedIds.has(r.item_id)}
+                  onToggleSelect={toggleSelect}
+                  onClick={() => setEditingId(r.item_id)}
+                  gridSize={gridSize} showCaptions={showCaptions} />
+              ))}
+            </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={{ ...thStyle, width: 28, textAlign: "center" }}>
-                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ cursor: "pointer" }} />
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 28 }} />
+                {showThumbnails && <col style={{ width: 50 }} />}
+                <col style={{ width: colWidths.title }} />
+                <col style={{ width: colWidths.artist }} />
+                <col style={{ width: colWidths.type }} />
+                <col style={{ width: colWidths.date }} />
+                <col style={{ width: colWidths.editions }} />
+                <col style={{ width: colWidths.genre }} />
+                <col style={{ width: colWidths.ownership }} />
+              </colgroup>
+              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid var(--border)" }}>
+                    <input type="checkbox" checked={allVisibleSelected}
+                      onChange={() => allVisibleSelected ? clearSelection() : selectAll()}
+                      style={{ margin: 0, cursor: "pointer" }} />
                   </th>
-                  {showThumbnails && <th style={{ ...thStyle, width: 42 }}></th>}
-                  <th style={thStyle}>Title</th>
-                  <th style={thStyle}>Artist(s)</th>
-                  <th style={thStyle}>Type</th>
-                  <th style={thStyle}>Date</th>
-                  <th style={thStyle}>Editions</th>
-                  <th style={thStyle}>Genre(s)</th>
-                  <th style={thStyle}>Ownership</th>
+                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
+                  {[
+                    { key: "title", label: "Title", colKey: "title" },
+                    { key: "artist", label: "Artist(s)", colKey: "artist" },
+                    { key: "type", label: "Type", colKey: "type" },
+                    { key: "date", label: "Date", colKey: "date" },
+                    { key: null, label: "Editions", colKey: "editions" },
+                    { key: null, label: "Genre(s)", colKey: "genre" },
+                    { key: "ownership", label: "Ownership", colKey: "ownership" },
+                  ].map(({ key, label, colKey }) => (
+                    <th
+                      key={label}
+                      onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                      style={{
+                        padding: "5px 8px",
+                        textAlign: "left",
+                        position: "relative",
+                        userSelect: "none",
+                        cursor: key ? "pointer" : "default",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        borderRight: "1px solid var(--border)",
+                      }}
+                    >
+                      {label}{key ? sortIndicator(key) : ""}
+                      <div
+                        onMouseDown={makeResizeHandler(colKey)}
+                        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 1 }}
+                      />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => {
-                  const isSelected = selectedIds.includes(r.item_id);
-                  const rowBg = isSelected ? "var(--green-light)" : undefined;
+                {sorted.map(r => {
+                  const isSelected = selectedIds.has(r.item_id);
                   return (
                     <tr
                       key={r.item_id}
-                      style={{ background: rowBg, cursor: "pointer" }}
                       onClick={() => setEditingId(r.item_id)}
+                      style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}
                     >
-                      <td style={{ ...tdStyle, textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(r.item_id); }}>
-                        <input type="checkbox" checked={isSelected} onChange={() => {}} style={{ cursor: "pointer" }} />
+                      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }}
+                        onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(r.item_id)} style={{ margin: 0, cursor: "pointer" }} />
                       </td>
                       {showThumbnails && (
-                        <td style={{ ...tdStyle, padding: "2px 4px" }}>
+                        <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
                           {r.cover_image_url
-                            ? <img src={getImageUrl(r.cover_image_url)} alt="" style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 2, display: "block" }} />
-                            : <div style={{ width: 34, height: 34, background: "var(--surface-2)", borderRadius: 2 }} />}
+                            ? <img src={getImageUrl(r.cover_image_url)} alt="" style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 42, background: "var(--bg-surface)", borderRadius: 2 }} />}
                         </td>
                       )}
-                      <td style={{ ...tdStyle, fontWeight: 500 }}>{r.title}</td>
-                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{(r.artists || []).join(", ")}</td>
-                      <td style={tdStyle}>{r.release_type}</td>
-                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{r.release_date?.slice(0, 4) || ""}</td>
-                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{r.editions_summary || ""}</td>
-                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{(r.genres || []).join(", ")}</td>
-                      <td style={tdStyle}>{r.ownership_status}</td>
+                      <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>{r.title}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.artists || []).join(", ")}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.release_type}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{r.release_date?.slice(0, 4) || ""}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.editions_summary || ""}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.genres || []).join(", ")}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.ownership_status}</td>
                     </tr>
                   );
                 })}
@@ -815,9 +1003,8 @@ export default function MusicLibraryPage() {
         </div>
       </div>
 
-      {/* Edit modal */}
       {editingId && (
-        <EditModal
+        <MusicDetailModal
           itemId={editingId}
           ownershipStatuses={ownershipStatuses}
           releaseTypes={releaseTypes}
@@ -825,7 +1012,22 @@ export default function MusicLibraryPage() {
           allGenres={allGenres}
           onClose={() => setEditingId(null)}
           onSaved={() => { setEditingId(null); load(); }}
-          onDeleted={id => { setEditingId(null); setReleases(prev => prev.filter(r => r.item_id !== id)); }}
+          onDeleted={id => {
+            setEditingId(null);
+            setReleases(prev => prev.filter(r => r.item_id !== id));
+            setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+          }}
+        />
+      )}
+
+      {bulkEditOpen && (
+        <MusicBulkEdit
+          selectedIds={selectedReleases.map(r => r.item_id)}
+          ownershipStatuses={ownershipStatuses}
+          releaseTypes={releaseTypes}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
         />
       )}
     </div>

@@ -247,86 +247,10 @@ async def upload_restore(file: UploadFile = File(...)):
 
 
 # ---------- Admin: Unused Lookup Cleanup ----------
+# The cleanable set is derived from the shared lookup registry in
+# routers/admin_lookups.py — see cleanable_lookups_for_scan() there.
 
-# Each entry: (display_label, lookup_table, pk_column, name_column, [(ref_table, ref_fk_column), ...])
-_CLEANABLE_LOOKUPS = [
-    # Photocards
-    ("Photocard Groups", "lkup_photocard_groups", "group_id", "group_name", [
-        ("tbl_photocard_details", "group_id"),
-        ("lkup_photocard_members", "group_id"),
-        ("lkup_photocard_source_origins", "group_id"),
-    ]),
-    ("Photocard Members", "lkup_photocard_members", "member_id", "member_name", [
-        ("xref_photocard_members", "member_id"),
-    ]),
-    ("Photocard Source Origins", "lkup_photocard_source_origins", "source_origin_id", "source_origin_name", [
-        ("tbl_photocard_details", "source_origin_id"),
-    ]),
-    # Books
-    ("Book Authors", "lkup_book_authors", "author_id", "author_name", [
-        ("xref_book_item_authors", "author_id"),
-    ]),
-    ("Book Tags", "lkup_book_tags", "tag_id", "tag_name", [
-        ("xref_book_item_tags", "tag_id"),
-    ]),
-    ("Book Series", "tbl_book_series", "series_id", "series_name", [
-        ("xref_book_item_series", "series_id"),
-    ]),
-    # Graphic Novels
-    ("GN Publishers", "lkup_graphicnovel_publishers", "publisher_id", "publisher_name", [
-        ("tbl_graphicnovel_details", "publisher_id"),
-    ]),
-    ("GN Writers", "lkup_graphicnovel_writers", "writer_id", "writer_name", [
-        ("xref_graphicnovel_item_writers", "writer_id"),
-    ]),
-    ("GN Artists", "lkup_graphicnovel_artists", "artist_id", "artist_name", [
-        ("xref_graphicnovel_item_artists", "artist_id"),
-    ]),
-    ("GN Tags", "lkup_graphicnovel_tags", "tag_id", "tag_name", [
-        ("xref_graphicnovel_item_tags", "tag_id"),
-    ]),
-    # Video Games
-    ("Game Developers", "lkup_game_developers", "developer_id", "developer_name", [
-        ("xref_game_developers", "developer_id"),
-    ]),
-    ("Game Publishers", "lkup_game_publishers", "publisher_id", "publisher_name", [
-        ("xref_game_publishers", "publisher_id"),
-    ]),
-    ("Game Platforms", "lkup_game_platforms", "platform_id", "platform_name", [
-        ("tbl_game_copies", "platform_id"),
-    ]),
-    # Music
-    ("Music Artists", "lkup_music_artists", "artist_id", "artist_name", [
-        ("xref_music_release_artists", "artist_id"),
-    ]),
-    # Video
-    ("Video Directors", "lkup_video_directors", "director_id", "director_name", [
-        ("xref_video_directors", "director_id"),
-    ]),
-    ("Video Cast", "lkup_video_cast", "cast_id", "cast_name", [
-        ("xref_video_cast", "cast_id"),
-    ]),
-    # Board Games
-    ("Board Game Designers", "lkup_boardgame_designers", "designer_id", "designer_name", [
-        ("xref_boardgame_designers", "designer_id"),
-    ]),
-    ("Board Game Publishers", "lkup_boardgame_publishers", "publisher_id", "publisher_name", [
-        ("tbl_boardgame_details", "publisher_id"),
-    ]),
-    # TTRPG
-    ("TTRPG Authors", "lkup_ttrpg_authors", "author_id", "author_name", [
-        ("xref_ttrpg_book_authors", "author_id"),
-    ]),
-    ("TTRPG Publishers", "lkup_ttrpg_publishers", "publisher_id", "publisher_name", [
-        ("tbl_ttrpg_details", "publisher_id"),
-    ]),
-    ("TTRPG System Editions", "lkup_ttrpg_system_editions", "edition_id", "edition_name", [
-        ("tbl_ttrpg_details", "system_edition_id"),
-    ]),
-    ("TTRPG Lines", "lkup_ttrpg_lines", "line_id", "line_name", [
-        ("tbl_ttrpg_details", "line_id"),
-    ]),
-]
+from routers.admin_lookups import cleanable_lookups_for_scan
 
 
 @router.get("/admin/unused-lookups")
@@ -334,7 +258,7 @@ def scan_unused_lookups(db=Depends(get_db)):
     """Scan all cleanable lookup tables and return values that are not
     referenced by any records (and are still active)."""
     results = []
-    for label, lkup_table, pk_col, name_col, refs in _CLEANABLE_LOOKUPS:
+    for label, lkup_table, pk_col, name_col, refs in cleanable_lookups_for_scan():
         # Build a WHERE clause: no references in any ref table
         not_exists_clauses = " AND ".join(
             f"NOT EXISTS (SELECT 1 FROM {ref_table} WHERE {ref_fk} = l.{pk_col})"
@@ -365,7 +289,8 @@ def deactivate_unused_lookups(req: DeactivateLookupRequest, db=Depends(get_db)):
     """Soft-delete lookup values by setting is_active = 0.
     Only allows tables that are in the cleanable list."""
     # Validate table name against whitelist
-    valid = {entry[1]: entry for entry in _CLEANABLE_LOOKUPS}
+    cleanables = cleanable_lookups_for_scan()
+    valid = {entry[1]: entry for entry in cleanables}
     if req.table not in valid:
         raise HTTPException(status_code=400, detail=f"Table '{req.table}' is not a cleanable lookup table.")
 

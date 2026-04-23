@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -21,15 +19,34 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess } from "../styles/commonStyles";
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
+import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
+};
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  return (
+    <div style={{
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function BoardgameFilters({ items, categories, ownershipStatuses, filters, onSectionChange, onClearAll }) {
-
-
   const allDesigners = useMemo(() => {
     const seen = new Set();
     const result = [];
@@ -58,6 +75,7 @@ function BoardgameFilters({ items, categories, ownershipStatuses, filters, onSec
     >
       <TriStateFilterSection
         title="Ownership"
+        defaultShown={2}
         items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
@@ -98,7 +116,7 @@ function ExpansionsEditor({ expansions, ownershipStatuses, onChange }) {
   return (
     <div>
       {expansions.map((exp, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
+        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Expansion {i + 1}</span>
             <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
@@ -127,11 +145,50 @@ function ExpansionsEditor({ expansions, ownershipStatuses, onChange }) {
   );
 }
 
-// ─── Edit modal ───────────────────────────────────────────────────────────────
+// ─── Grid item ────────────────────────────────────────────────────────────────
 
-function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, onDeleted }) {
+const BoardgameGridItem = memo(function BoardgameGridItem({ game, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+  const { w, h } = GRID_SIZES[gridSize];
+  return (
+    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+      position: "relative", cursor: "pointer", width: w, flexShrink: 0,
+      outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
+      borderRadius: 3, boxSizing: "border-box",
+    }}>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(game.item_id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ margin: 0, cursor: "pointer" }} />
+        </div>
+        <OwnershipBadge statusName={game.ownership_status} />
+        {game.cover_image_url ? (
+          <img src={getImageUrl(game.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
+      {showCaptions && (
+        <div style={{ padding: "3px 2px 0", maxWidth: w }}>
+          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{game.title}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {(game.designers || []).join(", ") || (game.year_published ? String(game.year_published) : "")}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Detail modal ─────────────────────────────────────────────────────────────
+
+function BoardgameDetailModal({ itemId, categories, ownershipStatuses, onClose, onSaved, onDeleted }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const coverFileRef = useRef(null);
@@ -212,215 +269,230 @@ function EditModal({ itemId, categories, ownershipStatuses, onClose, onSaved, on
   }
 
   async function handleDelete() {
-    setSaving(true);
+    setDeleting(true);
     try {
       await deleteBoardgame(itemId);
       onDeleted();
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setSaving(false);
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  if (!form) return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, padding: 24, minWidth: 300 }}>
-        {error ? <p style={{ color: "red" }}>{error}</p> : <p style={{ fontSize: 13 }}>Loading…</p>}
-        <button onClick={onClose} style={btnSecondary}>Close</button>
-      </div>
-    </div>
-  );
-
-
-
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, width: 680, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}>
-        {/* Header */}
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>Edit Board Game</span>
-          <button onClick={onClose} style={{ ...btnSm, fontSize: 14 }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Board Game Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
         </div>
 
-        {/* Cover banner */}
-        {form.coverImageUrl && (
-          <div style={{ padding: "10px 16px 0", display: "flex", gap: 12 }}>
-            <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ width: 60, height: 85, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => {}} />
-          </div>
-        )}
-
-        <div style={{ padding: 16 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
           {error && <div style={alertError}>{error}</div>}
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-          </div>
+          {form && (
+            <>
+              {form.coverImageUrl && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{form.designers.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={labelStyle}>Player Count *</label>
-              <select value={form.categoryId} onChange={e => set("categoryId", e.target.value)} style={selectStyle}>
-                {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Title *</label>
+                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
+              </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={labelStyle}>Year Published</label>
-              <input value={form.yearPublished} onChange={e => set("yearPublished", e.target.value)} style={inputStyle} placeholder="YYYY" />
-            </div>
-            <div>
-              <label style={labelStyle}>Min Players</label>
-              <input value={form.minPlayers} onChange={e => set("minPlayers", e.target.value)} style={inputStyle} type="number" min="1" />
-            </div>
-            <div>
-              <label style={labelStyle}>Max Players</label>
-              <input value={form.maxPlayers} onChange={e => set("maxPlayers", e.target.value)} style={inputStyle} type="number" min="1" />
-            </div>
-          </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Player Count *</label>
+                  <select value={form.categoryId} onChange={e => set("categoryId", e.target.value)} style={selectStyle}>
+                    {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ownership *</label>
+                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Designer(s)</label>
-            <NameList names={form.designers} onChange={v => set("designers", v)} addLabel="+ Designer" placeholder="Designer name" />
-          </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Year Published</label>
+                  <input value={form.yearPublished} onChange={e => set("yearPublished", e.target.value)} style={inputStyle} placeholder="YYYY" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Min Players</label>
+                  <input value={form.minPlayers} onChange={e => set("minPlayers", e.target.value)} style={inputStyle} type="number" min="1" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Max Players</label>
+                  <input value={form.maxPlayers} onChange={e => set("maxPlayers", e.target.value)} style={inputStyle} type="number" min="1" />
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher</label>
-            <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} placeholder="Publisher name" />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Designer(s)</label>
+                <NameList names={form.designers} onChange={v => set("designers", v)} addLabel="+ Designer" placeholder="Designer name" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 48, width: 34, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />}
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Publisher</label>
+                <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} placeholder="Publisher name" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Cover Image URL</label>
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
+              </div>
 
-          <div style={{ marginBottom: 4 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Expansions</label>
-            <ExpansionsEditor
-              expansions={form.expansions}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("expansions", v)}
-            />
-          </div>
-        </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
+              </div>
 
-        {/* Footer */}
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save"}</button>
-            <button onClick={onClose} style={btnSecondary}>Cancel</button>
-          </div>
-          {confirmDelete ? (
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--error)" }}>Delete this game?</span>
-              <button onClick={handleDelete} disabled={saving} style={{ ...btnDanger, fontSize: 12, padding: "3px 10px" }}>Yes, delete</button>
-              <button onClick={() => setConfirmDelete(false)} style={btnSm}>No</button>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmDelete(true)} style={{ ...btnSm, color: "var(--error)", border: "1px solid var(--error)" }}>Delete</button>
+              <div style={{ marginBottom: 4 }}>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>Expansions</label>
+                <ExpansionsEditor
+                  expansions={form.expansions}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("expansions", v)}
+                />
+              </div>
+            </>
           )}
         </div>
+
+        {form && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              {!confirmDelete
+                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this game?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Bulk edit panel ──────────────────────────────────────────────────────────
+// ─── Bulk edit modal ──────────────────────────────────────────────────────────
 
-function BulkEditPanel({ selectedIds, categories, ownershipStatuses, onDone, onDeleted }) {
-  const [ownershipId, setOwnershipId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+function BulkField({ label, enabled, onToggle, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
+      </label>
+      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
+    </div>
+  );
+}
+
+function BoardgameBulkEdit({ selectedIds, categories, ownershipStatuses, onClose, onSaved, onDeleted }) {
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
+
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updateCategory, setUpdateCategory] = useState(false);
+  const [categoryId, setCategoryId] = useState(String(categories[0]?.top_level_category_id || ""));
+
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
+  const anyEnabled = updateOwnership || updateCategory;
 
-
-  async function handleApply() {
-    if (!ownershipId && !categoryId) return;
+  async function handleSave() {
+    if (!anyEnabled) { setError("Select at least one field to update."); return; }
+    const fields = {};
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipId);
+    if (updateCategory) fields.top_level_category_id = Number(categoryId);
     setSaving(true); setError("");
-    try {
-      const fields = {};
-      if (ownershipId) fields.ownership_status_id = parseInt(ownershipId, 10);
-      if (categoryId) fields.top_level_category_id = parseInt(categoryId, 10);
-      await bulkUpdateBoardgames(selectedIds, fields);
-      onDone();
-    } catch (err) {
-      setError(err.message || "Bulk update failed.");
-      setSaving(false);
-    }
+    try { await bulkUpdateBoardgames(selectedIds, fields); onSaved(); }
+    catch (err) { setError(err.message || "Failed to update"); }
+    finally { setSaving(false); }
   }
 
   async function handleDelete() {
-    setSaving(true);
-    try {
-      await bulkDeleteBoardgames(selectedIds);
-      onDeleted();
-    } catch (err) {
-      setError(err.message || "Bulk delete failed.");
-      setSaving(false);
-    }
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try { await bulkDeleteBoardgames(selectedIds); onDeleted(); }
+    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
   }
 
   return (
-    <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4, padding: "8px 12px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-      <span style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)" }}>{selectedIds.length} selected</span>
-      <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 120, fontSize: 12 }}>
-        <option value="">Ownership…</option>
-        {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-      </select>
-      <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 150, fontSize: 12 }}>
-        <option value="">Player Count…</option>
-        {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-      </select>
-      <button onClick={handleApply} disabled={saving || (!ownershipId && !categoryId)} style={{ ...btnPrimary, fontSize: 12, padding: "4px 10px" }}>Apply</button>
-      {error && <span style={{ fontSize: 11, color: "var(--error)" }}>{error}</span>}
-      <div style={{ marginLeft: "auto" }}>
-        {confirmDelete ? (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "var(--error)" }}>Delete {selectedIds.length} games?</span>
-            <button onClick={handleDelete} disabled={saving} style={{ ...btnDanger, fontSize: 12, padding: "3px 10px" }}>Yes</button>
-            <button onClick={() => setConfirmDelete(false)} style={btnSm}>No</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
+        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
+          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
+              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Player Count" enabled={updateCategory} onToggle={() => setUpdateCategory((p) => !p)}>
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={fieldStyle}>
+              {categories.map((c) => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+            </select>
+          </BulkField>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
           </div>
-        ) : (
-          <button onClick={() => setConfirmDelete(true)} style={{ ...btnSm, color: "var(--error)", border: "1px solid var(--error)" }}>Delete {selectedIds.length}</button>
-        )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
+          </div>
+        </div>
       </div>
     </div>
-  );
-}
-
-// ─── Ownership badge ──────────────────────────────────────────────────────────
-
-const OWNERSHIP_COLORS = { Owned: "#39ff14", Wanted: "#ffff00", Trade: "#00ffff" };
-function OwnershipBadge({ label }) {
-  const letter = label ? label[0] : "?";
-  const color = OWNERSHIP_COLORS[label] || "#aaa";
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "#111", color, fontSize: 10, fontWeight: "bold", border: `1px solid ${color}`, flexShrink: 0 }}>{letter}</span>
   );
 }
 
@@ -439,11 +511,51 @@ export default function BoardgamesLibraryPage() {
   const [categories, setCategories] = useState([]);
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
   const [filters, setFilters] = useState(emptyFilters());
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
+  const [gridSize, setGridSize] = useState("m");
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  const [sortField, setSortField] = useState("title");
+  const [sortDir, setSortDir] = useState("asc");
+
+  const [colWidths, setColWidths] = useState({
+    title: 220, year: 70, players: 80, category: 120, designers: 140, publisher: 130, expansions: 80, ownership: 110,
+  });
+  const colResizingRef = useRef(false);
+
+  const makeResizeHandler = useCallback((col) => (e) => {
+    e.preventDefault();
+    colResizingRef.current = true;
+    const startX = e.clientX;
+    const startW = colWidths[col];
+    function onMove(ev) {
+      setColWidths((prev) => ({ ...prev, [col]: Math.max(50, startW + ev.clientX - startX) }));
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setTimeout(() => { colResizingRef.current = false; }, 0);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [colWidths]);
+
+  function handleHeaderSort(field) {
+    if (field === sortField) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
+
+  function sortIndicator(field) {
+    if (field !== sortField) return " ⇅";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
 
   function loadGames() {
     return listBoardgames().then(setGames);
@@ -478,172 +590,235 @@ export default function BoardgamesLibraryPage() {
     if (q) result = result.filter(g => g.title.toLowerCase().includes(q));
 
     if (sectionActive(filters.ownership)) {
-      result = result.filter(g => applySection(filters.ownership, g.ownership_status_id));
+      result = result.filter(g => applySection(filters.ownership, [g.ownership_status_id]));
     }
     if (sectionActive(filters.category)) {
-      result = result.filter(g => applySection(filters.category, g.top_level_category_id));
+      result = result.filter(g => applySection(filters.category, [g.top_level_category_id]));
     }
     if (sectionActive(filters.designer)) {
-      result = result.filter(g => (g.designers || []).some(d => applySection(filters.designer, d)));
+      result = result.filter(g => applySection(filters.designer, g.designers || []));
     }
     if (sectionActive(filters.publisher)) {
-      result = result.filter(g => g.publisher_name && applySection(filters.publisher, g.publisher_name));
+      result = result.filter(g => applySection(filters.publisher, g.publisher_name ? [g.publisher_name] : []));
     }
     return result;
   }, [games, filters]);
 
-  // Selection
-  const allFilteredIds = filteredGames.map(g => g.item_id);
-  const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.includes(id));
-
-  function toggleSelectAll() {
-    if (allSelected) setSelectedIds([]);
-    else setSelectedIds(allFilteredIds);
-  }
+  const sortedGames = useMemo(() => {
+    const arr = [...filteredGames];
+    const flip = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "year":
+        return arr.sort((a, b) => flip * ((a.year_published || 0) - (b.year_published || 0)));
+      case "category":
+        return arr.sort((a, b) => flip * ((a.category_name || "").localeCompare(b.category_name || "")));
+      case "publisher":
+        return arr.sort((a, b) => flip * ((a.publisher_name || "").localeCompare(b.publisher_name || "")));
+      case "ownership":
+        return arr.sort((a, b) => flip * ((a.ownership_status || "").localeCompare(b.ownership_status || "")));
+      default:
+        return arr.sort((a, b) => flip * ((a.title_sort || a.title || "").localeCompare(b.title_sort || b.title || "")));
+    }
+  }, [filteredGames, sortField, sortDir]);
 
   function toggleSelect(id) {
-    setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
-  function handleEditClose() { setEditId(null); }
+  function clearSelection() { setSelectedIds(new Set()); }
 
-  function handleSaved() {
-    setEditId(null);
-    loadGames();
+  function toggleSelectAll() {
+    if (sortedGames.length > 0 && sortedGames.every(g => selectedIds.has(g.item_id))) clearSelection();
+    else setSelectedIds(new Set(sortedGames.map(g => g.item_id)));
   }
 
-  function handleDeleted() {
-    setEditId(null);
-    setSelectedIds([]);
-    loadGames();
-  }
-
-  function handleBulkDone() {
-    setSelectedIds([]);
-    loadGames();
-  }
-
-  function handleBulkDeleted() {
-    setSelectedIds([]);
-    loadGames();
-  }
+  const allVisibleSelected = sortedGames.length > 0 && sortedGames.every(g => selectedIds.has(g.item_id));
 
   if (loading) return (
-    <div style={{ display: "flex", height: "100%" }}>
-      <div style={{ flex: 1, padding: 20, fontSize: 13 }}>Loading…</div>
-    </div>
+    <div style={{ padding: 20, fontSize: 13 }}>Loading…</div>
   );
 
   return (
-    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
-      {/* Sidebar */}
-      <BoardgameFilters
-        items={games}
-        categories={categories}
-        ownershipStatuses={ownershipStatuses}
-        filters={filters}
-        onSectionChange={handleSectionChange}
-        onClearAll={handleClearAll}
-      />
-
-      {/* Main content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "12px 16px" }}>
-        {error && <div style={alertError}>{error}</div>}
-
-        {/* Toolbar */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {filteredGames.length} game{filteredGames.length !== 1 ? "s" : ""}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {sortedGames.length} game{sortedGames.length !== 1 ? "s" : ""}
           </span>
-          <button onClick={() => setShowThumbnails(t => !t)} style={btnSecondary}>
-            {showThumbnails ? "Hide Thumbnails" : "Show Thumbnails"}
-          </button>
+          {selectedIds.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
+          )}
         </div>
-
-        {/* Bulk edit panel */}
-        {selectedIds.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            <BulkEditPanel
-              selectedIds={selectedIds}
-              categories={categories}
-              ownershipStatuses={ownershipStatuses}
-              onDone={handleBulkDone}
-              onDeleted={handleBulkDeleted}
-            />
-          </div>
-        )}
-
-        {/* Table */}
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: "var(--surface-2)", borderBottom: "2px solid var(--border)" }}>
-              <th style={{ width: 28, padding: "4px 6px" }}>
-                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
-              </th>
-              {showThumbnails && <th style={{ width: 40, padding: "4px 6px" }}></th>}
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Title</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Year</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Players</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Player Count</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Designers</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Publisher</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Expansions</th>
-              <th style={{ textAlign: "left", padding: "4px 8px" }}>Own.</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredGames.map((g, idx) => (
-              <tr
-                key={g.item_id}
-                style={{ borderBottom: "1px solid var(--border)", background: idx % 2 === 0 ? "var(--surface)" : "var(--surface-2)", cursor: "pointer" }}
-                onClick={() => setEditId(g.item_id)}
-              >
-                <td style={{ padding: "4px 6px" }} onClick={e => { e.stopPropagation(); toggleSelect(g.item_id); }}>
-                  <input type="checkbox" checked={selectedIds.includes(g.item_id)} onChange={() => {}} />
-                </td>
-                {showThumbnails && (
-                  <td style={{ padding: "2px 6px" }}>
-                    {g.cover_image_url
-                      ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 28, height: 40, objectFit: "cover", borderRadius: 2 }} onError={e => { e.target.style.display = "none"; }} />
-                      : <div style={{ width: 28, height: 40, background: "var(--border)", borderRadius: 2 }} />}
-                  </td>
-                )}
-                <td style={{ padding: "4px 8px", fontWeight: 500 }}>{g.title}</td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>{g.year_published || "—"}</td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>
-                  {g.min_players && g.max_players
-                    ? g.min_players === g.max_players ? g.min_players : `${g.min_players}–${g.max_players}`
-                    : g.min_players || g.max_players || "—"}
-                </td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>{g.category_name}</td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>{g.designers?.join(", ") || "—"}</td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>{g.publisher_name || "—"}</td>
-                <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>{g.expansion_count > 0 ? g.expansion_count : "—"}</td>
-                <td style={{ padding: "4px 8px" }}>
-                  <OwnershipBadge label={g.ownership_status} />
-                </td>
-              </tr>
-            ))}
-            {filteredGames.length === 0 && (
-              <tr>
-                <td colSpan={showThumbnails ? 10 : 9} style={{ padding: "20px 8px", textAlign: "center", color: "var(--text-secondary)", fontStyle: "italic" }}>
-                  No board games found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <SegmentedButtons
+            options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
+            value={viewMode} onChange={setViewMode} />
+          {viewMode === "table" && (
+            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+          )}
+          {viewMode === "grid" && (
+            <>
+              <SegmentedButtons
+                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                value={gridSize} onChange={setGridSize} />
+              <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Edit modal */}
+      {error && <div style={{ ...alertError, margin: "8px 12px" }}>{error}</div>}
+
+      {/* Body */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        <BoardgameFilters
+          items={games}
+          categories={categories}
+          ownershipStatuses={ownershipStatuses}
+          filters={filters}
+          onSectionChange={handleSectionChange}
+          onClearAll={handleClearAll}
+        />
+
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
+          {sortedGames.length === 0 ? (
+            <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No board games found.</p>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+              {sortedGames.map(g => (
+                <BoardgameGridItem key={g.item_id} game={g}
+                  isSelected={selectedIds.has(g.item_id)}
+                  onToggleSelect={toggleSelect}
+                  onClick={() => setEditId(g.item_id)}
+                  gridSize={gridSize} showCaptions={showCaptions} />
+              ))}
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 28 }} />
+                {showThumbnails && <col style={{ width: 50 }} />}
+                <col style={{ width: colWidths.title }} />
+                <col style={{ width: colWidths.year }} />
+                <col style={{ width: colWidths.players }} />
+                <col style={{ width: colWidths.category }} />
+                <col style={{ width: colWidths.designers }} />
+                <col style={{ width: colWidths.publisher }} />
+                <col style={{ width: colWidths.expansions }} />
+                <col style={{ width: colWidths.ownership }} />
+              </colgroup>
+              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid var(--border)" }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ margin: 0, cursor: "pointer" }} />
+                  </th>
+                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
+                  {[
+                    { key: "title", label: "Title", colKey: "title" },
+                    { key: "year", label: "Year", colKey: "year" },
+                    { key: null, label: "Players", colKey: "players" },
+                    { key: "category", label: "Player Count", colKey: "category" },
+                    { key: null, label: "Designers", colKey: "designers" },
+                    { key: "publisher", label: "Publisher", colKey: "publisher" },
+                    { key: null, label: "Expansions", colKey: "expansions" },
+                    { key: "ownership", label: "Ownership", colKey: "ownership" },
+                  ].map(({ key, label, colKey }) => (
+                    <th
+                      key={label}
+                      onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                      style={{
+                        padding: "5px 8px",
+                        textAlign: "left",
+                        position: "relative",
+                        userSelect: "none",
+                        cursor: key ? "pointer" : "default",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        borderRight: "1px solid var(--border)",
+                      }}
+                    >
+                      {label}{key ? sortIndicator(key) : ""}
+                      <div
+                        onMouseDown={makeResizeHandler(colKey)}
+                        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 1 }}
+                      />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedGames.map(g => {
+                  const isSelected = selectedIds.has(g.item_id);
+                  const players = g.min_players && g.max_players
+                    ? (g.min_players === g.max_players ? g.min_players : `${g.min_players}–${g.max_players}`)
+                    : (g.min_players || g.max_players || "—");
+                  return (
+                    <tr
+                      key={g.item_id}
+                      onClick={() => setEditId(g.item_id)}
+                      style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}
+                    >
+                      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }} onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(g.item_id)} style={{ margin: 0, cursor: "pointer" }} />
+                      </td>
+                      {showThumbnails && (
+                        <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
+                          {g.cover_image_url
+                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                        </td>
+                      )}
+                      <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.title}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{g.year_published || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{players}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.category_name}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.designers?.join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.publisher_name || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{g.expansion_count > 0 ? g.expansion_count : "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.ownership_status || "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {editId && (
-        <EditModal
+        <BoardgameDetailModal
           itemId={editId}
           categories={categories}
           ownershipStatuses={ownershipStatuses}
-          onClose={handleEditClose}
-          onSaved={handleSaved}
-          onDeleted={handleDeleted}
+          onClose={() => setEditId(null)}
+          onSaved={() => { setEditId(null); loadGames(); }}
+          onDeleted={() => {
+            setEditId(null);
+            loadGames();
+            setSelectedIds(prev => { const next = new Set(prev); next.delete(editId); return next; });
+          }}
+        />
+      )}
+
+      {bulkEditOpen && (
+        <BoardgameBulkEdit
+          selectedIds={[...selectedIds]}
+          categories={categories}
+          ownershipStatuses={ownershipStatuses}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); loadGames(); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); loadGames(); }}
         />
       )}
     </div>

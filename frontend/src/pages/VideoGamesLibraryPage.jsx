@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -23,15 +21,34 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess } from "../styles/commonStyles";
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
+import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
+};
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  return (
+    <div style={{
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
-function GameFilters({ items, ownershipStatuses, playStatuses, allGenres, filters, onSectionChange, onClearAll }) {
-
-
+function GameFilters({ items, ownershipStatuses, playStatuses, filters, onSectionChange, onClearAll }) {
   const allPlatformOptions = useMemo(() => {
     const seen = new Set();
     const result = [];
@@ -75,6 +92,7 @@ function GameFilters({ items, ownershipStatuses, playStatuses, allGenres, filter
     >
       <TriStateFilterSection
         title="Ownership"
+        defaultShown={2}
         items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
@@ -201,7 +219,7 @@ function CopiesEditor({ copies, allPlatforms, ownershipStatuses, onChange }) {
   return (
     <div>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
+        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
             <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
@@ -233,11 +251,48 @@ function CopiesEditor({ copies, allPlatforms, ownershipStatuses, onChange }) {
   );
 }
 
-// ─── Edit modal ───────────────────────────────────────────────────────────────
+// ─── Grid item ────────────────────────────────────────────────────────────────
 
-function EditModal({ itemId, ownershipStatuses, playStatuses, allGenres, allPlatforms, onClose, onSaved, onDeleted }) {
+const VideoGameGridItem = memo(function VideoGameGridItem({ game, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+  const { w, h } = GRID_SIZES[gridSize];
+  return (
+    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+      position: "relative", cursor: "pointer", width: w, flexShrink: 0,
+      outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
+      borderRadius: 3, boxSizing: "border-box",
+    }}>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(game.item_id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ margin: 0, cursor: "pointer" }} />
+        </div>
+        <OwnershipBadge statusName={game.ownership_status} />
+        {game.cover_image_url ? (
+          <img src={getImageUrl(game.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
+      {showCaptions && (
+        <div style={{ padding: "3px 2px 0", maxWidth: w }}>
+          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{game.title}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(game.platforms || []).join(", ")}</div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Detail modal ─────────────────────────────────────────────────────────────
+
+function VideoGameDetailModal({ itemId, ownershipStatuses, playStatuses, allGenres, allPlatforms, onClose, onSaved, onDeleted }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const coverFileRef = useRef(null);
@@ -312,212 +367,227 @@ function EditModal({ itemId, ownershipStatuses, playStatuses, allGenres, allPlat
   }
 
   async function handleDelete() {
-    setSaving(true);
+    setDeleting(true);
     try {
       await deleteVideoGame(itemId);
       onDeleted();
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setSaving(false);
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  if (!form) return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, padding: 24, minWidth: 300 }}>
-        {error ? <p style={{ color: "red" }}>{error}</p> : <p style={{ fontSize: 13 }}>Loading…</p>}
-        <button onClick={onClose} style={btnSecondary}>Close</button>
-      </div>
-    </div>
-  );
-
-
-
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}>
-        {/* Header */}
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>Edit Game</span>
-          <button onClick={onClose} style={{ ...btnSm, fontSize: 14 }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Game Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
         </div>
 
-        {/* Cover banner */}
-        {form.coverImageUrl && (
-          <div style={{ padding: "10px 16px 0", display: "flex", gap: 12 }}>
-            <img src={form.coverImageUrl} alt="cover" style={{ width: 60, height: 85, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => {}} />
-          </div>
-        )}
-
-        <div style={{ padding: 16 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
           {error && <div style={alertError}>{error}</div>}
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-          </div>
+          {form && (
+            <>
+              {form.coverImageUrl && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{form.developers.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Play Status</label>
-              <select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Title *</label>
+                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Release Date</label>
-            <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={{ ...inputStyle, maxWidth: 180 }} placeholder="YYYY-MM-DD" />
-          </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={labelStyle}>Ownership *</label>
+                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Play Status</label>
+                  <select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)} style={selectStyle}>
+                    <option value="">None</option>
+                    {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Developer(s)</label>
-            <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="Developer name" />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Release Date</label>
+                <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={{ ...inputStyle, maxWidth: 180 }} placeholder="YYYY-MM-DD" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher(s)</label>
-            <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="Publisher name" />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Developer(s)</label>
+                <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="Developer name" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Genre</label>
-            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Publisher(s)</label>
+                <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="Publisher name" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 48, width: 34, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />}
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Genre</label>
+                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Cover Image URL</label>
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
+              </div>
 
-          <div style={{ marginBottom: 4 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Copies</label>
-            <CopiesEditor
-              copies={form.copies}
-              allPlatforms={allPlatforms}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("copies", v)}
-            />
-          </div>
-        </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
+              </div>
 
-        {/* Footer */}
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save"}</button>
-            <button onClick={onClose} style={btnSecondary}>Cancel</button>
-          </div>
-          {confirmDelete ? (
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--error)" }}>Delete this game?</span>
-              <button onClick={handleDelete} disabled={saving} style={{ ...btnDanger, fontSize: 12, padding: "3px 10px" }}>Yes, delete</button>
-              <button onClick={() => setConfirmDelete(false)} style={{ ...btnSm }}>No</button>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmDelete(true)} style={{ ...btnSm, color: "var(--error)", border: "1px solid var(--error)" }}>Delete</button>
+              <div style={{ marginBottom: 4 }}>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>Copies</label>
+                <CopiesEditor
+                  copies={form.copies}
+                  allPlatforms={allPlatforms}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("copies", v)}
+                />
+              </div>
+            </>
           )}
         </div>
+
+        {form && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              {!confirmDelete
+                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this game?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Bulk edit panel ──────────────────────────────────────────────────────────
+// ─── Bulk edit modal ──────────────────────────────────────────────────────────
 
-function BulkEditPanel({ selectedIds, ownershipStatuses, playStatuses, onDone, onDeleted }) {
-  const [ownershipId, setOwnershipId] = useState("");
-  const [playStatusId, setPlayStatusId] = useState("");
+function BulkField({ label, enabled, onToggle, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
+      </label>
+      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
+    </div>
+  );
+}
+
+function VideoGameBulkEdit({ selectedIds, ownershipStatuses, playStatuses, onClose, onSaved, onDeleted }) {
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
+
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updatePlayStatus, setUpdatePlayStatus] = useState(false);
+  const [playStatusId, setPlayStatusId] = useState(String(playStatuses[0]?.play_status_id || ""));
+
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
+  const anyEnabled = updateOwnership || updatePlayStatus;
 
-
-  async function handleApply() {
-    if (!ownershipId && !playStatusId) return;
+  async function handleSave() {
+    if (!anyEnabled) { setError("Select at least one field to update."); return; }
+    const fields = {};
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipId);
+    if (updatePlayStatus) fields.play_status_id = Number(playStatusId);
     setSaving(true); setError("");
-    try {
-      const fields = {};
-      if (ownershipId) fields.ownership_status_id = parseInt(ownershipId, 10);
-      if (playStatusId) fields.play_status_id = parseInt(playStatusId, 10);
-      await bulkUpdateVideoGames(selectedIds, fields);
-      onDone();
-    } catch (err) {
-      setError(err.message || "Bulk update failed.");
-      setSaving(false);
-    }
+    try { await bulkUpdateVideoGames(selectedIds, fields); onSaved(); }
+    catch (err) { setError(err.message || "Failed to update"); }
+    finally { setSaving(false); }
   }
 
   async function handleDelete() {
-    setSaving(true);
-    try {
-      await bulkDeleteVideoGames(selectedIds);
-      onDeleted();
-    } catch (err) {
-      setError(err.message || "Bulk delete failed.");
-      setSaving(false);
-    }
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try { await bulkDeleteVideoGames(selectedIds); onDeleted(); }
+    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
   }
 
   return (
-    <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4, padding: "8px 12px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-      <span style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)" }}>{selectedIds.length} selected</span>
-      <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 120, fontSize: 12 }}>
-        <option value="">Ownership…</option>
-        {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-      </select>
-      <select value={playStatusId} onChange={e => setPlayStatusId(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130, fontSize: 12 }}>
-        <option value="">Play Status…</option>
-        {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
-      </select>
-      <button onClick={handleApply} disabled={saving || (!ownershipId && !playStatusId)} style={{ ...btnPrimary, fontSize: 12, padding: "4px 10px" }}>Apply</button>
-      {error && <span style={{ fontSize: 11, color: "var(--error)" }}>{error}</span>}
-      <div style={{ marginLeft: "auto" }}>
-        {confirmDelete ? (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "var(--error)" }}>Delete {selectedIds.length} games?</span>
-            <button onClick={handleDelete} disabled={saving} style={{ ...btnDanger, fontSize: 12, padding: "3px 10px" }}>Yes</button>
-            <button onClick={() => setConfirmDelete(false)} style={btnSm}>No</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
+        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
+          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
+              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+          <BulkField label="Play Status" enabled={updatePlayStatus} onToggle={() => setUpdatePlayStatus((p) => !p)}>
+            <select value={playStatusId} onChange={(e) => setPlayStatusId(e.target.value)} style={fieldStyle}>
+              {playStatuses.map((s) => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
+            </select>
+          </BulkField>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
           </div>
-        ) : (
-          <button onClick={() => setConfirmDelete(true)} style={{ ...btnSm, color: "var(--error)", border: "1px solid var(--error)" }}>Delete {selectedIds.length}</button>
-        )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
+          </div>
+        </div>
       </div>
     </div>
-  );
-}
-
-// ─── Ownership badge ──────────────────────────────────────────────────────────
-
-const OWNERSHIP_COLORS = { Owned: "#39ff14", Wanted: "#ffff00", Trade: "#00ffff" };
-function OwnershipBadge({ label }) {
-  const letter = label ? label[0] : "?";
-  const color = OWNERSHIP_COLORS[label] || "#aaa";
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "#111", color, fontSize: 10, fontWeight: "bold", border: `1px solid ${color}`, flexShrink: 0 }}>{letter}</span>
   );
 }
 
@@ -540,11 +610,51 @@ export default function VideoGamesLibraryPage() {
   const [allGenres, setAllGenres] = useState([]);
   const [allPlatforms, setAllPlatforms] = useState([]);
   const [filters, setFilters] = useState(emptyFilters());
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
+  const [gridSize, setGridSize] = useState("m");
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  const [sortField, setSortField] = useState("title");
+  const [sortDir, setSortDir] = useState("asc");
+
+  const [colWidths, setColWidths] = useState({
+    title: 220, platform: 150, developer: 150, genre: 150, playStatus: 110, ownership: 110,
+  });
+  const colResizingRef = useRef(false);
+
+  const makeResizeHandler = useCallback((col) => (e) => {
+    e.preventDefault();
+    colResizingRef.current = true;
+    const startX = e.clientX;
+    const startW = colWidths[col];
+    function onMove(ev) {
+      setColWidths((prev) => ({ ...prev, [col]: Math.max(50, startW + ev.clientX - startX) }));
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setTimeout(() => { colResizingRef.current = false; }, 0);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [colWidths]);
+
+  function handleHeaderSort(field) {
+    if (field === sortField) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
+
+  function sortIndicator(field) {
+    if (field !== sortField) return " ⇅";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
 
   function loadGames() {
     return listVideoGames().then(setGames);
@@ -596,50 +706,72 @@ export default function VideoGamesLibraryPage() {
     return result;
   }, [games, filters]);
 
+  const sortedGames = useMemo(() => {
+    const arr = [...filteredGames];
+    const flip = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "playStatus":
+        return arr.sort((a, b) => flip * ((a.play_status || "").localeCompare(b.play_status || "")));
+      case "ownership":
+        return arr.sort((a, b) => flip * ((a.ownership_status || "").localeCompare(b.ownership_status || "")));
+      default:
+        return arr.sort((a, b) => flip * ((a.title_sort || a.title || "").localeCompare(b.title_sort || b.title || "")));
+    }
+  }, [filteredGames, sortField, sortDir]);
+
   function toggleSelect(id) {
-    setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
+
+  function clearSelection() { setSelectedIds(new Set()); }
 
   function toggleSelectAll() {
-    if (selectedIds.length === filteredGames.length) setSelectedIds([]);
-    else setSelectedIds(filteredGames.map(g => g.item_id));
+    if (sortedGames.length > 0 && sortedGames.every(g => selectedIds.has(g.item_id))) clearSelection();
+    else setSelectedIds(new Set(sortedGames.map(g => g.item_id)));
   }
 
-  const allSelected = filteredGames.length > 0 && selectedIds.length === filteredGames.length;
+  const allVisibleSelected = sortedGames.length > 0 && sortedGames.every(g => selectedIds.has(g.item_id));
 
   if (loading) return <div style={{ padding: 24, fontSize: 13 }}>Loading…</div>;
   if (error) return <div style={{ padding: 24 }}><p style={alertError}>{error}</p></div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
       {/* Controls bar */}
-      <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "var(--surface)", flexShrink: 0 }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          {filteredGames.length} game{filteredGames.length !== 1 ? "s" : ""}
-          {selectedIds.length > 0 && ` · ${selectedIds.length} selected`}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            onClick={() => setShowThumbnails(t => !t)}
-            style={{ ...btnSm, background: showThumbnails ? "var(--btn-primary-bg)" : undefined, color: showThumbnails ? "var(--btn-primary-text)" : undefined }}
-          >
-            Thumbnails
-          </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {sortedGames.length} game{sortedGames.length !== 1 ? "s" : ""}
+          </span>
+          {selectedIds.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <SegmentedButtons
+            options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
+            value={viewMode} onChange={setViewMode} />
+          {viewMode === "table" && (
+            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+          )}
+          {viewMode === "grid" && (
+            <>
+              <SegmentedButtons
+                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                value={gridSize} onChange={setGridSize} />
+              <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
+            </>
+          )}
         </div>
       </div>
-
-      {/* Bulk edit */}
-      {selectedIds.length > 0 && (
-        <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <BulkEditPanel
-            selectedIds={selectedIds}
-            ownershipStatuses={ownershipStatuses}
-            playStatuses={playStatuses}
-            onDone={() => { loadGames(); setSelectedIds([]); }}
-            onDeleted={() => { loadGames(); setSelectedIds([]); }}
-          />
-        </div>
-      )}
 
       {/* Body */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -647,68 +779,105 @@ export default function VideoGamesLibraryPage() {
           items={games}
           ownershipStatuses={ownershipStatuses}
           playStatuses={playStatuses}
-          allGenres={allGenres}
           filters={filters}
           onSectionChange={handleSectionChange}
           onClearAll={handleClearAll}
         />
 
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {filteredGames.length === 0 ? (
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
+          {sortedGames.length === 0 ? (
             <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No games match current filters.</p>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+              {sortedGames.map(g => (
+                <VideoGameGridItem key={g.item_id} game={g}
+                  isSelected={selectedIds.has(g.item_id)}
+                  onToggleSelect={toggleSelect}
+                  onClick={() => setEditId(g.item_id)}
+                  gridSize={gridSize} showCaptions={showCaptions} />
+              ))}
+            </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "var(--surface-2)", borderBottom: "2px solid var(--border)" }}>
-                  <th style={{ padding: "5px 8px", width: 28, textAlign: "center" }}>
-                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 28 }} />
+                {showThumbnails && <col style={{ width: 50 }} />}
+                <col style={{ width: colWidths.title }} />
+                <col style={{ width: colWidths.platform }} />
+                <col style={{ width: colWidths.developer }} />
+                <col style={{ width: colWidths.genre }} />
+                <col style={{ width: colWidths.playStatus }} />
+                <col style={{ width: colWidths.ownership }} />
+              </colgroup>
+              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid var(--border)" }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ margin: 0, cursor: "pointer" }} />
                   </th>
-                  {showThumbnails && <th style={{ padding: "5px 6px", width: 44 }}></th>}
-                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Title</th>
-                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Platform(s)</th>
-                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Developer</th>
-                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Genre</th>
-                  <th style={{ padding: "5px 8px", textAlign: "left" }}>Play Status</th>
-                  <th style={{ padding: "5px 8px", width: 28, textAlign: "center" }}>Own</th>
+                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
+                  {[
+                    { key: "title", label: "Title", colKey: "title" },
+                    { key: null, label: "Platform(s)", colKey: "platform" },
+                    { key: null, label: "Developer", colKey: "developer" },
+                    { key: null, label: "Genre", colKey: "genre" },
+                    { key: "playStatus", label: "Play Status", colKey: "playStatus" },
+                    { key: "ownership", label: "Ownership", colKey: "ownership" },
+                  ].map(({ key, label, colKey }) => (
+                    <th
+                      key={label}
+                      onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                      style={{
+                        padding: "5px 8px",
+                        textAlign: "left",
+                        position: "relative",
+                        userSelect: "none",
+                        cursor: key ? "pointer" : "default",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        borderRight: "1px solid var(--border)",
+                      }}
+                    >
+                      {label}{key ? sortIndicator(key) : ""}
+                      <div
+                        onMouseDown={makeResizeHandler(colKey)}
+                        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 1 }}
+                      />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredGames.map(g => (
-                  <tr
-                    key={g.item_id}
-                    onClick={() => setEditId(g.item_id)}
-                    style={{
-                      borderBottom: "1px solid var(--border)",
-                      cursor: "pointer",
-                      background: selectedIds.includes(g.item_id) ? "var(--row-selected, #e8f5e9)" : undefined,
-                    }}
-                    onMouseEnter={e => { if (!selectedIds.includes(g.item_id)) e.currentTarget.style.background = "var(--row-hover, #f5f5f5)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = selectedIds.includes(g.item_id) ? "var(--row-selected, #e8f5e9)" : ""; }}
-                  >
-                    <td style={{ padding: "4px 8px", textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(g.item_id); }}>
-                      <input type="checkbox" checked={selectedIds.includes(g.item_id)} onChange={() => {}} />
-                    </td>
-                    {showThumbnails && (
-                      <td style={{ padding: "2px 4px" }}>
-                        {getImageUrl(g.cover_image_url)
-                          ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 36, height: 50, objectFit: "cover", display: "block" }} />
-                          : <div style={{ width: 36, height: 50, background: "var(--border)", borderRadius: 2 }} />}
+                {sortedGames.map(g => {
+                  const isSelected = selectedIds.has(g.item_id);
+                  return (
+                    <tr
+                      key={g.item_id}
+                      onClick={() => setEditId(g.item_id)}
+                      style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}
+                    >
+                      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }} onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(g.item_id)} style={{ margin: 0, cursor: "pointer" }} />
                       </td>
-                    )}
-                    <td style={{ padding: "4px 8px", fontWeight: 500, color: "var(--text-primary)" }}>{g.title}</td>
-                    <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>
-                      {(g.platforms || []).join(", ") || "—"}
-                    </td>
-                    <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>{(g.developers || []).join(", ") || "—"}</td>
-                    <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>
-                      {(g.genres || []).slice(0, 2).join(", ")}{g.genres?.length > 2 ? "…" : ""}
-                    </td>
-                    <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>{g.play_status || "—"}</td>
-                    <td style={{ padding: "4px 8px", textAlign: "center" }}>
-                      <OwnershipBadge label={g.ownership_status} />
-                    </td>
-                  </tr>
-                ))}
+                      {showThumbnails && (
+                        <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
+                          {g.cover_image_url
+                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                        </td>
+                      )}
+                      <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.title}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.platforms || []).join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.developers || []).join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                        {(g.genres || []).slice(0, 2).join(", ")}{g.genres?.length > 2 ? "…" : ""}
+                      </td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.play_status || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.ownership_status || "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -716,7 +885,7 @@ export default function VideoGamesLibraryPage() {
       </div>
 
       {editId && (
-        <EditModal
+        <VideoGameDetailModal
           itemId={editId}
           ownershipStatuses={ownershipStatuses}
           playStatuses={playStatuses}
@@ -724,7 +893,22 @@ export default function VideoGamesLibraryPage() {
           allPlatforms={allPlatforms}
           onClose={() => setEditId(null)}
           onSaved={() => { setEditId(null); loadGames(); }}
-          onDeleted={() => { setEditId(null); loadGames(); setSelectedIds(ids => ids.filter(i => i !== editId)); }}
+          onDeleted={() => {
+            setEditId(null);
+            loadGames();
+            setSelectedIds(prev => { const next = new Set(prev); next.delete(editId); return next; });
+          }}
+        />
+      )}
+
+      {bulkEditOpen && (
+        <VideoGameBulkEdit
+          selectedIds={[...selectedIds]}
+          ownershipStatuses={ownershipStatuses}
+          playStatuses={playStatuses}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); loadGames(); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); loadGames(); }}
         />
       )}
     </div>

@@ -61,6 +61,7 @@ from routers import (
     ingest,
     export,
     admin,
+    admin_lookups,
 )
 
 app.include_router(shared.router)
@@ -75,6 +76,7 @@ app.include_router(ttrpg.router)
 app.include_router(ingest.router)
 app.include_router(export.router)
 app.include_router(admin.router)
+app.include_router(admin_lookups.router)
 
 # ---------- Frontend SPA (must be last) ----------
 admin.register_frontend_static(app)

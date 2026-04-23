@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -25,15 +23,34 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, row2 } from "../styles/commonStyles";
+import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, row2, GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
+import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+
+const OWNERSHIP_BADGE_COLORS = {
+  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
+};
+
+function OwnershipBadge({ statusName }) {
+  if (!statusName) return null;
+  const initial = statusName[0].toUpperCase();
+  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  return (
+    <div style={{
+      position: "absolute", bottom: 4, left: 4,
+      background: "#000", color,
+      fontWeight: 700, fontSize: 12, lineHeight: "12px",
+      padding: "3px 5px", borderRadius: 4, zIndex: 2,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
 function TTRPGFilters({ items, systems, bookTypes, ownershipStatuses, filters, onSectionChange, onClearAll }) {
-
-
   const allAuthors = useMemo(() => {
     const seen = new Set();
     const result = [];
@@ -63,6 +80,7 @@ function TTRPGFilters({ items, systems, bookTypes, ownershipStatuses, filters, o
     >
       <TriStateFilterSection
         title="Ownership"
+        defaultShown={2}
         items={ownershipStatuses.map(s => ({ id: s.ownership_status_id, label: s.status_name }))}
         section={filters.ownership}
         onChange={s => onSectionChange("ownership", s)}
@@ -95,8 +113,6 @@ function TTRPGFilters({ items, systems, bookTypes, ownershipStatuses, filters, o
   );
 }
 
-// ─── NameList ─────────────────────────────────────────────────────────────────
-
 // ─── Copies editor (edit modal) ───────────────────────────────────────────────
 
 function CopiesEditor({ copies, formatTypes, ownershipStatuses, onChange }) {
@@ -111,7 +127,7 @@ function CopiesEditor({ copies, formatTypes, ownershipStatuses, onChange }) {
   return (
     <div>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
+        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
             <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
@@ -153,11 +169,48 @@ function CopiesEditor({ copies, formatTypes, ownershipStatuses, onChange }) {
   );
 }
 
-// ─── Edit modal ───────────────────────────────────────────────────────────────
+// ─── Grid item ────────────────────────────────────────────────────────────────
 
-function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses, onClose, onSaved, onDeleted }) {
+const TtrpgGridItem = memo(function TtrpgGridItem({ book, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
+  const { w, h } = GRID_SIZES[gridSize];
+  return (
+    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+      position: "relative", cursor: "pointer", width: w, flexShrink: 0,
+      outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
+      borderRadius: 3, boxSizing: "border-box",
+    }}>
+      <div style={{ position: "relative", width: w, height: h }}>
+        <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
+          <input type="checkbox" checked={isSelected}
+            onChange={() => onToggleSelect(book.item_id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ margin: 0, cursor: "pointer" }} />
+        </div>
+        <OwnershipBadge statusName={book.ownership_status} />
+        {book.cover_image_url ? (
+          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+        ) : (
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          </div>
+        )}
+      </div>
+      {showCaptions && (
+        <div style={{ padding: "3px 2px 0", maxWidth: w }}>
+          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.category_name || ""}</div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Detail modal ─────────────────────────────────────────────────────────────
+
+function TtrpgDetailModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses, onClose, onSaved, onDeleted }) {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [systemEditions, setSystemEditions] = useState([]);
@@ -200,7 +253,6 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
           notes: c.notes || "",
         })) || [],
       });
-      // Load scoped lookups for this system
       if (d.top_level_category_id) {
         Promise.all([
           fetchTtrpgSystemEditions(d.top_level_category_id),
@@ -210,7 +262,6 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
     }).catch(() => setError("Failed to load TTRPG book."));
   }, [itemId]);
 
-  // Reload editions + lines when system changes in edit modal
   useEffect(() => {
     if (!form?.systemId) { setSystemEditions([]); setLines([]); return; }
     const id = parseInt(form.systemId, 10);
@@ -258,150 +309,150 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
   }
 
   async function handleDelete() {
-    setSaving(true);
+    setDeleting(true);
     try {
       await deleteTtrpg(itemId);
       onDeleted();
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setSaving(false);
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  if (!form) return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, padding: 24, minWidth: 300 }}>
-        {error ? <p style={{ color: "red" }}>{error}</p> : <p style={{ fontSize: 13 }}>Loading…</p>}
-        <button onClick={onClose} style={btnSecondary}>Close</button>
-      </div>
-    </div>
-  );
-
-
-
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, width: 680, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}>
-        {/* Header */}
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>Edit TTRPG Book</span>
-          <button onClick={onClose} style={{ ...btnSm, fontSize: 14 }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "TTRPG Book Detail"}</div>
+          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
         </div>
 
-        {form.coverImageUrl && (
-          <div style={{ padding: "10px 16px 0" }}>
-            <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ width: 60, height: 85, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => {}} />
-          </div>
-        )}
-
-        <div style={{ padding: 16 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
           {error && <div style={alertError}>{error}</div>}
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-          </div>
+          {form && (
+            <>
+              {form.coverImageUrl && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+                  <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
+                    <div style={{ fontSize: 12, color: "#555" }}>{form.authors.filter(Boolean).join(", ")}</div>
+                  </div>
+                </div>
+              )}
 
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Game System *</label>
-              <select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }} style={selectStyle}>
-                {systems.map(s => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Title *</label>
+                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
+              </div>
 
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>System Edition</label>
-              <input value={form.systemEditionName} onChange={e => set("systemEditionName", e.target.value)} style={inputStyle} placeholder="e.g. 5e" list="edit-edition-list" />
-              <datalist id="edit-edition-list">
-                {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
-              </datalist>
-            </div>
-            <div>
-              <label style={labelStyle}>Line / Setting</label>
-              <input value={form.lineName} onChange={e => set("lineName", e.target.value)} style={inputStyle} placeholder="e.g. Forgotten Realms" list="edit-line-list" />
-              <datalist id="edit-line-list">
-                {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
-              </datalist>
-            </div>
-          </div>
+              <div style={row2}>
+                <div>
+                  <label style={labelStyle}>Game System *</label>
+                  <select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }} style={selectStyle}>
+                    {systems.map(s => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Ownership *</label>
+                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </select>
+                </div>
+              </div>
 
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Book Type</label>
-              <select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {bookTypes.map(bt => <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Release Date</label>
-              <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY or YYYY-MM-DD" />
-            </div>
-          </div>
+              <div style={row2}>
+                <div>
+                  <label style={labelStyle}>System Edition</label>
+                  <input value={form.systemEditionName} onChange={e => set("systemEditionName", e.target.value)} style={inputStyle} placeholder="e.g. 5e" list="edit-edition-list" />
+                  <datalist id="edit-edition-list">
+                    {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
+                  </datalist>
+                </div>
+                <div>
+                  <label style={labelStyle}>Line / Setting</label>
+                  <input value={form.lineName} onChange={e => set("lineName", e.target.value)} style={inputStyle} placeholder="e.g. Forgotten Realms" list="edit-line-list" />
+                  <datalist id="edit-line-list">
+                    {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
+                  </datalist>
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher</label>
-            <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} />
-          </div>
+              <div style={row2}>
+                <div>
+                  <label style={labelStyle}>Book Type</label>
+                  <select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)} style={selectStyle}>
+                    <option value="">Select…</option>
+                    {bookTypes.map(bt => <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Release Date</label>
+                  <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY or YYYY-MM-DD" />
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Author(s)</label>
-            <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="Author name" />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Publisher</label>
+                <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 48, width: 34, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />}
-            </div>
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Author(s)</label>
+                <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="Author name" />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Cover Image URL</label>
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+                  {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>Description</label>
+                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
+              </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Copies / Formats</label>
-            <CopiesEditor copies={form.copies} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} onChange={v => set("copies", v)} />
-          </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Notes</label>
+                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
+              </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save"}</button>
-              <button onClick={onClose} style={btnSecondary}>Cancel</button>
-            </div>
+              <div style={{ marginBottom: 4 }}>
+                <label style={{ ...labelStyle, marginBottom: 6 }}>Copies / Formats</label>
+                <CopiesEditor copies={form.copies} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} onChange={v => set("copies", v)} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {form && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
             <div>
               {!confirmDelete
-                ? <button onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : (
-                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Confirm?</span>
-                    <button onClick={handleDelete} disabled={saving} style={btnDanger}>Yes, Delete</button>
-                    <button onClick={() => setConfirmDelete(false)} style={btnSecondary}>No</button>
-                  </span>
-                )}
+                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
+                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this book?</span>
+                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
+                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
+                  </div>
+              }
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -409,55 +460,87 @@ function EditModal({ itemId, systems, bookTypes, formatTypes, ownershipStatuses,
 
 // ─── Bulk edit modal ──────────────────────────────────────────────────────────
 
-function BulkEditModal({ selectedIds, systems, ownershipStatuses, onClose, onSaved }) {
-  const [ownershipId, setOwnershipId] = useState("");
-  const [systemId, setSystemId] = useState("");
+function BulkField({ label, enabled, onToggle, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
+      </label>
+      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
+    </div>
+  );
+}
+
+function TtrpgBulkEdit({ selectedIds, systems, ownershipStatuses, onClose, onSaved, onDeleted }) {
+  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
+
+  const [updateOwnership, setUpdateOwnership] = useState(false);
+  const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
+  const [updateSystem, setUpdateSystem] = useState(false);
+  const [systemId, setSystemId] = useState(String(systems[0]?.top_level_category_id || ""));
+
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
+  const anyEnabled = updateOwnership || updateSystem;
 
   async function handleSave() {
-    if (!ownershipId && !systemId) { setError("Select at least one field to update."); return; }
+    if (!anyEnabled) { setError("Select at least one field to update."); return; }
+    const fields = {};
+    if (updateOwnership) fields.ownership_status_id = Number(ownershipId);
+    if (updateSystem) fields.top_level_category_id = Number(systemId);
     setSaving(true); setError("");
-    try {
-      const fields = {};
-      if (ownershipId) fields.ownership_status_id = parseInt(ownershipId, 10);
-      if (systemId) fields.top_level_category_id = parseInt(systemId, 10);
-      await bulkUpdateTtrpg({ item_ids: selectedIds, fields });
-      onSaved();
-    } catch (err) {
-      setError(err.message || "Bulk update failed.");
-    } finally {
-      setSaving(false);
-    }
+    try { await bulkUpdateTtrpg(selectedIds, fields); onSaved(); }
+    catch (err) { setError(err.message || "Failed to update"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try { await bulkDeleteTtrpg(selectedIds); onDeleted(); }
+    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    finally { setDeleting(false); }
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-surface)", borderRadius: 6, width: 420, maxWidth: "95vw", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>Bulk Edit ({selectedIds.length} items)</span>
-          <button onClick={onClose} style={{ ...btnSm, fontSize: 14 }}>✕</button>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} book{selectedIds.length !== 1 ? "s" : ""}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
         </div>
-        <div style={{ padding: 16 }}>
-          {error && <div style={alertError}>{error}</div>}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Set Ownership</label>
-            <select value={ownershipId} onChange={e => setOwnershipId(e.target.value)} style={selectStyle}>
-              <option value="">No change</option>
-              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
+        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
+          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
+              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
             </select>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>Set Game System</label>
-            <select value={systemId} onChange={e => setSystemId(e.target.value)} style={selectStyle}>
-              <option value="">No change</option>
-              {systems.map(s => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
+          </BulkField>
+          <BulkField label="Game System" enabled={updateSystem} onToggle={() => setUpdateSystem((p) => !p)}>
+            <select value={systemId} onChange={(e) => setSystemId(e.target.value)} style={fieldStyle}>
+              {systems.map((s) => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
             </select>
+          </BulkField>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
+          <div>
+            {!confirmDelete
+              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} book{selectedIds.length !== 1 ? "s" : ""}</button>
+              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
+                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
+                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
+                </span>
+            }
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Apply"}</button>
-            <button onClick={onClose} style={btnSecondary}>Cancel</button>
+            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
           </div>
         </div>
       </div>
@@ -465,7 +548,7 @@ function BulkEditModal({ selectedIds, systems, ownershipStatuses, onClose, onSav
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 function emptyFilters() {
   return {
@@ -478,36 +561,6 @@ function emptyFilters() {
   };
 }
 
-function matchesFilters(book, filters) {
-  if (filters.search.trim()) {
-    const q = filters.search.trim().toLowerCase();
-    if (!book.title.toLowerCase().includes(q)) return false;
-  }
-  if (sectionActive(filters.ownership)) {
-    const state = getItemState(filters.ownership, book.ownership_status_id);
-    if (!applySection(state)) return false;
-  }
-  if (sectionActive(filters.system)) {
-    const state = getItemState(filters.system, book.top_level_category_id);
-    if (!applySection(state)) return false;
-  }
-  if (sectionActive(filters.bookType)) {
-    const state = getItemState(filters.bookType, book.book_type_id);
-    if (!applySection(state)) return false;
-  }
-  if (sectionActive(filters.author)) {
-    const match = (book.authors || []).some(a => applySection(getItemState(filters.author, a)));
-    if (!match) return false;
-  }
-  if (sectionActive(filters.publisher)) {
-    const state = getItemState(filters.publisher, book.publisher_name);
-    if (!applySection(state)) return false;
-  }
-  return true;
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
-
 export default function TTRPGLibraryPage() {
   const [items, setItems] = useState([]);
   const [systems, setSystems] = useState([]);
@@ -517,12 +570,49 @@ export default function TTRPGLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState(emptyFilters);
-  const [showThumbs, setShowThumbs] = useState(false);
   const [editId, setEditId] = useState(null);
   const [selected, setSelected] = useState(new Set());
-  const [showBulkEdit, setShowBulkEdit] = useState(false);
-  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
-  const [actionMsg, setActionMsg] = useState("");
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const [viewMode, setViewMode] = useState("table");
+  const [showThumbnails, setShowThumbnails] = useState(false);
+  const [gridSize, setGridSize] = useState("m");
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  const [sortField, setSortField] = useState("title");
+  const [sortDir, setSortDir] = useState("asc");
+
+  const [colWidths, setColWidths] = useState({
+    title: 220, system: 140, edition: 160, bookType: 110, authors: 150, copies: 130,
+  });
+  const colResizingRef = useRef(false);
+
+  const makeResizeHandler = useCallback((col) => (e) => {
+    e.preventDefault();
+    colResizingRef.current = true;
+    const startX = e.clientX;
+    const startW = colWidths[col];
+    function onMove(ev) {
+      setColWidths((prev) => ({ ...prev, [col]: Math.max(50, startW + ev.clientX - startX) }));
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setTimeout(() => { colResizingRef.current = false; }, 0);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [colWidths]);
+
+  function handleHeaderSort(field) {
+    if (field === sortField) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
+
+  function sortIndicator(field) {
+    if (field !== sortField) return " ⇅";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -547,7 +637,38 @@ export default function TTRPGLibraryPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const filtered = useMemo(() => items.filter(b => matchesFilters(b, filters)), [items, filters]);
+  const filtered = useMemo(() => {
+    return items.filter(b => {
+      if (filters.search.trim()) {
+        const q = filters.search.trim().toLowerCase();
+        if (!b.title.toLowerCase().includes(q)) return false;
+      }
+      if (sectionActive(filters.ownership)
+          && !applySection(filters.ownership, [b.ownership_status_id])) return false;
+      if (sectionActive(filters.system)
+          && !applySection(filters.system, [b.top_level_category_id])) return false;
+      if (sectionActive(filters.bookType)
+          && !applySection(filters.bookType, b.book_type_id != null ? [b.book_type_id] : [])) return false;
+      if (sectionActive(filters.author)
+          && !applySection(filters.author, b.authors || [])) return false;
+      if (sectionActive(filters.publisher)
+          && !applySection(filters.publisher, b.publisher_name ? [b.publisher_name] : [])) return false;
+      return true;
+    });
+  }, [items, filters]);
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const flip = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "system":
+        return arr.sort((a, b) => flip * ((a.category_name || "").localeCompare(b.category_name || "")));
+      case "bookType":
+        return arr.sort((a, b) => flip * ((a.book_type_name || "").localeCompare(b.book_type_name || "")));
+      default:
+        return arr.sort((a, b) => flip * ((a.title_sort || a.title || "").localeCompare(b.title_sort || b.title || "")));
+    }
+  }, [filtered, sortField, sortDir]);
 
   function handleSectionChange(key, val) {
     setFilters(f => ({ ...f, [key]: val }));
@@ -556,146 +677,172 @@ export default function TTRPGLibraryPage() {
   function toggleSelect(id) {
     setSelected(s => {
       const next = new Set(s);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
 
+  function clearSelection() { setSelected(new Set()); }
+
   function toggleSelectAll() {
-    if (selected.size === filtered.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(filtered.map(b => b.item_id)));
-    }
+    if (sorted.length > 0 && sorted.every(b => selected.has(b.item_id))) clearSelection();
+    else setSelected(new Set(sorted.map(b => b.item_id)));
   }
 
-  async function handleBulkDelete() {
-    try {
-      await bulkDeleteTtrpg({ item_ids: [...selected] });
-      setSelected(new Set());
-      setBulkDeleteConfirm(false);
-      setActionMsg(`Deleted ${selected.size} item(s).`);
-      loadData();
-    } catch (err) {
-      setActionMsg("Bulk delete failed.");
-    }
-  }
-
-  const bookTypeMap = useMemo(() => Object.fromEntries(bookTypes.map(bt => [bt.book_type_id, bt.book_type_name])), [bookTypes]);
+  const allVisibleSelected = sorted.length > 0 && sorted.every(b => selected.has(b.item_id));
 
   return (
-    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
-      {/* Sidebar */}
-      <TTRPGFilters
-        items={items}
-        systems={systems}
-        bookTypes={bookTypes}
-        ownershipStatuses={ownershipStatuses}
-        filters={filters}
-        onSectionChange={handleSectionChange}
-        onClearAll={() => setFilters(emptyFilters())}
-      />
-
-      {/* Main content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "12px 16px" }}>
-        {/* Toolbar */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {filtered.length} book{filtered.length !== 1 ? "s" : ""}
-            {filtered.length !== items.length ? ` of ${items.length}` : ""}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+      {/* Controls bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {loading ? "Loading…" : `${sorted.length} book${sorted.length !== 1 ? "s" : ""}${sorted.length !== items.length ? ` of ${items.length}` : ""}`}
           </span>
-          <button onClick={() => setShowThumbs(t => !t)} style={btnSecondary}>
-            {showThumbs ? "Hide Covers" : "Show Covers"}
-          </button>
           {selected.size > 0 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selected.size} selected</span>
+              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
+              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <SegmentedButtons
+            options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
+            value={viewMode} onChange={setViewMode} />
+          {viewMode === "table" && (
+            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+          )}
+          {viewMode === "grid" && (
             <>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{selected.size} selected</span>
-              <button onClick={() => setShowBulkEdit(true)} style={btnSecondary}>Bulk Edit</button>
-              {!bulkDeleteConfirm
-                ? <button onClick={() => setBulkDeleteConfirm(true)} style={{ ...btnSm, color: "#c62828" }}>Delete Selected</button>
-                : (
-                  <>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete {selected.size}?</span>
-                    <button onClick={handleBulkDelete} style={{ ...btnSm, background: "#c62828", color: "#fff", border: "none" }}>Yes</button>
-                    <button onClick={() => setBulkDeleteConfirm(false)} style={btnSm}>No</button>
-                  </>
-                )}
+              <SegmentedButtons
+                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                value={gridSize} onChange={setGridSize} />
+              <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
-          {actionMsg && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{actionMsg}</span>}
         </div>
-
-        {loading && <p style={{ fontSize: 13 }}>Loading…</p>}
-        {error && <div style={alertError}>{error}</div>}
-
-        {!loading && !error && (
-          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
-                <th style={{ width: 28, padding: "4px 6px", textAlign: "center" }}>
-                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} />
-                </th>
-                {showThumbs && <th style={{ width: 44, padding: "4px 6px" }}></th>}
-                <th style={{ padding: "4px 8px", textAlign: "left" }}>Title</th>
-                <th style={{ padding: "4px 8px", textAlign: "left", whiteSpace: "nowrap" }}>System</th>
-                <th style={{ padding: "4px 8px", textAlign: "left", whiteSpace: "nowrap" }}>Edition / Line</th>
-                <th style={{ padding: "4px 8px", textAlign: "left", whiteSpace: "nowrap" }}>Book Type</th>
-                <th style={{ padding: "4px 8px", textAlign: "left" }}>Authors</th>
-                <th style={{ padding: "4px 8px", textAlign: "left" }}>Copies</th>
-                <th style={{ width: 50, padding: "4px 6px" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((book, idx) => (
-                <tr
-                  key={book.item_id}
-                  style={{ background: selected.has(book.item_id) ? "var(--selection-bg, #e8f5e9)" : idx % 2 === 0 ? "var(--bg-surface)" : "var(--surface-2)", borderBottom: "1px solid var(--border)" }}
-                >
-                  <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                    <input type="checkbox" checked={selected.has(book.item_id)} onChange={() => toggleSelect(book.item_id)} />
-                  </td>
-                  {showThumbs && (
-                    <td style={{ padding: "3px 6px" }}>
-                      {book.cover_image_url
-                        ? <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: 32, height: 45, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} onError={e => { e.target.style.display = "none"; }} />
-                        : <div style={{ width: 32, height: 45, background: "var(--border)", borderRadius: 2 }} />
-                      }
-                    </td>
-                  )}
-                  <td style={{ padding: "4px 8px", fontWeight: 500 }}>{book.title}</td>
-                  <td style={{ padding: "4px 8px", color: "var(--text-secondary)" }}>{book.category_name}</td>
-                  <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>
-                    {[book.system_edition_name, book.line_name].filter(Boolean).join(" / ") || "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>
-                    {book.book_type_name || "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>
-                    {book.authors?.length ? book.authors.join(", ") : "—"}
-                  </td>
-                  <td style={{ padding: "4px 8px", color: "var(--text-secondary)", fontSize: 12 }}>
-                    {book.copies_summary || (book.copy_count > 0 ? `${book.copy_count} cop${book.copy_count !== 1 ? "ies" : "y"}` : "—")}
-                  </td>
-                  <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                    <button onClick={() => setEditId(book.item_id)} style={btnSm}>Edit</button>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={showThumbs ? 9 : 8} style={{ padding: 20, textAlign: "center", color: "var(--text-secondary)", fontSize: 13 }}>
-                    No books found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
       </div>
 
-      {/* Modals */}
+      {error && <div style={{ ...alertError, margin: "8px 12px" }}>{error}</div>}
+
+      {/* Body */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        <TTRPGFilters
+          items={items}
+          systems={systems}
+          bookTypes={bookTypes}
+          ownershipStatuses={ownershipStatuses}
+          filters={filters}
+          onSectionChange={handleSectionChange}
+          onClearAll={() => setFilters(emptyFilters())}
+        />
+
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
+          {loading ? (
+            <p style={{ padding: 20, fontSize: 13 }}>Loading…</p>
+          ) : sorted.length === 0 ? (
+            <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No books found.</p>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+              {sorted.map(b => (
+                <TtrpgGridItem key={b.item_id} book={b}
+                  isSelected={selected.has(b.item_id)}
+                  onToggleSelect={toggleSelect}
+                  onClick={() => setEditId(b.item_id)}
+                  gridSize={gridSize} showCaptions={showCaptions} />
+              ))}
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 28 }} />
+                {showThumbnails && <col style={{ width: 50 }} />}
+                <col style={{ width: colWidths.title }} />
+                <col style={{ width: colWidths.system }} />
+                <col style={{ width: colWidths.edition }} />
+                <col style={{ width: colWidths.bookType }} />
+                <col style={{ width: colWidths.authors }} />
+                <col style={{ width: colWidths.copies }} />
+              </colgroup>
+              <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "5px 6px", textAlign: "center", borderRight: "1px solid var(--border)" }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ margin: 0, cursor: "pointer" }} />
+                  </th>
+                  {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
+                  {[
+                    { key: "title", label: "Title", colKey: "title" },
+                    { key: "system", label: "System", colKey: "system" },
+                    { key: null, label: "Edition / Line", colKey: "edition" },
+                    { key: "bookType", label: "Book Type", colKey: "bookType" },
+                    { key: null, label: "Authors", colKey: "authors" },
+                    { key: null, label: "Copies", colKey: "copies" },
+                  ].map(({ key, label, colKey }) => (
+                    <th
+                      key={label}
+                      onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                      style={{
+                        padding: "5px 8px",
+                        textAlign: "left",
+                        position: "relative",
+                        userSelect: "none",
+                        cursor: key ? "pointer" : "default",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        borderRight: "1px solid var(--border)",
+                      }}
+                    >
+                      {label}{key ? sortIndicator(key) : ""}
+                      <div
+                        onMouseDown={makeResizeHandler(colKey)}
+                        style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 1 }}
+                      />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map(b => {
+                  const isSelected = selected.has(b.item_id);
+                  return (
+                    <tr
+                      key={b.item_id}
+                      onClick={() => setEditId(b.item_id)}
+                      style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}
+                    >
+                      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }} onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(b.item_id)} style={{ margin: 0, cursor: "pointer" }} />
+                      </td>
+                      {showThumbnails && (
+                        <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
+                          {b.cover_image_url
+                            ? <img src={getImageUrl(b.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                        </td>
+                      )}
+                      <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.title}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.category_name}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                        {[b.system_edition_name, b.line_name].filter(Boolean).join(" / ") || "—"}
+                      </td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.book_type_name || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.authors?.length ? b.authors.join(", ") : "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.copies_summary || (b.copy_count > 0 ? `${b.copy_count} cop${b.copy_count !== 1 ? "ies" : "y"}` : "—")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {editId && (
-        <EditModal
+        <TtrpgDetailModal
           itemId={editId}
           systems={systems}
           bookTypes={bookTypes}
@@ -703,16 +850,22 @@ export default function TTRPGLibraryPage() {
           ownershipStatuses={ownershipStatuses}
           onClose={() => setEditId(null)}
           onSaved={() => { setEditId(null); loadData(); }}
-          onDeleted={() => { setEditId(null); loadData(); }}
+          onDeleted={() => {
+            setEditId(null);
+            loadData();
+            setSelected(prev => { const next = new Set(prev); next.delete(editId); return next; });
+          }}
         />
       )}
-      {showBulkEdit && (
-        <BulkEditModal
+
+      {bulkEditOpen && (
+        <TtrpgBulkEdit
           selectedIds={[...selected]}
           systems={systems}
           ownershipStatuses={ownershipStatuses}
-          onClose={() => setShowBulkEdit(false)}
-          onSaved={() => { setShowBulkEdit(false); setSelected(new Set()); loadData(); }}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); loadData(); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); loadData(); }}
         />
       )}
     </div>
