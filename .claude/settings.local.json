@@ -14,5 +14,20 @@
       "Read(C:/Dev/CollectCore/backend/.venv/Lib/site-packages/**)",
       "Bash(grep -l \"fastapi\\|uvicorn\\|sqlalchemy\" *.dist-info/METADATA)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash c:/Dev/CollectCore/.claude/check-proxy-paths.sh",
+            "timeout": 10,
+            "statusMessage": "Checking vite proxy paths..."
+          }
+        ]
+      }
+    ]
   }
 }

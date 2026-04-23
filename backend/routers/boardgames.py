@@ -1,3 +1,4 @@
+import os
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -5,6 +6,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
+
+BGG_API_KEY = os.getenv("BGG_API_KEY", "").strip()
 
 from constants import BOARDGAMES_COLLECTION_TYPE_ID
 from dependencies import get_db
@@ -198,7 +201,10 @@ def bgg_search(q: str):
     encoded = urllib.parse.quote(q.strip())
     url = f"https://boardgamegeek.com/xmlapi2/search?query={encoded}&type=boardgame"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        headers = {"User-Agent": "CollectCore/1.0"}
+        if BGG_API_KEY:
+            headers["Authorization"] = f"Bearer {BGG_API_KEY}"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
             xml_data = resp.read().decode("utf-8")
         root = ET.fromstring(xml_data)
@@ -225,7 +231,10 @@ def bgg_detail(bgg_id: str):
     """Fetch detailed info from BGG for a single game (used to pre-fill the form)."""
     url = f"https://boardgamegeek.com/xmlapi2/thing?id={bgg_id}&stats=0"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
+        headers = {"User-Agent": "CollectCore/1.0"}
+        if BGG_API_KEY:
+            headers["Authorization"] = f"Bearer {BGG_API_KEY}"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
             xml_data = resp.read().decode("utf-8")
         root = ET.fromstring(xml_data)

@@ -1,6 +1,12 @@
 Set oShell = CreateObject("WScript.Shell")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 
+' Show splash screen while starting up
+splashFile = oShell.CurrentDirectory & "\splash.ps1"
+If FSO.FileExists(splashFile) Then
+    oShell.Run "powershell.exe -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & splashFile & """", 0, False
+End If
+
 ' Stop any running instances (kill full process tree to handle uvicorn --reload parent/child)
 oShell.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do taskkill /F /T /PID %a", 0, True
 oShell.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -ano ^| findstr :5181 ^| findstr LISTENING') do taskkill /F /T /PID %a", 0, True
@@ -11,6 +17,8 @@ oShell.Run "cmd /c cd /d C:\Dev\CollectCore\backend && .\.venv\Scripts\python.ex
 WScript.Sleep 1000
 oShell.Run "cmd /c cd /d C:\Dev\CollectCore\frontend && npm run dev -- --port 5181", 0, False
 WScript.Sleep 7000
+
+' Splash auto-closes itself via internal timer (see splash.ps1)
 
 ' Open app in browser
 appUrl = "http://localhost:5181"

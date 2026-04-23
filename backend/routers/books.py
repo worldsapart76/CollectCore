@@ -1,7 +1,3 @@
-import json
-import os
-import urllib.parse
-import urllib.request
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +5,7 @@ from sqlalchemy import text
 
 from constants import BOOK_COLLECTION_TYPE_ID
 from dependencies import get_db
+from external_apis import google_books_lookup_isbn, google_books_search
 from helpers import generic_upsert, make_title_sort
 from schemas.books import (
     BookBulkUpdatePayload,
@@ -22,8 +19,6 @@ from file_helpers import (
     resolve_cover_url,
 )
 from schemas.photocards import BulkDeletePayload
-
-GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "")
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -422,24 +417,17 @@ def get_book_tags(q: Optional[str] = None, db=Depends(get_db)):
 
 @router.get("/search-external")
 def search_external_books(q: str = Query(..., min_length=1)):
-    encoded = urllib.parse.quote(q)
-    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=10"
     try:
-        with urllib.request.urlopen(url, timeout=6) as resp:
-            data = json.loads(resp.read())
-        return [_normalize_google_book(v) for v in data.get("items", [])]
+        items = google_books_search(q, max_results=10)
+        return [_normalize_google_book(v) for v in items]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"External search failed: {e}")
 
 
 @router.get("/lookup-isbn")
 def lookup_isbn(isbn: str = Query(..., min_length=10)):
-    encoded = urllib.parse.quote(f"isbn:{isbn}")
-    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=1"
     try:
-        with urllib.request.urlopen(url, timeout=6) as resp:
-            data = json.loads(resp.read())
-        items = data.get("items", [])
+        items = google_books_lookup_isbn(isbn, max_results=1)
         if not items:
             return None
         return _normalize_google_book(items[0])

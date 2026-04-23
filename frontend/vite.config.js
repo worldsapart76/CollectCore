@@ -13,6 +13,7 @@ const PROXY_PATHS = [
   '/health',
   '/categories',
   '/ownership-statuses',
+  '/consumption-statuses',
   '/ingest',
   '/photocards',
   '/books',

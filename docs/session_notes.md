@@ -6,6 +6,17 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-21 — Graphic Novels ingest crash fix + deferred list cleanup
+
+**Completed:**
+- **Deferred item #2 (GN ingest white screen crash):** Root cause was a missing `getImageUrl` import in `frontend/src/pages/GraphicNovelsIngestPage.jsx`. The `ManualForm` cover preview called `getImageUrl(form.coverImageUrl)` but the helper was never imported, throwing a `ReferenceError` that React surfaced as a white screen whenever a cover URL was set. Triggered reliably by Comic Vine keyword results (which always include a cover); masked for manual entry and Google Books lookups without covers. Fixed with a one-line import from `../utils/imageUrl`.
+- **Deferred item #3 (Google Books rate limiting):** Already resolved — `GOOGLE_BOOKS_API_KEY` is now applied to both Books and Graphic Novels routers via the shared `external_apis.py` helpers (previously only GN had keyed access). Removed from deferred list.
+- **Deferred items #1 (ownership status dropdown) and #2 (consumption status rename + cross-contamination):** Already resolved by the 2026-04-22 Wave 4 Unified Status Visibility System — `lkup_consumption_statuses` rename is in `schema.sql`, both `xref_ownership_status_modules` and `xref_consumption_status_modules` junctions exist, all 8 modules filter by `collection_type_id`, and `hiddenStatuses.js` was deleted. Removed both from deferred list.
+- **CLAUDE.md:** Removed four resolved items in total; renumbered remaining items (now 1–5).
+
+**Next:**
+- Continue deferred items triage.
+
 ### 2026-04-21 — Code quality overhaul Wave 4 complete
 
 **Completed (Wave 4 — Query Optimization & Consistency):**
@@ -18,6 +29,27 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 
 **Next:**
 - CLAUDE.md Deferred Items #1 (image field schema finalization) and #3 (photocard copy/edition sub-table refactor) are the blocking prerequisites for Railway deployment
+
+### 2026-04-22 — Unified Status Visibility System + deferred items triage
+
+**Completed:**
+- **Deferred items triage (partial):** Reviewed items #1–#2 from CLAUDE.md deferred list
+  - **#1 (Image ingest rebuild):** Investigated, confirmed already implemented — removed from deferred list
+  - **#2 (Ownership status dropdown) + #16 (Read/consumption status cross-contamination):** Identified as same root cause, designed and implemented unified solution (see Wave 4 below)
+  - Items #3–#15 reviewed and categorized (defer vs fix) — awaiting user decisions
+- **Wave 4: Unified Status Visibility System** (resolves former deferred #2, #8, #16):
+  - **Schema:** Renamed `lkup_book_read_statuses` → `lkup_consumption_statuses` via migration in `db.py`; added `xref_ownership_status_modules` and `xref_consumption_status_modules` junction tables for per-module visibility scoping; seeded xref with all-modules-enabled defaults
+  - **Backend:** Updated `GET /ownership-statuses` to accept optional `collection_type_id` filter via xref JOIN; added `GET /consumption-statuses?collection_type_id=` endpoint (replaces module-specific `/read-statuses`, `/play-statuses`, `/watch-statuses`); added `GET/PUT /admin/status-visibility` endpoints for Admin grid management
+  - **Backend cleanup:** Updated all module routers (`books`, `graphic_novels`, `video`, `videogames`) to reference `lkup_consumption_statuses`; removed 3 module-specific status endpoints
+  - **Frontend:** All 8 modules now pass `collection_type_id` when fetching ownership/consumption statuses; deleted `frontend/src/constants/hiddenStatuses.js` — all filtering is now DB-driven
+  - **Admin page:** Rewrote with 4-tab layout (Modules, Backup & Restore, Lookup Cleanup, Status Visibility); Status Visibility tab has checkbox grid (statuses × modules) with optimistic UI updates and rollback on failure
+  - **Migration:** Copper Age era deactivated via migration (removed from seed data)
+- **CLAUDE.md updated:** Removed stale Image Ingest section, added accurate Image Handling section, removed resolved deferred items (#1, #8, #16), updated deferred #4 with Admin tab note, updated Railway prerequisites
+
+**Next:**
+- Continue deferred items triage: user decisions pending on #3–#15
+- Bug fix candidates: #14 (GN ingest crash), #13 (BGG search verification)
+- Test the new Status Visibility admin grid end-to-end
 
 ### 2026-04-22 — Code quality overhaul Waves 1-3 complete
 

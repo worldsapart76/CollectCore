@@ -16,6 +16,7 @@ import PageContainer from "../components/layout/PageContainer";
 import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, alertWarn, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import { getImageUrl } from "../utils/imageUrl";
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";

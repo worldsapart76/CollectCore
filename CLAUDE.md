@@ -124,29 +124,12 @@ instructed:
 
 These are intentionally not yet built. Do not implement without instruction:
 
-1. Ownership status dropdown — move to lookup-driven UI
-3. Return full object on create endpoints (photocards done in Wave 4; other modules still return minimal response)
-4. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred
-5. Validation improvements and consistent error handling across endpoints
-6. Pagination — not designed or implemented for any module
-7. Photocard library filter sidebar — update font size, spacing, and padding to match the books library sidebar style (user-preferred reference)
-8. `lkup_book_read_statuses` rename to `lkup_consumption_statuses` — Video and Video Games now use this table; rename should happen soon. Also adds Watched/Playing/etc. statuses.
-9. Dark mode — needs full design revision; current implementation is not usable
-10. Distributed launcher — PowerShell window should be hidden on launch; add a "CollectCore is starting up…" popup (e.g., Windows Toast or a small splash) so the app doesn't appear unresponsive while backend initializes
-11. Photocard filter/input state persistence — when navigating between Inbox, Library, and Export tabs, the filter selections and form inputs should be preserved (currently reset on each navigation)
-12. Library pop-up modals — always offer an "Update image" option regardless of whether an image exists
-13. Board Games BGG search — BGG XML API may require an approved API key (conflicting notes); search panel is built but may be non-functional. Needs verification. Endpoints: `/boardgames/bgg-search` and `/boardgames/bgg-detail/{id}`. Add `BGG_API_KEY` to `.env` if required.
-14. Graphic Novels ingest — keyword search result selection causes white screen crash. Clicking a Comic Vine search result calls `applyResult()` which crashes React. Needs debugging in `GraphicNovelsIngestPage.jsx`. ISBN lookup and manual entry work fine.
-15. Google Books API rate limiting — external search and ISBN lookup for Books and Graphic Novels modules intermittently return HTTP 429 (Too Many Requests). Consider adding retry-with-backoff, caching recent lookups, or switching to a different primary source.
-16. Read/consumption status cross-contamination — Books shows video/game statuses (Played, Watched, etc.) and GN shows gaming statuses in their read status filters. All modules share `lkup_book_read_statuses` and statuses added for Video/Video Games bleed into Books and GN.
-    **Design decision required before implementing:**
-    - **Option A (quick):** Expand `HIDDEN_READ_STATUS_NAMES` per module in `frontend/src/constants/hiddenStatuses.js` — no schema change, but hides statuses in frontend only; bleed still exists at the API level.
-    - **Option B (proper):** Add `module_scope` column to `lkup_book_read_statuses` (and `lkup_ownership_statuses` if back-applying — see below), filter at the API level so each module only receives relevant statuses. Removes all frontend hidden sets for those tables.
-    **If Option B:** Decide whether to back-apply `module_scope` to the three existing frontend hidden sets, which would also move to DB-side filtering:
-    - `HIDDEN_OWNERSHIP_NAMES` (`["Trade", "Formerly Owned", "Pending", "Borrowed"]`) — hidden in GN, Boardgames, Music, Video, VideoGames, TTRPG (but shown in Books/Photocards); scoping in the DB would be cleaner
-    - `HIDDEN_READ_STATUS_NAMES` (`["Currently Reading", "DNF"]`) — hidden in GN (these are book-specific statuses that don't apply to GN)
-    - `HIDDEN_ERA_NAMES` (`["Copper Age"]`) — hidden in GN; a data-quality issue rather than a module-scope issue (era probably shouldn't exist in the DB if unused)
-    - Photocard/Inbox use a different, smaller `HIDDEN` set (`["Formerly Owned", "Borrowed"]`) — same ownership table, different subset
+1. Collection type ID resolution — `frontend/src/constants/collectionTypes.js` hardcodes DB-specific IDs (e.g., `boardgames: 258`) because the DB has duplicate/non-sequential `lkup_collection_types` rows. This is brittle across databases. Proper fix: either (a) canonicalize `lkup_collection_types` so each module has one row with predictable IDs (1–8) and remove legacy duplicates, or (b) add a `/collection-types` endpoint and have the frontend look up IDs by `collection_type_code` at startup so hardcoding isn't needed.
+2. Return full object on create endpoints (photocards done in Wave 4; other modules still return minimal response).
+3. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred.
+4. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
+    - **Sub-item: Dark mode** — current implementation is not usable; requires the design system foundation before a full revision is practical.
+5. Library interaction consistency — review how record selection, bulk edit, bulk delete, and similar shared functionality is implemented inconsistently across each module's library page. Pull common patterns into a shared template/component where possible.
 
 ---
 

@@ -11,6 +11,11 @@ from sqlalchemy import text
 
 from constants import GN_COLLECTION_TYPE_ID
 from dependencies import get_db
+from external_apis import (
+    google_books_get_volume,
+    google_books_lookup_isbn,
+    google_books_search,
+)
 from file_helpers import (
     delete_attachment_files,
     collect_cover_file,
@@ -30,7 +35,6 @@ from schemas.graphic_novels import (
 from schemas.photocards import BulkDeletePayload
 
 # ---------- API keys ----------
-GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "")
 COMIC_VINE_API_KEY = os.environ.get("COMIC_VINE_API_KEY", "")
 
 router = APIRouter(prefix="/graphicnovels", tags=["graphicnovels"])
@@ -619,14 +623,7 @@ def gn_lookup_isbn(isbn: str = Query(..., min_length=10), source: str = Query("a
 
     # 2. Google Books — good general fallback with covers
     try:
-        encoded = urllib.parse.quote(f"isbn:{isbn}")
-        gb_url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=5"
-        if GOOGLE_BOOKS_API_KEY:
-            gb_url += f"&key={GOOGLE_BOOKS_API_KEY}"
-        req = urllib.request.Request(gb_url, headers={"User-Agent": "CollectCore/1.0"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = json.loads(resp.read())
-        items = data.get("items", [])
+        items = google_books_lookup_isbn(isbn, max_results=5)
         if items:
             return [_normalize_gn_isbn_result(v) for v in items]
     except Exception:
@@ -686,15 +683,9 @@ def gn_search_external(q: str = Query(..., min_length=1), source: str = Query("c
             raise HTTPException(status_code=502, detail=f"Comic Vine search failed: {e}")
 
     else:  # google
-        encoded = urllib.parse.quote(q)
-        url = f"https://www.googleapis.com/books/v1/volumes?q={encoded}&maxResults=40"
-        if GOOGLE_BOOKS_API_KEY:
-            url += f"&key={GOOGLE_BOOKS_API_KEY}"
         try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                data = json.loads(resp.read())
-            return [_normalize_gn_isbn_result(v) for v in data.get("items", [])]
+            items = google_books_search(q, max_results=40)
+            return [_normalize_gn_isbn_result(v) for v in items]
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Google Books search failed: {e}")
 
@@ -1048,12 +1039,7 @@ def gn_fix_covers(db=Depends(get_db)):
             # For Google Books: re-fetch the thumbnail URL via the volume API
             if api_source == "google_books" and external_work_id:
                 try:
-                    gb_url = f"https://www.googleapis.com/books/v1/volumes/{external_work_id}"
-                    if GOOGLE_BOOKS_API_KEY:
-                        gb_url += f"?key={GOOGLE_BOOKS_API_KEY}"
-                    req = urllib.request.Request(gb_url, headers={"User-Agent": "CollectCore/1.0"})
-                    with urllib.request.urlopen(req, timeout=6) as resp:
-                        vol = json.loads(resp.read())
+                    vol = google_books_get_volume(external_work_id)
                     info = vol.get("volumeInfo", {})
                     image_links = info.get("imageLinks", {})
                     raw = image_links.get("thumbnail") or image_links.get("smallThumbnail")
