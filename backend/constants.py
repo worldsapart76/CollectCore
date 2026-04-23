@@ -24,8 +24,8 @@ def _resolve_collection_type_id(code: str, fallback: int) -> int:
 
 
 # Collection type IDs
-PHOTOCARD_COLLECTION_TYPE_ID = _resolve_collection_type_id("photocard", 1)
-BOOK_COLLECTION_TYPE_ID = _resolve_collection_type_id("book", 2)
+PHOTOCARD_COLLECTION_TYPE_ID = _resolve_collection_type_id("photocards", 1)
+BOOK_COLLECTION_TYPE_ID = _resolve_collection_type_id("books", 2)
 GN_COLLECTION_TYPE_ID = _resolve_collection_type_id("graphicnovels", 3)
 VIDEOGAMES_COLLECTION_TYPE_ID = _resolve_collection_type_id("videogames", 4)
 MUSIC_COLLECTION_TYPE_ID = _resolve_collection_type_id("music", 5)

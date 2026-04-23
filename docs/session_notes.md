@@ -6,13 +6,19 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-04-21 — Graphic Novels ingest crash fix + deferred list cleanup
+### 2026-04-21 — GN ingest fix, deferred list cleanup, collection type canonicalization
 
 **Completed:**
 - **Deferred item #2 (GN ingest white screen crash):** Root cause was a missing `getImageUrl` import in `frontend/src/pages/GraphicNovelsIngestPage.jsx`. The `ManualForm` cover preview called `getImageUrl(form.coverImageUrl)` but the helper was never imported, throwing a `ReferenceError` that React surfaced as a white screen whenever a cover URL was set. Triggered reliably by Comic Vine keyword results (which always include a cover); masked for manual entry and Google Books lookups without covers. Fixed with a one-line import from `../utils/imageUrl`.
 - **Deferred item #3 (Google Books rate limiting):** Already resolved — `GOOGLE_BOOKS_API_KEY` is now applied to both Books and Graphic Novels routers via the shared `external_apis.py` helpers (previously only GN had keyed access). Removed from deferred list.
 - **Deferred items #1 (ownership status dropdown) and #2 (consumption status rename + cross-contamination):** Already resolved by the 2026-04-22 Wave 4 Unified Status Visibility System — `lkup_consumption_statuses` rename is in `schema.sql`, both `xref_ownership_status_modules` and `xref_consumption_status_modules` junctions exist, all 8 modules filter by `collection_type_id`, and `hiddenStatuses.js` was deleted. Removed both from deferred list.
-- **CLAUDE.md:** Removed four resolved items in total; renumbered remaining items (now 1–5).
+- **Deferred item #1 (collection type ID resolution):** Fully canonicalized `lkup_collection_types` so the live DB matches what `schema.sql` seeds on a fresh install.
+    - `migrate_collection_types_canonicalize.py`: deleted the zero-reference orphan duplicates (IDs 61/62 for `photocards`/`books`) plus four orphan `lkup_top_level_categories` rows (IDs 8–11); renamed the surviving legacy singular codes `photocard`→`photocards` and `book`→`books` (with matching `collection_type_name` updates).
+    - `migrate_collection_types_resequence.py`: remapped the non-sequential IDs 94/155/202/258/274 to 4/5/6/7/8 for videogames/music/video/boardgames/ttrpg; updated all FK references in `tbl_items` and `lkup_top_level_categories`, then the PK in `lkup_collection_types`; reset `sqlite_sequence` so new rows continue from 9.
+    - Updated `backend/constants.py` to look up by the new plural codes.
+    - Updated `frontend/src/constants/collectionTypes.js` to IDs 1–8, matching both the live DB and any fresh install going forward.
+    - Pre-migration backup: `F:/Dropbox/Apps/CollectCore/data/backups/collectcore_pre_collection_types_canonicalize_20260422_200932.db`.
+- **CLAUDE.md:** Five resolved items removed in total; deferred list renumbered (now 1–4).
 
 **Next:**
 - Continue deferred items triage.

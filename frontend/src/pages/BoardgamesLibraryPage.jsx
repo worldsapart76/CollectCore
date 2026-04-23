@@ -599,7 +599,7 @@ export default function BoardgamesLibraryPage() {
                 onClick={() => setEditId(g.item_id)}
               >
                 <td style={{ padding: "4px 6px" }} onClick={e => { e.stopPropagation(); toggleSelect(g.item_id); }}>
-                  <input type="checkbox" checked={selectedIds.includes(g.item_id)} onChange={() => toggleSelect(g.item_id)} />
+                  <input type="checkbox" checked={selectedIds.includes(g.item_id)} onChange={() => {}} />
                 </td>
                 {showThumbnails && (
                   <td style={{ padding: "2px 6px" }}>

@@ -124,12 +124,11 @@ instructed:
 
 These are intentionally not yet built. Do not implement without instruction:
 
-1. Collection type ID resolution — `frontend/src/constants/collectionTypes.js` hardcodes DB-specific IDs (e.g., `boardgames: 258`) because the DB has duplicate/non-sequential `lkup_collection_types` rows. This is brittle across databases. Proper fix: either (a) canonicalize `lkup_collection_types` so each module has one row with predictable IDs (1–8) and remove legacy duplicates, or (b) add a `/collection-types` endpoint and have the frontend look up IDs by `collection_type_code` at startup so hardcoding isn't needed.
-2. Return full object on create endpoints (photocards done in Wave 4; other modules still return minimal response).
-3. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred.
-4. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
+1. Return full object on create endpoints (photocards done in Wave 4; other modules still return minimal response).
+2. Lookup admin/management UI — soft-delete cleanup is implemented (Admin page "Unused Lookup Cleanup"); full management UI (view/edit/merge/re-activate/hard-delete) remains deferred.
+3. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
     - **Sub-item: Dark mode** — current implementation is not usable; requires the design system foundation before a full revision is practical.
-5. Library interaction consistency — review how record selection, bulk edit, bulk delete, and similar shared functionality is implemented inconsistently across each module's library page. Pull common patterns into a shared template/component where possible.
+4. Library interaction consistency — review how record selection, bulk edit, bulk delete, and similar shared functionality is implemented inconsistently across each module's library page. Pull common patterns into a shared template/component where possible.
 
 ---
 

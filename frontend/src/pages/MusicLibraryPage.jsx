@@ -790,7 +790,7 @@ export default function MusicLibraryPage() {
                       onClick={() => setEditingId(r.item_id)}
                     >
                       <td style={{ ...tdStyle, textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(r.item_id); }}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(r.item_id)} style={{ cursor: "pointer" }} />
+                        <input type="checkbox" checked={isSelected} onChange={() => {}} style={{ cursor: "pointer" }} />
                       </td>
                       {showThumbnails && (
                         <td style={{ ...tdStyle, padding: "2px 4px" }}>
