@@ -347,18 +347,18 @@ export default function PhotocardDetailModal({
             <FormRow label="Group">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={styles.readOnly}>{groupName}</span>
-                <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", flexShrink: 0 }}>
+                <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", flexShrink: 0 }}>
                   <button
                     type="button"
                     onClick={() => { setIsSpecial(false); setIsDirty(true); }}
                     style={{
                       padding: "3px 9px",
-                      fontSize: 12,
+                      fontSize: "var(--text-sm)",
                       cursor: "pointer",
                       border: "none",
-                      borderRight: "1px solid #ccc",
-                      background: !isSpecial ? "#1565c0" : "#f5f5f5",
-                      color: !isSpecial ? "#fff" : "#333",
+                      borderRight: "1px solid var(--border-input)",
+                      background: !isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                      color: !isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
                     }}
                   >
                     Regular
@@ -368,11 +368,11 @@ export default function PhotocardDetailModal({
                     onClick={() => { setIsSpecial(true); setIsDirty(true); }}
                     style={{
                       padding: "3px 9px",
-                      fontSize: 12,
+                      fontSize: "var(--text-sm)",
                       cursor: "pointer",
                       border: "none",
-                      background: isSpecial ? "#1565c0" : "#f5f5f5",
-                      color: isSpecial ? "#fff" : "#333",
+                      background: isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                      color: isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
                     }}
                   >
                     ★ Special
@@ -512,13 +512,13 @@ export default function PhotocardDetailModal({
 function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: "bold", color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      <div style={{ fontSize: "var(--text-xs)", fontWeight: "bold", color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {label}
       </div>
       <div style={{
         width: 130, height: 180,
-        border: "1px solid #ddd", borderRadius: 4,
-        background: "#f0f0f0",
+        border: "1px solid var(--border-input)", borderRadius: "var(--radius-md)",
+        background: "var(--bg-surface)",
         display: "flex", alignItems: "center", justifyContent: "center",
         overflow: "hidden", position: "relative",
       }}>
@@ -529,12 +529,12 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         ) : (
-          <span style={{ fontSize: 11, color: "#aaa" }}>No {label.toLowerCase()}</span>
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>No {label.toLowerCase()}</span>
         )}
         {replacing && (
           <div style={{
             position: "absolute", inset: 0, background: "rgba(255,255,255,0.7)",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#555",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--text-xs)", color: "var(--text-secondary)",
           }}>
             Uploading...
           </div>
@@ -553,7 +553,7 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
       />
       <button
         type="button"
-        style={{ marginTop: 4, fontSize: 11, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#f5f5f5", width: 130 }}
+        style={{ marginTop: 4, fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", background: "var(--bg-surface)", width: 130 }}
         onClick={() => fileRef.current?.click()}
         disabled={replacing}
       >
@@ -612,9 +612,9 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
 
   return (
     <div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" }}>
         <thead>
-          <tr style={{ borderBottom: "1px solid #ddd" }}>
+          <tr style={{ borderBottom: "1px solid var(--border-input)" }}>
             <th style={{ textAlign: "left", padding: "3px 4px", fontWeight: 600 }}>Ownership</th>
             <th style={{ textAlign: "left", padding: "3px 4px", fontWeight: 600 }}>Notes</th>
             <th style={{ width: 28, padding: "3px 4px" }}></th>
@@ -622,12 +622,12 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
         </thead>
         <tbody>
           {copies.map((cp) => (
-            <tr key={cp.copy_id} style={{ borderBottom: "1px solid #eee" }}>
+            <tr key={cp.copy_id} style={{ borderBottom: "1px solid var(--border)" }}>
               <td style={{ padding: "3px 4px" }}>
                 <select
                   value={cp.ownership_status_id}
                   onChange={(e) => handleUpdate(cp, "ownership", e.target.value)}
-                  style={{ fontSize: 12, padding: "1px 2px" }}
+                  style={{ fontSize: "var(--text-sm)", padding: "1px 2px" }}
                 >
                   {ownershipStatuses.map((s) => (
                     <option key={s.ownership_status_id} value={s.ownership_status_id}>
@@ -644,13 +644,13 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
                       handleUpdate(cp, "notes", e.target.value);
                     }
                   }}
-                  style={{ fontSize: 12, width: "100%", border: "1px solid #ddd", borderRadius: 2, padding: "1px 3px" }}
+                  style={{ fontSize: "var(--text-sm)", width: "100%", border: "1px solid var(--border-input)", borderRadius: 2, padding: "1px 3px" }}
                 />
               </td>
               <td style={{ padding: "3px 4px", textAlign: "center" }}>
                 <button
                   onClick={() => handleDelete(cp.copy_id)}
-                  style={{ background: "none", border: "none", color: "#c00", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
+                  style={{ background: "none", border: "none", color: "var(--danger-text)", cursor: "pointer", fontSize: "var(--text-md)", lineHeight: 1 }}
                   title="Delete copy"
                 >
                   ×
@@ -666,7 +666,7 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
           <select
             value={newOwnership}
             onChange={(e) => setNewOwnership(e.target.value)}
-            style={{ fontSize: 12, padding: "1px 2px" }}
+            style={{ fontSize: "var(--text-sm)", padding: "1px 2px" }}
           >
             <option value="">— Select —</option>
             {ownershipStatuses.map((s) => (
@@ -679,21 +679,21 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
             value={newNotes}
             onChange={(e) => setNewNotes(e.target.value)}
             placeholder="Notes"
-            style={{ fontSize: 12, flex: 1, border: "1px solid #ddd", borderRadius: 2, padding: "1px 3px" }}
+            style={{ fontSize: "var(--text-sm)", flex: 1, border: "1px solid var(--border-input)", borderRadius: 2, padding: "1px 3px" }}
           />
-          <button onClick={handleAdd} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>Add</button>
-          <button onClick={() => setAdding(false)} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>Cancel</button>
+          <button onClick={handleAdd} style={{ fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer" }}>Add</button>
+          <button onClick={() => setAdding(false)} style={{ fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer" }}>Cancel</button>
         </div>
       ) : (
         <button
           onClick={() => setAdding(true)}
-          style={{ marginTop: 4, fontSize: 11, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#f5f5f5" }}
+          style={{ marginTop: 4, fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", background: "var(--bg-surface)" }}
         >
           + Add Copy
         </button>
       )}
 
-      {error && <div style={{ color: "#c00", fontSize: 11, marginTop: 4 }}>{error}</div>}
+      {error && <div style={{ color: "var(--danger-text)", fontSize: "var(--text-xs)", marginTop: 4 }}>{error}</div>}
     </div>
   );
 }
@@ -702,7 +702,7 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
 function FormRow({ label, children }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "block", fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 4 }}>
+      <label style={{ display: "block", fontSize: "var(--text-sm)", fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 4 }}>
         {label}
       </label>
       {children}
@@ -721,13 +721,13 @@ const styles = {
     zIndex: 1000,
   },
   modal: {
-    background: "#fff",
-    borderRadius: 6,
+    background: "var(--bg-base)",
+    borderRadius: "var(--radius-lg)",
     width: 700,
     maxHeight: "90vh",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+    boxShadow: "var(--shadow-modal)",
   },
   modalBody: {
     display: "flex",
@@ -737,9 +737,9 @@ const styles = {
   imagePanel: {
     flexShrink: 0,
     padding: "16px 12px 16px 16px",
-    borderRight: "1px solid #e0e0e0",
+    borderRight: "1px solid var(--border)",
     overflowY: "auto",
-    background: "#fafafa",
+    background: "var(--bg-surface)",
     width: 158,
   },
   modalHeader: {
@@ -747,7 +747,7 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     padding: "10px 14px",
-    borderBottom: "1px solid #e0e0e0",
+    borderBottom: "1px solid var(--border)",
   },
   modalTitle: {
     fontWeight: "bold",
@@ -755,35 +755,35 @@ const styles = {
   },
   navBtn: {
     padding: "1px 7px",
-    fontSize: 18,
+    fontSize: "18px",
     lineHeight: 1,
     cursor: "pointer",
-    border: "1px solid #ccc",
-    borderRadius: 3,
-    background: "#f5f5f5",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-surface)",
   },
   navCounter: {
-    fontSize: 12,
-    color: "#888",
+    fontSize: "var(--text-sm)",
+    color: "var(--text-muted)",
     fontWeight: "normal",
     marginLeft: 4,
   },
   closeBtn: {
     background: "none",
     border: "none",
-    fontSize: 16,
+    fontSize: "16px",
     cursor: "pointer",
-    color: "#666",
+    color: "var(--text-muted)",
     padding: "0 4px",
   },
   errorBox: {
     margin: "8px 16px 0",
     padding: "8px 10px",
-    background: "#ffebee",
-    border: "1px solid #c62828",
-    borderRadius: 3,
-    fontSize: 13,
-    color: "#c62828",
+    background: "var(--error-bg)",
+    border: "1px solid var(--danger-text)",
+    borderRadius: "var(--radius-sm)",
+    fontSize: "var(--text-base)",
+    color: "var(--danger-text)",
   },
   form: {
     padding: "16px",
@@ -792,30 +792,30 @@ const styles = {
     minWidth: 0,
   },
   readOnly: {
-    fontSize: 13,
-    color: "#333",
+    fontSize: "var(--text-base)",
+    color: "var(--text-primary)",
   },
   select: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
   },
   input: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
     boxSizing: "border-box",
   },
   textarea: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
     resize: "vertical",
     boxSizing: "border-box",
   },
@@ -827,56 +827,56 @@ const styles = {
   memberChip: {
     display: "flex",
     alignItems: "center",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
     padding: "3px 6px",
-    border: "1px solid #ddd",
-    borderRadius: 3,
-    background: "#f9f9f9",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-surface)",
   },
   addBtn: {
     padding: "4px 8px",
-    fontSize: 12,
+    fontSize: "var(--text-sm)",
     cursor: "pointer",
-    border: "1px solid #ccc",
-    borderRadius: 3,
-    background: "#f5f5f5",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-surface)",
     whiteSpace: "nowrap",
   },
   cancelBtn: {
     padding: "5px 12px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #ccc",
-    borderRadius: 3,
-    background: "#fff",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-base)",
   },
   saveBtn: {
     padding: "5px 16px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #1565c0",
-    borderRadius: 3,
-    background: "#1565c0",
-    color: "#fff",
+    border: "1px solid var(--btn-primary-bg)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--btn-primary-bg)",
+    color: "var(--btn-primary-text)",
     fontWeight: "bold",
   },
   deleteBtn: {
     padding: "5px 12px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #c62828",
-    borderRadius: 3,
-    background: "#fff",
-    color: "#c62828",
+    border: "1px solid var(--danger-text)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-base)",
+    color: "var(--danger-text)",
   },
   fieldError: {
-    color: "#c62828",
-    fontSize: 12,
+    color: "var(--danger-text)",
+    fontSize: "var(--text-sm)",
     marginTop: 4,
   },
   confirmPrompt: {
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -886,7 +886,7 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     padding: "12px 16px",
-    borderTop: "1px solid #e0e0e0",
+    borderTop: "1px solid var(--border)",
   },
   actionsLeft: {
     display: "flex",

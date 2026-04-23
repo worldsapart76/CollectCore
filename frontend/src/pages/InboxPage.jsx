@@ -32,14 +32,14 @@ function libraryImageUrl(path) {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
-const labelStyle = { display: "block", fontSize: 12, fontWeight: "bold", marginBottom: 3, color: "#444" };
-const selectStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc" };
-const inputStyle = { fontSize: 13, padding: "3px 6px", borderRadius: 3, border: "1px solid #ccc", width: "100%", boxSizing: "border-box" };
-const btnPrimary = { fontSize: 13, padding: "6px 14px", background: "#377e00", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
-const btnSecondary = { fontSize: 13, padding: "5px 12px", background: "#f5f5f5", color: "#333", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" };
-const btnSm = { fontSize: 11, padding: "2px 7px", background: "#f5f5f5", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" };
-const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid #c62828", background: "#ffebee", fontSize: 13, borderRadius: 3 };
-const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid #2e7d32", background: "#e8f5e9", fontSize: 13, borderRadius: 3 };
+const labelStyle = { display: "block", fontSize: "var(--text-sm)", fontWeight: "bold", marginBottom: 3, color: "var(--text-secondary)" };
+const selectStyle = { fontSize: "var(--text-base)", padding: "3px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-input)" };
+const inputStyle = { fontSize: "var(--text-base)", padding: "3px 6px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-input)", width: "100%", boxSizing: "border-box" };
+const btnPrimary = { fontSize: "var(--text-base)", padding: "6px 14px", background: "var(--btn-primary-bg)", color: "var(--btn-primary-text)", border: "none", borderRadius: "var(--radius-md)", cursor: "pointer" };
+const btnSecondary = { fontSize: "var(--text-base)", padding: "5px 12px", background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--border-input)", borderRadius: "var(--radius-md)", cursor: "pointer" };
+const btnSm = { fontSize: "var(--text-xs)", padding: "2px 7px", background: "var(--bg-surface)", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", cursor: "pointer" };
+const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--danger-text)", background: "var(--error-bg)", fontSize: "var(--text-base)", borderRadius: "var(--radius-sm)" };
+const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--success-border)", background: "var(--success-bg)", fontSize: "var(--text-base)", borderRadius: "var(--radius-sm)" };
 
 // ─── Upload zone ─────────────────────────────────────────────────────────────
 
@@ -72,15 +72,15 @@ function UploadZone({ onUploaded }) {
       onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(Array.from(e.dataTransfer.files)); }}
       onClick={() => inputRef.current?.click()}
       style={{
-        border: `2px dashed ${dragging ? "#377e00" : "#bbb"}`,
-        borderRadius: 6,
+        border: `2px dashed ${dragging ? "var(--btn-primary-bg)" : "var(--border-input)"}`,
+        borderRadius: "var(--radius-lg)",
         padding: "22px 20px",
         textAlign: "center",
         cursor: "pointer",
-        background: dragging ? "#f2fde8" : "#fafafa",
+        background: dragging ? "var(--green-light)" : "var(--bg-surface)",
         marginBottom: 12,
-        fontSize: 13,
-        color: "#666",
+        fontSize: "var(--text-base)",
+        color: "var(--text-muted)",
         minHeight: 70,
         display: "flex",
         flexDirection: "column",
@@ -91,7 +91,7 @@ function UploadZone({ onUploaded }) {
       {uploading ? "Uploading..." : "Drop images here or click to upload to inbox"}
       <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: "none" }}
         onChange={(e) => handleFiles(Array.from(e.target.files))} />
-      {error && <div style={{ color: "#c62828", marginTop: 4 }}>{error}</div>}
+      {error && <div style={{ color: "var(--error-text)", marginTop: 4 }}>{error}</div>}
     </div>
   );
 }
@@ -100,7 +100,7 @@ function UploadZone({ onUploaded }) {
 
 function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSide, onRemove }) {
   if (!files.length) {
-    return <div style={{ padding: "8px 0", color: "#999", fontSize: 13 }}>Inbox is empty.</div>;
+    return <div style={{ padding: "8px 0", color: "var(--text-muted)", fontSize: "var(--text-base)" }}>Inbox is empty.</div>;
   }
 
   return (
@@ -117,9 +117,9 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
               alignItems: "center",
               gap: 6,
               padding: "4px 6px",
-              borderRadius: 4,
-              background: isSelected ? "#f2fde8" : "transparent",
-              border: `1px solid ${isSelected ? "#a5d6a7" : "transparent"}`,
+              borderRadius: "var(--radius-md)",
+              background: isSelected ? "var(--green-light)" : "transparent",
+              border: `1px solid ${isSelected ? "var(--green-vivid)" : "transparent"}`,
             }}
           >
             {/* Side toggle */}
@@ -133,11 +133,11 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
                 height: 22,
                 fontSize: 10,
                 fontWeight: "bold",
-                border: "1px solid #bbb",
-                borderRadius: 3,
+                border: "1px solid var(--border-input)",
+                borderRadius: "var(--radius-sm)",
                 cursor: "pointer",
-                background: side === "back" ? "#fff3e0" : "#e8f5e9",
-                color: side === "back" ? "#e65100" : "#2e7d32",
+                background: side === "back" ? "var(--warn-bg)" : "var(--success-bg)",
+                color: side === "back" ? "var(--warn-text)" : "var(--success-text)",
                 padding: 0,
                 lineHeight: 1,
               }}
@@ -153,9 +153,9 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
               <img
                 src={inboxImageUrl(f.filename, f.mtime)}
                 alt={f.filename}
-                style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 3, background: "#eee", flexShrink: 0 }}
+                style={{ width: 34, height: 34, objectFit: "cover", borderRadius: "var(--radius-sm)", background: "var(--bg-surface)", flexShrink: 0 }}
               />
-              <span style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#333" }}>
+              <span style={{ fontSize: "var(--text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>
                 {f.filename}
               </span>
             </div>
@@ -169,20 +169,20 @@ function InboxQueue({ files, selectedFilenames, fileSides, onSelect, onToggleSid
                 flexShrink: 0,
                 width: 18,
                 height: 18,
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 lineHeight: 1,
                 padding: 0,
                 border: "none",
                 borderRadius: 2,
                 cursor: "pointer",
                 background: "transparent",
-                color: "#999",
+                color: "var(--text-muted)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#c62828"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "#999"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--danger-text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
             >
               ✕
             </button>
@@ -244,7 +244,7 @@ function SourceOriginSelector({ sourceOrigins, sourceOriginId, onChange, groupId
           </button>
         </div>
       )}
-      {addError && <div style={{ color: "#c62828", fontSize: 12, marginTop: 3 }}>{addError}</div>}
+      {addError && <div style={{ color: "var(--error-text)", fontSize: "var(--text-sm)", marginTop: 3 }}>{addError}</div>}
     </div>
   );
 }
@@ -253,7 +253,7 @@ function SourceOriginSelector({ sourceOrigins, sourceOriginId, onChange, groupId
 
 function CandidateGrid({ candidates, selectedId, onSelect }) {
   if (!candidates.length) {
-    return <div style={{ color: "#999", fontSize: 13 }}>No matching cards found.</div>;
+    return <div style={{ color: "var(--text-muted)", fontSize: "var(--text-base)" }}>No matching cards found.</div>;
   }
 
   return (
@@ -265,10 +265,10 @@ function CandidateGrid({ candidates, selectedId, onSelect }) {
           style={{
             width: 80,
             cursor: "pointer",
-            border: `2px solid ${selectedId === card.item_id ? "#377e00" : "#ddd"}`,
-            borderRadius: 4,
+            border: `2px solid ${selectedId === card.item_id ? "var(--btn-primary-bg)" : "var(--border-input)"}`,
+            borderRadius: "var(--radius-md)",
             overflow: "hidden",
-            background: selectedId === card.item_id ? "#f2fde8" : "#fff",
+            background: selectedId === card.item_id ? "var(--green-light)" : "var(--bg-base)",
           }}
         >
           {card.front_image_path ? (
@@ -278,17 +278,17 @@ function CandidateGrid({ candidates, selectedId, onSelect }) {
               style={{ width: "100%", height: 70, objectFit: "cover", display: "block" }}
             />
           ) : (
-            <div style={{ width: "100%", height: 70, background: "#eee", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#999" }}>
+            <div style={{ width: "100%", height: 70, background: "var(--bg-surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted)" }}>
               No image
             </div>
           )}
           <div style={{ padding: "2px 4px", fontSize: 10, lineHeight: 1.3 }}>
             <div style={{ fontWeight: "bold" }}>#{card.item_id}</div>
-            <div style={{ color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {card.members.join(", ") || "—"}
             </div>
             {card.version && (
-              <div style={{ color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {card.version}
               </div>
             )}
@@ -616,7 +616,7 @@ export default function InboxPage() {
     return <PageContainer><div style={{ padding: 20 }}>Loading...</div></PageContainer>;
   }
   if (lookupError) {
-    return <PageContainer><div style={{ padding: 20, color: "#c62828" }}>{lookupError}</div></PageContainer>;
+    return <PageContainer><div style={{ padding: 20, color: "var(--error-text)" }}>{lookupError}</div></PageContainer>;
   }
 
   return (
@@ -630,7 +630,7 @@ export default function InboxPage() {
 
           {/* Left: inbox queue */}
           <div>
-            <div style={{ fontSize: 11, fontWeight: "bold", color: "#888", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            <div style={{ fontSize: "var(--text-xs)", fontWeight: "bold", color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
               Inbox ({inboxFiles.length})
             </div>
             <InboxQueue
@@ -644,7 +644,7 @@ export default function InboxPage() {
           </div>
 
           {/* Right: metadata form + action */}
-          <div style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 16, background: "#fff" }}>
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 16, background: "var(--bg-base)" }}>
 
             {/* ── Top section: 3-column layout ── */}
             <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: 16, marginBottom: 14, alignItems: "start" }}>
@@ -660,8 +660,8 @@ export default function InboxPage() {
                         maxHeight: previewLarge ? 220 : 80,
                         maxWidth: previewLarge ? 180 : 70,
                         objectFit: "contain",
-                        borderRadius: 4,
-                        border: "1px solid #ddd",
+                        borderRadius: "var(--radius-md)",
+                        border: "1px solid var(--border-input)",
                         display: "block",
                       }}
                     />
@@ -672,8 +672,8 @@ export default function InboxPage() {
                       style={{
                         position: "absolute", bottom: 3, right: 3,
                         fontSize: 9, padding: "1px 4px", lineHeight: 1.4,
-                        border: "1px solid #bbb", borderRadius: 2, cursor: "pointer",
-                        background: "rgba(255,255,255,0.85)", color: "#555",
+                        border: "1px solid var(--border-input)", borderRadius: 2, cursor: "pointer",
+                        background: "rgba(255,255,255,0.85)", color: "var(--text-secondary)",
                       }}
                     >
                       {previewLarge ? "−" : "+"}
@@ -689,9 +689,9 @@ export default function InboxPage() {
                           <img
                             src={inboxImageUrl(f.filename, f.mtime)}
                             alt={f.filename}
-                            style={{ maxHeight: 80, maxWidth: 70, objectFit: "contain", borderRadius: 4, border: "1px solid #ddd", display: "block" }}
+                            style={{ maxHeight: 80, maxWidth: 70, objectFit: "contain", borderRadius: "var(--radius-md)", border: "1px solid var(--border-input)", display: "block" }}
                           />
-                          <div style={{ fontSize: 10, fontWeight: "bold", marginTop: 2, color: side === "front" ? "#2e7d32" : "#e65100" }}>
+                          <div style={{ fontSize: 10, fontWeight: "bold", marginTop: 2, color: side === "front" ? "var(--success-text)" : "var(--warn-text)" }}>
                             {side.toUpperCase()}
                           </div>
                         </div>
@@ -704,16 +704,16 @@ export default function InboxPage() {
               {/* Col 2: filename, badge, Card Type, Ownership */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {panelMode === "none" && (
-                  <div style={{ color: "#999", fontSize: 13 }}>Select a file from the inbox queue.</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "var(--text-base)" }}>Select a file from the inbox queue.</div>
                 )}
                 {(panelMode === "front" || panelMode === "back") && singleFile && (
                   <>
-                    <div style={{ fontSize: 12, color: "#555" }}>{singleFile.filename}</div>
+                    <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{singleFile.filename}</div>
                     <div style={{
-                      display: "inline-block", padding: "2px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                      background: panelMode === "back" ? "#fff3e0" : "#e8f5e9",
-                      color: panelMode === "back" ? "#e65100" : "#2e7d32",
-                      border: `1px solid ${panelMode === "back" ? "#ffcc80" : "#a5d6a7"}`,
+                      display: "inline-block", padding: "2px 10px", borderRadius: "var(--radius-sm)", fontSize: "var(--text-sm)", fontWeight: "bold",
+                      background: panelMode === "back" ? "var(--warn-bg)" : "var(--success-bg)",
+                      color: panelMode === "back" ? "var(--warn-text)" : "var(--success-text)",
+                      border: `1px solid ${panelMode === "back" ? "var(--warn-border)" : "var(--success-border)"}`,
                       width: "fit-content",
                     }}>
                       {panelMode === "back" ? "Back" : "Front"}
@@ -722,8 +722,8 @@ export default function InboxPage() {
                 )}
                 {panelMode === "pair" && (
                   <div style={{
-                    display: "inline-block", padding: "3px 10px", borderRadius: 3, fontSize: 12, fontWeight: "bold",
-                    background: "#f3e5f5", color: "#6a1b9a", border: "1px solid #ce93d8", width: "fit-content",
+                    display: "inline-block", padding: "3px 10px", borderRadius: "var(--radius-sm)", fontSize: "var(--text-sm)", fontWeight: "bold",
+                    background: "var(--green-light)", color: "var(--green)", border: "1px solid var(--green-vivid)", width: "fit-content",
                   }}>
                     Pair
                   </div>
@@ -735,15 +735,15 @@ export default function InboxPage() {
                 )}
                 <div>
                   <label style={labelStyle}>Card Type</label>
-                  <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", width: "fit-content" }}>
+                  <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
                     <button
                       type="button"
                       onClick={() => setIsSpecial(false)}
                       style={{
-                        padding: "3px 10px", fontSize: 12, cursor: "pointer",
-                        border: "none", borderRight: "1px solid #ccc",
-                        background: !isSpecial ? "#377e00" : "#f5f5f5",
-                        color: !isSpecial ? "#fff" : "#333",
+                        padding: "3px 10px", fontSize: "var(--text-sm)", cursor: "pointer",
+                        border: "none", borderRight: "1px solid var(--border-input)",
+                        background: !isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                        color: !isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
                       }}
                     >
                       Regular
@@ -752,10 +752,10 @@ export default function InboxPage() {
                       type="button"
                       onClick={() => setIsSpecial(true)}
                       style={{
-                        padding: "3px 10px", fontSize: 12, cursor: "pointer",
+                        padding: "3px 10px", fontSize: "var(--text-sm)", cursor: "pointer",
                         border: "none",
-                        background: isSpecial ? "#377e00" : "#f5f5f5",
-                        color: isSpecial ? "#fff" : "#333",
+                        background: isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                        color: isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
                       }}
                     >
                       ★ Special
@@ -832,8 +832,8 @@ export default function InboxPage() {
                     key={m.member_id}
                     style={{
                       display: "flex", alignItems: "center", padding: "2px 6px",
-                      border: "1px solid #ddd", borderRadius: 3, cursor: "pointer", fontSize: 12,
-                      background: selectedMemberIds.includes(String(m.member_id)) ? "#e3f2fd" : "#f9f9f9",
+                      border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)",
+                      background: selectedMemberIds.includes(String(m.member_id)) ? "var(--green-light)" : "var(--bg-surface)",
                     }}
                   >
                     <input type="checkbox"
@@ -853,7 +853,7 @@ export default function InboxPage() {
               </div>
             </div>
 
-            <hr style={{ margin: "14px 0", borderColor: "#e0e0e0" }} />
+            <hr style={{ margin: "14px 0", borderColor: "var(--border)" }} />
 
             {/* ── Action area ── */}
             {panelMode === "front" && (
@@ -864,16 +864,16 @@ export default function InboxPage() {
 
             {panelMode === "back" && (
               <div>
-                <div style={{ fontSize: 12, fontWeight: "bold", color: "#444", marginBottom: 8 }}>
+                <div style={{ fontSize: "var(--text-sm)", fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 8 }}>
                   Attach back to:
-                  {loadingCandidates && <span style={{ color: "#999", fontWeight: "normal", marginLeft: 6 }}>Loading...</span>}
+                  {loadingCandidates && <span style={{ color: "var(--text-muted)", fontWeight: "normal", marginLeft: 6 }}>Loading...</span>}
                   {!loadingCandidates && candidates.length > 0 && (
-                    <span style={{ color: "#666", fontWeight: "normal", marginLeft: 6 }}>
+                    <span style={{ color: "var(--text-muted)", fontWeight: "normal", marginLeft: 6 }}>
                       {candidates.length} candidate{candidates.length !== 1 ? "s" : ""}
                     </span>
                   )}
                 </div>
-                {candidateError && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 8 }}>{candidateError}</div>}
+                {candidateError && <div style={{ color: "var(--error-text)", fontSize: "var(--text-base)", marginBottom: 8 }}>{candidateError}</div>}
                 <CandidateGrid candidates={candidates} selectedId={selectedCandidateId} onSelect={setSelectedCandidateId} />
                 {candidates.length > 0 && (
                   <button

@@ -21,27 +21,48 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, sectionStyle, sectionLabel, GRID_SIZES } from "../styles/commonStyles";
+import { GRID_SIZES } from "../styles/commonStyles";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
-const OWNERSHIP_BADGE_COLORS = {
-  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
-};
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  ConfirmButton,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  Modal,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  ownershipToneFromInitial,
+} from "../components/primitives";
 
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  const tone = ownershipToneFromInitial(initial);
   return (
-    <div style={{
-      position: "absolute", bottom: 4, left: 4,
-      background: "#000", color,
-      fontWeight: 700, fontSize: 12, lineHeight: "12px",
-      padding: "3px 5px", borderRadius: 4, zIndex: 2,
-    }}>
-      {initial}
+    <div style={{ position: "absolute", bottom: 4, left: 4, zIndex: 2 }}>
+      <Badge tone={tone}>{initial}</Badge>
     </div>
+  );
+}
+
+function SectionBlock({ title, children }) {
+  return (
+    <Card surface>
+      <Stack gap={3}>
+        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text-secondary)" }}>{title}</div>
+        {children}
+      </Stack>
+    </Card>
   );
 }
 
@@ -159,33 +180,33 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-        <select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130 }}>
+    <Stack gap={2}>
+      <Row gap={3} wrap>
+        <Select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
           <option value="">Genre…</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
           <>
-            <select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130 }}>
+            <Select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
               <option value="">Subgenre…</option>
               {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-            </select>
-            <button type="button" onClick={add} style={btnSm}>Add</button>
+            </Select>
+            <Button variant="secondary" size="sm" onClick={add}>Add</Button>
           </>
         )}
-      </div>
+      </Row>
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {selected.map((g, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {labelFor(g)}
-              <button type="button" onClick={() => remove(i)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -216,31 +237,32 @@ function TrackListEditor({ songs, onChange }) {
   function add() { onChange([...songs, { title: "", duration_seconds: null, track_number: songs.length + 1, disc_number: 1 }]); }
   function remove(idx) { onChange(songs.filter((_, i) => i !== idx)); }
 
+  const rowGrid = { display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: "var(--space-2)", alignItems: "center" };
+
   return (
-    <div>
+    <Stack gap={2}>
       {songs.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: 4, marginBottom: 4, alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)", textAlign: "center" }}>#</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Title</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Duration</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Disc</span>
+        <div style={rowGrid}>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)", textAlign: "center" }}>#</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Title</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Duration</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Disc</span>
           <span />
         </div>
       )}
       {songs.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: 4, marginBottom: 4, alignItems: "center" }}>
-          <input
+        <div key={i} style={rowGrid}>
+          <Input
             value={s.track_number || ""}
             onChange={e => update(i, "track_number", e.target.value)}
-            style={{ ...inputStyle, textAlign: "center", padding: "2px 3px" }}
+            style={{ textAlign: "center", padding: "2px 3px" }}
           />
-          <input
+          <Input
             value={s.title}
             onChange={e => update(i, "title", e.target.value)}
-            style={inputStyle}
             placeholder="Track title"
           />
-          <input
+          <Input
             value={s.duration_seconds ? formatDuration(s.duration_seconds) : (s._durStr || "")}
             onChange={e => {
               const next = [...songs];
@@ -248,19 +270,21 @@ function TrackListEditor({ songs, onChange }) {
               next[i] = { ...next[i], duration_seconds: parsed, _durStr: e.target.value };
               onChange(next);
             }}
-            style={{ ...inputStyle, padding: "2px 4px" }}
+            style={{ padding: "2px 4px" }}
             placeholder="m:ss"
           />
-          <input
+          <Input
             value={s.disc_number || 1}
             onChange={e => update(i, "disc_number", parseInt(e.target.value, 10) || 1)}
-            style={{ ...inputStyle, textAlign: "center", padding: "2px 3px" }}
+            style={{ textAlign: "center", padding: "2px 3px" }}
           />
-          <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828", padding: "2px 5px" }}>✕</button>
+          <RemoveButton onClick={() => remove(i)} />
         </div>
       ))}
-      <button type="button" onClick={add} style={{ ...btnSm, marginTop: 2 }}>+ Track</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start", marginTop: "var(--space-1)" }}>
+        + Track
+      </Button>
+    </Stack>
   );
 }
 
@@ -276,57 +300,64 @@ function EditionsEditor({ editions, formatTypes, ownershipStatuses, onChange }) 
   function remove(idx) { onChange(editions.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {editions.map((e, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Edition {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Format</label>
-              <select value={e.format_type_id || ""} onChange={ev => update(i, "format_type_id", ev.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Version Name</label>
-              <input value={e.version_name || ""} onChange={ev => update(i, "version_name", ev.target.value)} style={inputStyle} placeholder="e.g. Limited Edition" />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Label</label>
-              <input value={e.label || ""} onChange={ev => update(i, "label", ev.target.value)} style={inputStyle} placeholder="Record label" />
-            </div>
-            <div>
-              <label style={labelStyle}>Catalog #</label>
-              <input value={e.catalog_number || ""} onChange={ev => update(i, "catalog_number", ev.target.value)} style={inputStyle} />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Barcode</label>
-              <input value={e.barcode || ""} onChange={ev => update(i, "barcode", ev.target.value)} style={inputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership</label>
-              <select value={e.ownership_status_id || ""} onChange={ev => update(i, "ownership_status_id", ev.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={e.notes || ""} onChange={ev => update(i, "notes", ev.target.value)} style={inputStyle} />
-          </div>
+        <div
+          key={i}
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Edition {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Format">
+                <Select value={e.format_type_id || ""} onChange={ev => update(i, "format_type_id", ev.target.value)}>
+                  <option value="">None</option>
+                  {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Version Name">
+                <Input value={e.version_name || ""} onChange={ev => update(i, "version_name", ev.target.value)} placeholder="e.g. Limited Edition" />
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="Label">
+                <Input value={e.label || ""} onChange={ev => update(i, "label", ev.target.value)} placeholder="Record label" />
+              </FormField>
+              <FormField label="Catalog #">
+                <Input value={e.catalog_number || ""} onChange={ev => update(i, "catalog_number", ev.target.value)} />
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="Barcode">
+                <Input value={e.barcode || ""} onChange={ev => update(i, "barcode", ev.target.value)} />
+              </FormField>
+              <FormField label="Ownership">
+                <Select value={e.ownership_status_id || ""} onChange={ev => update(i, "ownership_status_id", ev.target.value)}>
+                  <option value="">None</option>
+                  {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                </Select>
+              </FormField>
+            </Grid>
+            <FormField label="Notes">
+              <Input value={e.notes || ""} onChange={ev => update(i, "notes", ev.target.value)} />
+            </FormField>
+          </Stack>
         </div>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Edition</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Edition
+      </Button>
+    </Stack>
   );
 }
 
@@ -338,7 +369,7 @@ const MusicGridItem = memo(function MusicGridItem({ release, isSelected, onToggl
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
-      borderRadius: 3, boxSizing: "border-box",
+      borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
       <div style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
@@ -349,17 +380,17 @@ const MusicGridItem = memo(function MusicGridItem({ release, isSelected, onToggl
         </div>
         <OwnershipBadge statusName={release.ownership_status} />
         {release.cover_image_url ? (
-          <img src={getImageUrl(release.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+          <img src={getImageUrl(release.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: "var(--radius-sm)" }} />
         ) : (
-          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>No Cover</span>
           </div>
         )}
       </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
-          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{release.title}</div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(release.artists || []).join(", ")}</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{release.title}</div>
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(release.artists || []).join(", ")}</div>
         </div>
       )}
     </div>
@@ -372,7 +403,6 @@ function MusicDetailModal({ itemId, ownershipStatuses, releaseTypes, formatTypes
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [coverPreview, setCoverPreview] = useState(null);
   const coverFileRef = useRef(null);
@@ -466,134 +496,138 @@ function MusicDetailModal({ itemId, ownershipStatuses, releaseTypes, formatTypes
       onDeleted(itemId);
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
   }
 
+  const footer = form ? (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label="Delete"
+        confirmLabel={deleting ? "Deleting…" : "Confirm"}
+        promptText="Delete this release?"
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </Row>
+    </Row>
+  ) : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Release Detail"}</div>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
-        </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="md"
+      title={!form ? "Loading…" : form.title || "Release Detail"}
+      footer={footer}
+      footerJustify="between"
+    >
+      {!form && !error && <div style={{ color: "var(--text-muted)" }}>Loading…</div>}
+      {error && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{error}</Alert>}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
-          {error && <div style={alertError}>{error}</div>}
-
-          {form && (
-            <>
-              {coverPreview && (
-                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                  <img src={getImageUrl(coverPreview)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} onError={() => setCoverPreview(null)} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{form.artists.filter(Boolean).join(", ")}</div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label style={labelStyle}>Title *</label>
-                  <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Release Type</label>
-                  <select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)} style={selectStyle}>
-                    {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Ownership</label>
-                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Release Date</label>
-                  <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY-MM-DD" />
-                </div>
-                <div>
-                  <label style={labelStyle}>Cover Image URL</label>
-                  <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <input value={form.coverImageUrl} onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-                    <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                    <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                  </div>
+      {form && (
+        <Stack gap={5}>
+          {coverPreview && (
+            <Row gap={5} align="start">
+              <CoverThumb src={getImageUrl(coverPreview)} alt="cover" size="md" onError={() => setCoverPreview(null)} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-md)", marginBottom: 2 }}>{form.title}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                  {form.artists.filter(Boolean).join(", ")}
                 </div>
               </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Artist(s)</label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {form.artists.map((a, i) => (
-                    <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                      <input value={a} onChange={e => { const next = [...form.artists]; next[i] = e.target.value; set("artists", next); }} style={{ ...inputStyle, flex: 1 }} placeholder="Artist name" />
-                      {form.artists.length > 1 && <button type="button" onClick={() => set("artists", form.artists.filter((_, x) => x !== i))} style={{ ...btnSm, color: "#c62828" }}>✕</button>}
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => set("artists", [...form.artists, ""])} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Artist</button>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Genre</label>
-                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Description</label>
-                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Notes</label>
-                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 40, resize: "vertical" }} />
-              </div>
-
-              <div style={sectionStyle}>
-                <div style={sectionLabel}>Track List</div>
-                <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
-              </div>
-
-              <div style={sectionStyle}>
-                <div style={sectionLabel}>Editions / Versions</div>
-                <EditionsEditor
-                  editions={form.editions}
-                  formatTypes={formatTypes}
-                  ownershipStatuses={ownershipStatuses}
-                  onChange={v => set("editions", v)}
-                />
-              </div>
-            </>
+            </Row>
           )}
-        </div>
 
-        {form && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-            <div>
-              {!confirmDelete
-                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this release?</span>
-                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
-                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                  </div>
-              }
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <FormField label="Title" required>
+            <Input value={form.title} onChange={e => set("title", e.target.value)} />
+          </FormField>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Release Type">
+              <Select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)}>
+                {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Ownership">
+              <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Release Date">
+              <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY-MM-DD" />
+            </FormField>
+            <FormField label="Cover Image URL">
+              <Row gap={3} align="start">
+                <Input
+                  value={form.coverImageUrl}
+                  onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
+                  placeholder="https://…"
+                  style={{ flex: 1 }}
+                />
+                <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                  Add Image
+                </Button>
+              </Row>
+            </FormField>
+          </Grid>
+
+          <FormField label="Artist(s)">
+            <Stack gap={2}>
+              {form.artists.map((a, i) => (
+                <Row key={i} gap={2} align="center">
+                  <Input
+                    value={a}
+                    onChange={e => { const next = [...form.artists]; next[i] = e.target.value; set("artists", next); }}
+                    placeholder="Artist name"
+                    style={{ flex: 1 }}
+                  />
+                  {form.artists.length > 1 && (
+                    <RemoveButton onClick={() => set("artists", form.artists.filter((_, x) => x !== i))} />
+                  )}
+                </Row>
+              ))}
+              <Button variant="secondary" size="sm" onClick={() => set("artists", [...form.artists, ""])} style={{ alignSelf: "flex-start" }}>
+                + Artist
+              </Button>
+            </Stack>
+          </FormField>
+
+          <FormField label="Genre">
+            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+          </FormField>
+
+          <FormField label="Notes">
+            <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+          </FormField>
+
+          <SectionBlock title="Track List">
+            <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
+          </SectionBlock>
+
+          <SectionBlock title="Editions / Versions">
+            <EditionsEditor
+              editions={form.editions}
+              formatTypes={formatTypes}
+              ownershipStatuses={ownershipStatuses}
+              onChange={v => set("editions", v)}
+            />
+          </SectionBlock>
+        </Stack>
+      )}
+    </Modal>
   );
 }
 
@@ -601,19 +635,18 @@ function MusicDetailModal({ itemId, ownershipStatuses, releaseTypes, formatTypes
 
 function BulkField({ label, enabled, onToggle, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
+    <Stack gap={2}>
+      <Checkbox
+        label={<span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{label}</span>}
+        checked={enabled}
+        onChange={onToggle}
+      />
+      {enabled && <div style={{ paddingLeft: "var(--space-8)" }}>{children}</div>}
+    </Stack>
   );
 }
 
 function MusicBulkEdit({ selectedIds, ownershipStatuses, releaseTypes, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updateReleaseType, setUpdateReleaseType] = useState(false);
@@ -621,10 +654,10 @@ function MusicBulkEdit({ selectedIds, ownershipStatuses, releaseTypes, onClose, 
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
   const anyEnabled = updateOwnership || updateReleaseType;
+  const noun = selectedIds.length === 1 ? "release" : "releases";
 
   async function handleSave() {
     if (!anyEnabled) { setError("Select at least one field to update."); return; }
@@ -638,52 +671,55 @@ function MusicBulkEdit({ selectedIds, ownershipStatuses, releaseTypes, onClose, 
   }
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
     try { await bulkDeleteMusic(selectedIds); onDeleted(); }
-    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    catch (err) { setError(err.message || "Failed to delete"); }
     finally { setDeleting(false); }
   }
 
+  const footer = (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label={`Delete ${selectedIds.length} ${noun}`}
+        confirmLabel={deleting ? "…" : "Yes"}
+        cancelLabel="No"
+        promptText={`Delete ${selectedIds.length}?`}
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving…" : `Apply to ${selectedIds.length}`}
+        </Button>
+      </Row>
+    </Row>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} release{selectedIds.length !== 1 ? "s" : ""}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
-        </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Release Type" enabled={updateReleaseType} onToggle={() => setUpdateReleaseType((p) => !p)}>
-            <select value={releaseTypeId} onChange={(e) => setReleaseTypeId(e.target.value)} style={fieldStyle}>
-              {releaseTypes.map((r) => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
-            </select>
-          </BulkField>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <div>
-            {!confirmDelete
-              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} release{selectedIds.length !== 1 ? "s" : ""}</button>
-              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
-                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
-                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
-                </span>
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedIds.length} ${noun}`}
+      footer={footer}
+      footerJustify="between"
+    >
+      <Stack gap={5}>
+        {error && <Alert tone="error">{error}</Alert>}
+        <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+          <Select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)}>
+            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Release Type" enabled={updateReleaseType} onToggle={() => setUpdateReleaseType((p) => !p)}>
+          <Select value={releaseTypeId} onChange={(e) => setReleaseTypeId(e.target.value)}>
+            {releaseTypes.map((r) => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
+          </Select>
+        </BulkField>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -825,7 +861,7 @@ export default function MusicLibraryPage() {
         return arr.sort((a, b) =>
           flip * ((a.ownership_status || "").localeCompare(b.ownership_status || ""))
         );
-      default: // title
+      default:
         return arr.sort((a, b) =>
           flip * ((a.title_sort || a.title || "").localeCompare(b.title_sort || b.title || ""))
         );
@@ -851,22 +887,24 @@ export default function MusicLibraryPage() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: "var(--text-base)" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <Row gap={5}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {loading ? "Loading…" : `${sorted.length} release${sorted.length !== 1 ? "s" : ""}`}
           </span>
           {selectedIds.size > 0 && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
-              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
-              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
-            </span>
+            <Row gap={3}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--btn-primary-bg)", fontWeight: 700 }}>
+                {selectedIds.size} selected
+              </span>
+              <Button variant="primary" size="sm" onClick={() => setBulkEditOpen(true)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+            </Row>
           )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        </Row>
+        <Row gap={4}>
           <SegmentedButtons
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
@@ -881,7 +919,7 @@ export default function MusicLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
-        </div>
+        </Row>
       </div>
 
       {/* Main layout */}
@@ -899,11 +937,11 @@ export default function MusicLibraryPage() {
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {loading ? (
-            <p style={{ padding: 20, fontSize: 13 }}>Loading…</p>
+            <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p>
           ) : sorted.length === 0 ? (
-            <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No releases found.</p>
+            <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>No releases found.</p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
               {sorted.map(r => (
                 <MusicGridItem key={r.item_id} release={r}
                   isSelected={selectedIds.has(r.item_id)}
@@ -913,7 +951,7 @@ export default function MusicLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -983,17 +1021,17 @@ export default function MusicLibraryPage() {
                       {showThumbnails && (
                         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
                           {r.cover_image_url
-                            ? <img src={getImageUrl(r.cover_image_url)} alt="" style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-                            : <div style={{ width: 42, height: 42, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                            ? <img src={getImageUrl(r.cover_image_url)} alt="" style={{ width: 42, height: 42, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 42, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
                         </td>
                       )}
                       <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 }}>{r.title}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.artists || []).join(", ")}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.release_type}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{r.release_date?.slice(0, 4) || ""}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.editions_summary || ""}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.genres || []).join(", ")}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.ownership_status}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.artists || []).join(", ")}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.release_type}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{r.release_date?.slice(0, 4) || ""}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.editions_summary || ""}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.genres || []).join(", ")}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.ownership_status}</td>
                     </tr>
                   );
                 })}

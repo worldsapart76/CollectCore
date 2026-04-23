@@ -41,6 +41,78 @@
   --shadow-card-hover: 0 4px 16px rgba(55, 126, 0, 0.16), 0 2px 4px rgba(55, 126, 0, 0.08);
   --shadow-tile:       0 2px 8px rgba(55, 126, 0, 0.10), 0 1px 2px rgba(55, 126, 0, 0.06);
   --shadow-tile-hover: 0 6px 24px rgba(55, 126, 0, 0.18), 0 2px 6px rgba(55, 126, 0, 0.10);
+  --shadow-modal:      0 12px 40px rgba(0, 0, 0, 0.25);
+  --shadow-dropdown:   0 8px 24px rgba(0, 0, 0, 0.15);
+
+  /* Danger / destructive actions */
+  --btn-danger-bg:     #b91c1c;
+  --btn-danger-bg-hover: #991b1b;
+  --btn-danger-text:   #ffffff;
+  --danger-text:       #c62828;
+  --danger-text-strong:#991b1b;
+
+  /* Success + warn state */
+  --success-text:   #166534;
+  --success-bg:     #dcfce7;
+  --success-border: #2e7d32;
+  --warn-text:      #92400e;
+  --warn-bg:        #fef3c7;
+  --warn-border:    #d97706;
+
+  /* Ownership badge palette */
+  --badge-bg:             #000000;
+  --badge-owned:          #39ff14;
+  --badge-wanted:         #ffff00;
+  --badge-trade:          #ff3b3b;
+  --badge-borrowed:       #00bfff;
+  --badge-formerly-owned: #607d8b;
+  --badge-pending-out:    #ff9900;
+  --badge-pending-in:     #00bfff;
+  --badge-default:        #ffffff;
+
+  /* Accents */
+  --accent-rating:         #f9a825;
+  --accent-special:        #f5c518;
+  --accent-special-shadow: #000000;
+
+  /* Spacing scale (4px-ish grid) */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 20px;
+  --space-9: 24px;
+
+  /* Font-size scale (13px = de-facto base) */
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;
+  --text-lg:   17px;
+  --text-xl:   1.1rem;
+
+  /* Border-radius scale */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+
+  /* Z-index scale */
+  --z-dropdown: 200;
+  --z-modal:    1000;
+  --z-toast:    2000;
+
+  /* Transitions */
+  --transition-fast: 0.1s ease;
+  --transition-base: 0.15s ease;
+
+  /* Focus ring */
+  --focus-ring: 2px solid var(--green-vivid);
+  --focus-ring-offset: 2px;
 }
 
 [data-theme="dark"] {
@@ -82,6 +154,39 @@
   --shadow-card-hover: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(156, 237, 90, 0.28), 0 0 16px rgba(156, 237, 90, 0.07);
   --shadow-tile:       0 2px 8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(156, 237, 90, 0.08);
   --shadow-tile-hover: 0 6px 24px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(156, 237, 90, 0.35), 0 0 24px rgba(156, 237, 90, 0.10);
+  --shadow-modal:      0 12px 40px rgba(0, 0, 0, 0.7);
+  --shadow-dropdown:   0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Danger / destructive actions */
+  --btn-danger-bg:       #7f1d1d;
+  --btn-danger-bg-hover: #991b1b;
+  --btn-danger-text:     #ffffff;
+  --danger-text:         #fca5a5;
+  --danger-text-strong:  #fca5a5;
+
+  /* Success + warn state */
+  --success-text:   #86efac;
+  --success-bg:     rgba(34, 197, 94, 0.12);
+  --success-border: #15803d;
+  --warn-text:      #fcd34d;
+  --warn-bg:        rgba(217, 119, 6, 0.15);
+  --warn-border:    #b45309;
+
+  /* Ownership badge palette — same neon, on dark */
+  --badge-bg:             #000000;
+  --badge-owned:          #39ff14;
+  --badge-wanted:         #ffff00;
+  --badge-trade:          #ff3b3b;
+  --badge-borrowed:       #00bfff;
+  --badge-formerly-owned: #607d8b;
+  --badge-pending-out:    #ff9900;
+  --badge-pending-in:     #00bfff;
+  --badge-default:        #ffffff;
+
+  /* Accents */
+  --accent-rating:         #fbbf24;
+  --accent-special:        #f5c518;
+  --accent-special-shadow: #000000;
 }
 
 /* ── Utility button classes ──────────────────────────────────────────────────── */

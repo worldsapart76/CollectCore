@@ -319,18 +319,18 @@ export default function PhotocardBulkEdit({
           enabled={updateIsSpecial}
           onToggle={() => setUpdateIsSpecial((p) => !p)}
         >
-          <div style={{ display: "flex", border: "1px solid #ccc", borderRadius: 3, overflow: "hidden", width: "fit-content" }}>
+          <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
             <button
               type="button"
               onClick={() => setBulkIsSpecial(false)}
               style={{
                 padding: "3px 10px",
-                fontSize: 12,
+                fontSize: "var(--text-sm)",
                 cursor: "pointer",
                 border: "none",
-                borderRight: "1px solid #ccc",
-                background: !bulkIsSpecial ? "#1565c0" : "#f5f5f5",
-                color: !bulkIsSpecial ? "#fff" : "#333",
+                borderRight: "1px solid var(--border-input)",
+                background: !bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                color: !bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
               }}
             >
               Regular
@@ -340,11 +340,11 @@ export default function PhotocardBulkEdit({
               onClick={() => setBulkIsSpecial(true)}
               style={{
                 padding: "3px 10px",
-                fontSize: 12,
+                fontSize: "var(--text-sm)",
                 cursor: "pointer",
                 border: "none",
-                background: bulkIsSpecial ? "#1565c0" : "#f5f5f5",
-                color: bulkIsSpecial ? "#fff" : "#333",
+                background: bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                color: bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
               }}
             >
               ★ Special
@@ -360,8 +360,8 @@ export default function PhotocardBulkEdit({
               Delete {selectedCards.length} cards
             </button>
           ) : (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-              <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedCards.length} cards?</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-base)" }}>
+              <span style={{ color: "var(--danger-text)", fontWeight: "bold" }}>Delete {selectedCards.length} cards?</span>
               <button style={styles.deleteBtn} onClick={handleBulkDelete} disabled={deleting}>
                 {deleting ? "Deleting..." : "Yes"}
               </button>
@@ -405,42 +405,42 @@ function BulkRow({ label, enabled, onToggle, disabled, disabledReason, children 
 
 const styles = {
   panel: {
-    background: "#fff",
-    border: "1px solid #ddd",
-    borderRadius: 6,
+    background: "var(--bg-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-lg)",
     width: 420,
     maxHeight: "85vh",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 2px 12px rgba(0,0,0,0.15)",
+    boxShadow: "var(--shadow-modal)",
   },
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     padding: "10px 14px",
-    borderBottom: "1px solid #e0e0e0",
+    borderBottom: "1px solid var(--border)",
   },
   title: {
     fontWeight: "bold",
-    fontSize: 14,
+    fontSize: "var(--text-md)",
   },
   closeBtn: {
     background: "none",
     border: "none",
     fontSize: 15,
     cursor: "pointer",
-    color: "#666",
+    color: "var(--text-muted)",
     padding: "0 4px",
   },
   errorBox: {
     margin: "8px 14px 0",
     padding: "7px 10px",
-    background: "#ffebee",
-    border: "1px solid #c62828",
-    borderRadius: 3,
-    fontSize: 13,
-    color: "#c62828",
+    background: "var(--error-bg)",
+    border: "1px solid var(--danger-text)",
+    borderRadius: "var(--radius-sm)",
+    fontSize: "var(--text-base)",
+    color: "var(--danger-text)",
   },
   body: {
     padding: "12px 14px",
@@ -456,38 +456,38 @@ const styles = {
     cursor: "pointer",
   },
   disabledNote: {
-    fontSize: 11,
-    color: "#999",
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
     fontWeight: "normal",
   },
   select: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
   },
   input: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
     boxSizing: "border-box",
   },
   textarea: {
     width: "100%",
     padding: "5px 6px",
-    fontSize: 13,
-    border: "1px solid #ccc",
-    borderRadius: 3,
+    fontSize: "var(--text-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
     resize: "vertical",
     boxSizing: "border-box",
   },
   radioLabel: {
     display: "flex",
     alignItems: "center",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
   },
   memberGrid: {
@@ -498,12 +498,12 @@ const styles = {
   memberChip: {
     display: "flex",
     alignItems: "center",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
     padding: "3px 6px",
-    border: "1px solid #ddd",
-    borderRadius: 3,
-    background: "#f9f9f9",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-surface)",
   },
   footer: {
     display: "flex",
@@ -511,7 +511,7 @@ const styles = {
     alignItems: "center",
     gap: 8,
     padding: "10px 14px",
-    borderTop: "1px solid #e0e0e0",
+    borderTop: "1px solid var(--border)",
   },
   footerLeft: {
     display: "flex",
@@ -519,29 +519,29 @@ const styles = {
   },
   deleteBtn: {
     padding: "5px 12px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #c62828",
-    borderRadius: 3,
-    background: "#fff",
-    color: "#c62828",
+    border: "1px solid var(--danger-text)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-base)",
+    color: "var(--danger-text)",
   },
   cancelBtn: {
     padding: "5px 12px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #ccc",
-    borderRadius: 3,
-    background: "#fff",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-base)",
   },
   saveBtn: {
     padding: "5px 16px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #1565c0",
-    borderRadius: 3,
-    background: "#1565c0",
-    color: "#fff",
+    border: "1px solid var(--btn-primary-bg)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--btn-primary-bg)",
+    color: "var(--btn-primary-text)",
     fontWeight: "bold",
   },
 };

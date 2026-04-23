@@ -22,29 +22,38 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, GRID_SIZES } from "../styles/commonStyles";
+import { GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmButton,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  Modal,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  ownershipToneFromInitial,
+} from "../components/primitives";
 
 const TV_CATEGORY = "TV Series";
-
-const OWNERSHIP_BADGE_COLORS = {
-  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
-};
 
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  const tone = ownershipToneFromInitial(initial);
   return (
-    <div style={{
-      position: "absolute", bottom: 4, left: 4,
-      background: "#000", color,
-      fontWeight: 700, fontSize: 12, lineHeight: "12px",
-      padding: "3px 5px", borderRadius: 4, zIndex: 2,
-    }}>
-      {initial}
+    <div style={{ position: "absolute", bottom: 4, left: 4, zIndex: 2 }}>
+      <Badge tone={tone}>{initial}</Badge>
     </div>
   );
 }
@@ -73,13 +82,13 @@ function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, fil
 
   return (
     <FilterSidebarShell onClearAll={hasFilters ? onClearAll : null}>
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ display: "block", fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 3 }}>Search</label>
-        <input
+      <div style={{ marginBottom: "var(--space-5)" }}>
+        <label style={{ display: "block", fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "var(--space-1)" }}>Search</label>
+        <Input
+          size="sm"
           value={filters.search}
           onChange={e => onSectionChange("search", e.target.value)}
           placeholder="Title, director…"
-          style={{ fontSize: 12, padding: "3px 6px", borderRadius: 3, border: "1px solid var(--border-input)", width: "100%", boxSizing: "border-box" }}
         />
       </div>
       <TriStateFilterSection
@@ -146,29 +155,31 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-        <select value={topSel} onChange={e => { setTopSel(e.target.value); setSubSel(""); }} style={{ ...selectStyle, flex: 1 }}>
+    <Stack gap={2}>
+      <Row gap={3} align="center">
+        <Select value={topSel} onChange={e => { setTopSel(e.target.value); setSubSel(""); }} style={{ flex: 1 }}>
           <option value="">— Genre —</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
-          <select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+          <Select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ flex: 1 }}>
             <option value="">— Subgenre —</option>
             {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-          </select>
+          </Select>
         )}
-        <button type="button" onClick={add} style={btnSm}>+ Add</button>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {selected.map((g, i) => (
-          <span key={i} style={{ fontSize: 11, background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, padding: "1px 8px", display: "flex", gap: 4, alignItems: "center", color: "var(--green)" }}>
-            {labelFor(g)}
-            <button type="button" onClick={() => remove(i)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, color: "#c62828" }}>✕</button>
-          </span>
-        ))}
-      </div>
-    </div>
+        <Button variant="secondary" size="sm" onClick={add}>+ Add</Button>
+      </Row>
+      {selected.length > 0 && (
+        <Row gap={2} wrap>
+          {selected.map((g, i) => (
+            <Badge key={i} tone="tag">
+              {labelFor(g)}
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
+          ))}
+        </Row>
+      )}
+    </Stack>
   );
 }
 
@@ -179,32 +190,29 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
   function updateCopy(idx, field, val) { onChange(copies.map((c, i) => i === idx ? { ...c, [field]: val } : c)); }
   function removeCopy(idx) { onChange(copies.filter((_, i) => i !== idx)); }
   return (
-    <div>
+    <Stack gap={3}>
       {copies.map((c, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 6, marginBottom: 6, alignItems: "end" }}>
-          <div>
-            <label style={labelStyle}>Format</label>
-            <select value={c.format_type_id || ""} onChange={e => updateCopy(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
+          <FormField label="Format">
+            <Select value={c.format_type_id || ""} onChange={e => updateCopy(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Format —</option>
               {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+            </Select>
+          </FormField>
+          <FormField label="Ownership">
+            <Select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Status —</option>
               {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={c.notes || ""} onChange={e => updateCopy(i, "notes", e.target.value)} placeholder="Notes" style={inputStyle} />
-          </div>
-          <button type="button" onClick={() => removeCopy(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
+            </Select>
+          </FormField>
+          <FormField label="Notes">
+            <Input value={c.notes || ""} onChange={e => updateCopy(i, "notes", e.target.value)} placeholder="Notes" />
+          </FormField>
+          <RemoveButton onClick={() => removeCopy(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
         </div>
       ))}
-      <button type="button" onClick={addCopy} style={btnSm}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={addCopy} style={{ alignSelf: "flex-start" }}>+ Add Copy</Button>
+    </Stack>
   );
 }
 
@@ -218,36 +226,32 @@ function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
   function updateSeason(idx, field, val) { onChange(seasons.map((s, i) => i === idx ? { ...s, [field]: val } : s)); }
   function removeSeason(idx) { onChange(seasons.filter((_, i) => i !== idx)); }
   return (
-    <div>
+    <Stack gap={3}>
       {seasons.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: 6, marginBottom: 6, alignItems: "end" }}>
-          <div>
-            <label style={labelStyle}>Season</label>
-            <input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} style={inputStyle} min={1} />
-          </div>
-          <div>
-            <label style={labelStyle}>Episodes</label>
-            <input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" style={inputStyle} min={1} />
-          </div>
-          <div>
-            <label style={labelStyle}>Format</label>
-            <select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
+          <FormField label="Season">
+            <Input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} min={1} />
+          </FormField>
+          <FormField label="Episodes">
+            <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
+          </FormField>
+          <FormField label="Format">
+            <Select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Format —</option>
               {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+            </Select>
+          </FormField>
+          <FormField label="Ownership">
+            <Select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Status —</option>
               {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
-            </select>
-          </div>
-          <button type="button" onClick={() => removeSeason(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
+            </Select>
+          </FormField>
+          <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
         </div>
       ))}
-      <button type="button" onClick={addSeason} style={btnSm}>+ Add Season</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={addSeason} style={{ alignSelf: "flex-start" }}>+ Add Season</Button>
+    </Stack>
   );
 }
 
@@ -259,7 +263,7 @@ const VideoGridItem = memo(function VideoGridItem({ video, isSelected, onToggleS
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
-      borderRadius: 3, boxSizing: "border-box",
+      borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
       <div style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
@@ -270,17 +274,17 @@ const VideoGridItem = memo(function VideoGridItem({ video, isSelected, onToggleS
         </div>
         <OwnershipBadge statusName={video.ownership_status} />
         {video.cover_image_url ? (
-          <img src={getImageUrl(video.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+          <img src={getImageUrl(video.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: "var(--radius-sm)" }} />
         ) : (
-          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>No Cover</span>
           </div>
         )}
       </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
-          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{video.title}</div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{video.title}</div>
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {(video.directors || []).join(", ") || (video.release_date?.slice(0, 4) || "")}
           </div>
         </div>
@@ -295,7 +299,6 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const coverFileRef = useRef(null);
 
@@ -374,146 +377,132 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
       onDeleted(item.item_id);
     } catch (e) {
       setError(e.message || "Delete failed.");
-      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
   }
 
+  const footer = form ? (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label="Delete"
+        confirmLabel={deleting ? "Deleting…" : "Confirm"}
+        promptText="Delete this video?"
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </Row>
+    </Row>
+  ) : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Video Detail"}</div>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
-        </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="md"
+      title={!form ? "Loading…" : form.title || "Video Detail"}
+      footer={footer}
+      footerJustify="between"
+    >
+      {!form && !error && <div style={{ color: "var(--text-muted)" }}>Loading…</div>}
+      {error && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{error}</Alert>}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
-          {error && <div style={alertError}>{error}</div>}
-
-          {form && (
-            <>
-              {form.cover_image_url && (
-                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                  <img src={getImageUrl(form.cover_image_url)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{form.director_names.filter(Boolean).join(", ")}</div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={labelStyle}>Content Type</label>
-                  <select value={form.top_level_category_id} onChange={e => setForm(f => ({ ...f, top_level_category_id: e.target.value, copies: [], seasons: [] }))} style={selectStyle}>
-                    {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Ownership</label>
-                  <select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)} style={selectStyle}>
-                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                  </select>
+      {form && (
+        <Stack gap={5}>
+          {form.cover_image_url && (
+            <Row gap={5} align="start">
+              <CoverThumb src={getImageUrl(form.cover_image_url)} alt="cover" size="md" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-md)", marginBottom: 2 }}>{form.title}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                  {form.director_names.filter(Boolean).join(", ")}
                 </div>
               </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Title *</label>
-                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={labelStyle}>Release Date</label>
-                  <input type="date" value={form.release_date} onChange={e => set("release_date", e.target.value)} style={inputStyle} />
-                </div>
-                {!isTV && (
-                  <div>
-                    <label style={labelStyle}>Runtime (min)</label>
-                    <input type="number" value={form.runtime_minutes} onChange={e => set("runtime_minutes", e.target.value)} style={inputStyle} min={1} />
-                  </div>
-                )}
-                <div>
-                  <label style={labelStyle}>Watch Status</label>
-                  <select value={form.reading_status_id} onChange={e => set("reading_status_id", e.target.value)} style={selectStyle}>
-                    <option value="">— Status —</option>
-                    {watchStatuses.map(s => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Cover Image URL</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <input value={form.cover_image_url} onChange={e => set("cover_image_url", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                  {form.cover_image_url && <img src={getImageUrl(form.cover_image_url)} alt="" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Genres</label>
-                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-              </div>
-
-              {isTV ? (
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Seasons</label>
-                  <SeasonsEditor seasons={form.seasons} onChange={v => set("seasons", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
-                </div>
-              ) : (
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Copies / Formats</label>
-                  <CopiesEditor copies={form.copies} onChange={v => set("copies", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
-                </div>
-              )}
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Description</label>
-                <textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Notes</label>
-                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Director(s) / Creator(s)</label>
-                <NameList names={form.director_names} onChange={v => set("director_names", v)} addLabel="+ Director" placeholder="Director name" />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Cast</label>
-                <NameList names={form.cast_names} onChange={v => set("cast_names", v)} addLabel="+ Cast member" placeholder="Cast member name" />
-              </div>
-            </>
+            </Row>
           )}
-        </div>
 
-        {form && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-            <div>
-              {!confirmDelete
-                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this video?</span>
-                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
-                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                  </div>
-              }
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <Grid cols={2} gap={5}>
+            <FormField label="Content Type">
+              <Select value={form.top_level_category_id} onChange={e => setForm(f => ({ ...f, top_level_category_id: e.target.value, copies: [], seasons: [] }))}>
+                {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Ownership">
+              <Select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)}>
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
+
+          <FormField label="Title" required>
+            <Input value={form.title} onChange={e => set("title", e.target.value)} />
+          </FormField>
+
+          <Grid cols={3} gap={5}>
+            <FormField label="Release Date">
+              <Input type="date" value={form.release_date} onChange={e => set("release_date", e.target.value)} />
+            </FormField>
+            {!isTV && (
+              <FormField label="Runtime (min)">
+                <Input type="number" value={form.runtime_minutes} onChange={e => set("runtime_minutes", e.target.value)} min={1} />
+              </FormField>
+            )}
+            <FormField label="Watch Status">
+              <Select value={form.reading_status_id} onChange={e => set("reading_status_id", e.target.value)}>
+                <option value="">— Status —</option>
+                {watchStatuses.map(s => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
+
+          <FormField label="Cover Image URL">
+            <Row gap={3} align="start">
+              <Input value={form.cover_image_url} onChange={e => set("cover_image_url", e.target.value)} style={{ flex: 1 }} />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                Add Image
+              </Button>
+              {form.cover_image_url && <CoverThumb src={getImageUrl(form.cover_image_url)} alt="" size="sm" />}
+            </Row>
+          </FormField>
+
+          <FormField label="Genres">
+            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+          </FormField>
+
+          {isTV ? (
+            <FormField label="Seasons">
+              <SeasonsEditor seasons={form.seasons} onChange={v => set("seasons", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
+            </FormField>
+          ) : (
+            <FormField label="Copies / Formats">
+              <CopiesEditor copies={form.copies} onChange={v => set("copies", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
+            </FormField>
+          )}
+
+          <FormField label="Description">
+            <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+          </FormField>
+          <FormField label="Notes">
+            <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+          </FormField>
+
+          <FormField label="Director(s) / Creator(s)">
+            <NameList names={form.director_names} onChange={v => set("director_names", v)} addLabel="+ Director" placeholder="Director name" />
+          </FormField>
+
+          <FormField label="Cast">
+            <NameList names={form.cast_names} onChange={v => set("cast_names", v)} addLabel="+ Cast member" placeholder="Cast member name" />
+          </FormField>
+        </Stack>
+      )}
+    </Modal>
   );
 }
 
@@ -521,19 +510,18 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
 
 function BulkField({ label, enabled, onToggle, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
+    <Stack gap={2}>
+      <Checkbox
+        label={<span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{label}</span>}
+        checked={enabled}
+        onChange={onToggle}
+      />
+      {enabled && <div style={{ paddingLeft: "var(--space-8)" }}>{children}</div>}
+    </Stack>
   );
 }
 
 function VideoBulkEdit({ selectedIds, ownershipStatuses, watchStatuses, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updateWatchStatus, setUpdateWatchStatus] = useState(false);
@@ -541,10 +529,10 @@ function VideoBulkEdit({ selectedIds, ownershipStatuses, watchStatuses, onClose,
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
   const anyEnabled = updateOwnership || updateWatchStatus;
+  const noun = selectedIds.length === 1 ? "video" : "videos";
 
   async function handleSave() {
     if (!anyEnabled) { setError("Select at least one field to update."); return; }
@@ -558,52 +546,55 @@ function VideoBulkEdit({ selectedIds, ownershipStatuses, watchStatuses, onClose,
   }
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
     try { await bulkDeleteVideo(selectedIds); onDeleted(); }
-    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    catch (err) { setError(err.message || "Failed to delete"); }
     finally { setDeleting(false); }
   }
 
+  const footer = (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label={`Delete ${selectedIds.length} ${noun}`}
+        confirmLabel={deleting ? "…" : "Yes"}
+        cancelLabel="No"
+        promptText={`Delete ${selectedIds.length}?`}
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving…" : `Apply to ${selectedIds.length}`}
+        </Button>
+      </Row>
+    </Row>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} video{selectedIds.length !== 1 ? "s" : ""}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
-        </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Watch Status" enabled={updateWatchStatus} onToggle={() => setUpdateWatchStatus((p) => !p)}>
-            <select value={watchStatusId} onChange={(e) => setWatchStatusId(e.target.value)} style={fieldStyle}>
-              {watchStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <div>
-            {!confirmDelete
-              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} video{selectedIds.length !== 1 ? "s" : ""}</button>
-              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
-                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
-                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
-                </span>
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedIds.length} ${noun}`}
+      footer={footer}
+      footerJustify="between"
+    >
+      <Stack gap={5}>
+        {error && <Alert tone="error">{error}</Alert>}
+        <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+          <Select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)}>
+            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Watch Status" enabled={updateWatchStatus} onToggle={() => setUpdateWatchStatus((p) => !p)}>
+          <Select value={watchStatusId} onChange={(e) => setWatchStatusId(e.target.value)}>
+            {watchStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -780,22 +771,24 @@ export default function VideoLibraryPage() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: "var(--text-base)" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <Row gap={5}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {loading ? "Loading…" : `${sorted.length} of ${items.length}`}
           </span>
           {selected.size > 0 && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selected.size} selected</span>
-              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
-              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
-            </span>
+            <Row gap={3}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--btn-primary-bg)", fontWeight: 700 }}>
+                {selected.size} selected
+              </span>
+              <Button variant="primary" size="sm" onClick={() => setBulkEditOpen(true)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+            </Row>
           )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        </Row>
+        <Row gap={4}>
           <SegmentedButtons
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
@@ -810,10 +803,14 @@ export default function VideoLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
-        </div>
+        </Row>
       </div>
 
-      {error && <div style={{ ...alertError, margin: "8px 12px" }}>{error}</div>}
+      {error && (
+        <div style={{ margin: "var(--space-4) var(--space-6)" }}>
+          <Alert tone="error">{error}</Alert>
+        </div>
+      )}
 
       {/* Main layout */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -829,11 +826,11 @@ export default function VideoLibraryPage() {
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {loading ? (
-            <div style={{ padding: 20, color: "var(--text-secondary)" }}>Loading…</div>
+            <div style={{ padding: "var(--space-8)", color: "var(--text-secondary)" }}>Loading…</div>
           ) : sorted.length === 0 ? (
-            <div style={{ padding: 20, color: "var(--text-secondary)" }}>No items found.</div>
+            <div style={{ padding: "var(--space-8)", color: "var(--text-secondary)" }}>No items found.</div>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
               {sorted.map(v => (
                 <VideoGridItem key={v.item_id} video={v}
                   isSelected={selected.has(v.item_id)}
@@ -843,7 +840,7 @@ export default function VideoLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -910,17 +907,17 @@ export default function VideoLibraryPage() {
                       {showThumbnails && (
                         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
                           {v.cover_image_url
-                            ? <img src={getImageUrl(v.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                            ? <img src={getImageUrl(v.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
                         </td>
                       )}
                       <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.title}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.video_type}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{v.release_date ? v.release_date.slice(0, 4) : "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.directors?.join(", ") || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.watch_status || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.ownership_status}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{formatSummary(v)}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.video_type}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{v.release_date ? v.release_date.slice(0, 4) : "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.directors?.join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.watch_status || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.ownership_status}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{formatSummary(v)}</td>
                     </tr>
                   );
                 })}

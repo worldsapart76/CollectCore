@@ -264,19 +264,19 @@ export default function InboxManager() {
       </p>
 
       {error && (
-        <div style={{ marginBottom: 12, padding: 10, border: "1px solid #c62828", background: "#ffebee" }}>
+        <div style={{ marginBottom: 12, padding: 10, border: "1px solid var(--danger-text)", background: "var(--error-bg)" }}>
           {error}
         </div>
       )}
 
       {successMessage && (
-        <div style={{ marginBottom: 12, padding: 10, border: "1px solid #2e7d32", background: "#e8f5e9" }}>
+        <div style={{ marginBottom: 12, padding: 10, border: "1px solid var(--success-border)", background: "var(--success-bg)" }}>
           {successMessage}
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 20 }}>
-        <form onSubmit={handleSubmit} style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8 }}>
+        <form onSubmit={handleSubmit} style={{ border: "1px solid var(--border-input)", padding: 16, borderRadius: 8 }}>
           <h2>Create Photocard</h2>
 
           {/* Group */}
@@ -314,7 +314,7 @@ export default function InboxManager() {
             <label style={{ display: "block", marginBottom: 4, fontWeight: "bold" }}>Members</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
               {members.map((m) => (
-                <label key={m.member_id} style={{ display: "flex", alignItems: "center", padding: "3px 6px", border: "1px solid #ddd", borderRadius: 3, background: selectedMemberIds.includes(String(m.member_id)) ? "#e3f2fd" : "#f9f9f9", cursor: "pointer", fontSize: 13 }}>
+                <label key={m.member_id} style={{ display: "flex", alignItems: "center", padding: "3px 6px", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", background: selectedMemberIds.includes(String(m.member_id)) ? "var(--green-light)" : "var(--bg-surface)", cursor: "pointer", fontSize: "var(--text-base)" }}>
                   <input
                     type="checkbox"
                     checked={selectedMemberIds.includes(String(m.member_id))}
@@ -364,7 +364,7 @@ export default function InboxManager() {
                 </button>
 
                 {sourceOriginError && (
-                  <div style={{ color: "red" }}>{sourceOriginError}</div>
+                  <div style={{ color: "var(--error-text)" }}>{sourceOriginError}</div>
                 )}
               </div>
             )}

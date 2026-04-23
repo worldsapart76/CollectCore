@@ -29,13 +29,13 @@ const STATUS_LETTERS = {
 
 // Letter → neon color mapping
 const BADGE_LETTER_COLORS = {
-  O: "#39ff14",  // Owned — neon green
-  W: "#ffff00",  // Wanted — neon yellow
-  T: "#ff3131",  // Trade — neon red
-  F: "#607d8b",  // Formerly Owned — grey
-  P: "#ff9900",  // Pending - Outgoing — neon orange
-  B: "#00bcd4",  // Borrowed — cyan
-  I: "#00bfff",  // Pending - Incoming — sky blue
+  O: "var(--badge-owned)",
+  W: "var(--badge-wanted)",
+  T: "var(--badge-trade)",
+  F: "var(--badge-formerly-owned)",
+  P: "var(--badge-pending-out)",
+  B: "var(--badge-borrowed)",
+  I: "var(--badge-pending-in)",
 };
 
 // Render order for non-Owned/non-Wanted statuses (bottom-right)
@@ -64,7 +64,7 @@ function getCopyBadges(copies) {
   const otherParts = [];
   for (const letter of OTHER_STATUS_ORDER) {
     if (counts[letter]) {
-      otherParts.push({ letter, count: counts[letter], color: BADGE_LETTER_COLORS[letter] || "#fff" });
+      otherParts.push({ letter, count: counts[letter], color: BADGE_LETTER_COLORS[letter] || "var(--badge-default)" });
     }
   }
   if (otherParts.length > 0) {
@@ -102,7 +102,7 @@ export default function PhotocardGrid({
 
   if (cards.length === 0) {
     return (
-      <div style={{ padding: 32, color: "#999", textAlign: "center" }}>
+      <div style={{ padding: 32, color: "var(--text-muted)", textAlign: "center" }}>
         No cards match the current filters.
       </div>
     );
@@ -186,7 +186,7 @@ function CardCell({
         ...styles.cell,
         width: totalWidth,
         cursor: "pointer",
-        outline: selected ? "2px solid #1565c0" : "2px solid transparent",
+        outline: selected ? "2px solid var(--btn-primary-bg)" : "2px solid transparent",
         outlineOffset: 1,
       }}
     >
@@ -284,14 +284,14 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
 const styles = {
   cell: {
     position: "relative",
-    background: "#f9f9f9",
-    border: "1px solid #e0e0e0",
-    borderRadius: 3,
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
     overflow: "hidden",
   },
   imageSlot: {
     position: "relative",
-    background: "#eee",
+    background: "var(--bg-surface)",
     flexShrink: 0,
   },
   imagePlaceholder: {
@@ -301,7 +301,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     fontSize: 10,
-    color: "#bbb",
+    color: "var(--text-muted)",
     textAlign: "center",
     padding: 4,
     boxSizing: "border-box",
@@ -310,32 +310,32 @@ const styles = {
     position: "absolute",
     bottom: 4,
     left: 4,
-    background: "#000",
+    background: "var(--badge-bg)",
     fontWeight: "bold",
-    fontSize: 12,
+    fontSize: "var(--text-sm)",
     padding: "2px 4px",
     minWidth: 20,
     height: 20,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 3,
+    borderRadius: "var(--radius-sm)",
     lineHeight: 1,
   },
   otherBadge: {
     position: "absolute",
     bottom: 4,
     right: 4,
-    background: "#000",
+    background: "var(--badge-bg)",
     fontWeight: "bold",
-    fontSize: 12,
+    fontSize: "var(--text-sm)",
     padding: "2px 4px",
     minWidth: 20,
     height: 20,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 3,
+    borderRadius: "var(--radius-sm)",
     lineHeight: 1,
     gap: 1,
   },
@@ -343,19 +343,19 @@ const styles = {
     position: "absolute",
     top: 4,
     right: 4,
-    color: "#f5c518",
-    fontSize: 26,
+    color: "var(--accent-special)",
+    fontSize: "26px",
     lineHeight: 1,
-    textShadow: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000",
+    textShadow: "-1px -1px 0 var(--accent-special-shadow), 1px -1px 0 var(--accent-special-shadow), -1px 1px 0 var(--accent-special-shadow), 1px 1px 0 var(--accent-special-shadow)",
   },
   caption: {
     padding: "3px 4px",
-    borderTop: "1px solid #e0e0e0",
+    borderTop: "1px solid var(--border)",
   },
   captionText: {
     display: "block",
-    fontSize: 11,
-    color: "#333",
+    fontSize: "var(--text-xs)",
+    color: "var(--text-primary)",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
@@ -363,7 +363,7 @@ const styles = {
   captionSub: {
     display: "block",
     fontSize: 10,
-    color: "#777",
+    color: "var(--text-muted)",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
@@ -372,15 +372,15 @@ const styles = {
     position: "absolute",
     top: 4,
     right: 4,
-    background: "#1565c0",
-    color: "#fff",
+    background: "var(--btn-primary-bg)",
+    color: "var(--btn-primary-text)",
     borderRadius: "50%",
     width: 18,
     height: 18,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 11,
+    fontSize: "var(--text-xs)",
     fontWeight: "bold",
   },
   pagination: {
@@ -389,23 +389,23 @@ const styles = {
     gap: 12,
     marginTop: 16,
     paddingTop: 12,
-    borderTop: "1px solid #e0e0e0",
+    borderTop: "1px solid var(--border)",
   },
   pageBtn: {
     padding: "4px 10px",
-    fontSize: 13,
+    fontSize: "var(--text-base)",
     cursor: "pointer",
-    border: "1px solid #ccc",
-    borderRadius: 3,
-    background: "#fff",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-base)",
   },
   pageInfo: {
-    fontSize: 13,
-    color: "#555",
+    fontSize: "var(--text-base)",
+    color: "var(--text-secondary)",
   },
   countLine: {
     marginTop: 8,
-    fontSize: 12,
-    color: "#999",
+    fontSize: "var(--text-sm)",
+    color: "var(--text-muted)",
   },
 };

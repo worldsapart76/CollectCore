@@ -349,7 +349,7 @@ export default function PhotocardLibraryPage() {
 
   if (error) {
     return (
-      <div style={{ padding: 24, color: "#c62828" }}>
+      <div style={{ padding: 24, color: "var(--error-text)" }}>
         Error: {error}
       </div>
     );

@@ -1,8 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptySection,
-  cycleItem,
-  getItemState,
   sectionActive,
   applySection,
   FilterSidebarShell,
@@ -26,23 +24,43 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, GRID_SIZES } from "../styles/commonStyles";
+import { GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmButton,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  Modal,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  ownershipToneFromInitial,
+} from "../components/primitives";
 
 const BOOK_COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.books;
 
+// Format tint palette — module-specific to Books (Physical/Digital/Audio color-coding).
+// Kept as a local JS map (no matching design token since this palette is only used here).
 const FORMAT_COLORS_LIGHT = {
-  Physical: { background: "#f5f5f5", color: "#555",     border: "1px solid #ccc" },
-  Digital:  { background: "#e3f2fd", color: "#1565c0",  border: "1px solid #90caf9" },
-  Audio:    { background: "#e8f5e9", color: "#2e7d32",  border: "1px solid #a5d6a7" },
+  Physical: { background: "#f5f5f5", color: "#555",    border: "1px solid #ccc" },
+  Digital:  { background: "#e3f2fd", color: "#1565c0", border: "1px solid #90caf9" },
+  Audio:    { background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7" },
 };
 
 const FORMAT_COLORS_DARK = {
-  Physical: { background: "#2a2a2a", color: "#aaa",     border: "1px solid #444" },
-  Digital:  { background: "#0d2137", color: "#64b5f6",  border: "1px solid #1565c0" },
-  Audio:    { background: "#0d1f0d", color: "#9ced5a",  border: "1px solid #377e00" },
+  Physical: { background: "#2a2a2a", color: "#aaa",    border: "1px solid #444" },
+  Digital:  { background: "#0d2137", color: "#64b5f6", border: "1px solid #1565c0" },
+  Audio:    { background: "#0d1f0d", color: "#9ced5a", border: "1px solid #377e00" },
 };
 
 function getFormatColors(format) {
@@ -50,10 +68,6 @@ function getFormatColors(format) {
   const map = isDark ? FORMAT_COLORS_DARK : FORMAT_COLORS_LIGHT;
   return map[format] || map.Physical;
 }
-
-const OWNERSHIP_BADGE_COLORS = {
-  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
-};
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
@@ -79,7 +93,6 @@ function BookFilters({ books, genres, ownershipStatuses, readStatuses, ageLevels
     return result.sort().map((a) => ({ id: a, label: a }));
   }, [books]);
 
-  // Genre hierarchy filtered to only what's in the library
   const libraryGenreHierarchy = useMemo(() => {
     const genreNames = new Set(books.flatMap((b) => b.genres || []));
     const subGenreNames = new Set(books.flatMap((b) => b.subgenres || []));
@@ -205,33 +218,35 @@ function GenrePicker({ genres, selected, onChange }) {
   const showAddButton = topId && subGenres.length > 0 && !subId;
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-        <select value={topId} onChange={(e) => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", flex: 1 }}>
+    <Stack gap={2}>
+      <Row gap={3} align="center">
+        <Select value={topId} onChange={(e) => handleTopChange(e.target.value)} style={{ flex: 1 }}>
           <option value="">-- Genre --</option>
           {genres.map((g) => <option key={g.top_level_genre_id} value={g.top_level_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
-          <select value={subId} onChange={(e) => handleSubChange(e.target.value)} style={{ ...selectStyle, width: "auto", flex: 1 }}>
+          <Select value={subId} onChange={(e) => handleSubChange(e.target.value)} style={{ flex: 1 }}>
             <option value="">-- Subgenre (optional) --</option>
             {subGenres.map((s) => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-          </select>
+          </Select>
         )}
         {showAddButton && (
-          <button type="button" onClick={() => doAdd(topId, "")} style={btnSm} title="Add genre without subgenre">Add</button>
+          <Button variant="secondary" size="sm" onClick={() => doAdd(topId, "")} title="Add genre without subgenre">
+            Add
+          </Button>
         )}
-      </div>
+      </Row>
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {selected.map((s, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {s.genre_name}{s.sub_genre_name ? ` / ${s.sub_genre_name}` : ""}
-              <button type="button" onClick={() => onChange(selected.filter((_, j) => j !== i))} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0, lineHeight: 1 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => onChange(selected.filter((_, j) => j !== i))} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -240,33 +255,28 @@ function GenrePicker({ genres, selected, onChange }) {
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  const tone = ownershipToneFromInitial(initial);
   return (
-    <div style={{
-      position: "absolute", bottom: 4, left: 4,
-      background: "#000", color,
-      fontWeight: 700, fontSize: 12, lineHeight: "12px",
-      padding: "3px 5px", borderRadius: 4, zIndex: 2,
-    }}>
-      {initial}
+    <div style={{ position: "absolute", bottom: 4, left: 4, zIndex: 2 }}>
+      <Badge tone={tone}>{initial}</Badge>
     </div>
   );
 }
 
 function StarRatingDisplay({ rating }) {
-  if (!rating) return <span style={{ color: "#ccc", fontSize: 12 }}>—</span>;
-  return <span style={{ fontSize: 12, color: "#f9a825", fontWeight: "bold" }}>{rating}</span>;
+  if (!rating) return <span style={{ color: "var(--text-label)", fontSize: "var(--text-sm)" }}>—</span>;
+  return <span style={{ fontSize: "var(--text-sm)", color: "var(--accent-rating)", fontWeight: 700 }}>{rating}</span>;
 }
 
 function FormatBadges({ formats }) {
-  if (!formats || formats.length === 0) return <span style={{ color: "var(--text-label)", fontSize: 11 }}>—</span>;
+  if (!formats || formats.length === 0) return <span style={{ color: "var(--text-label)", fontSize: "var(--text-xs)" }}>—</span>;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+    <Row gap={1} wrap>
       {formats.map((f, i) => {
         const colors = getFormatColors(f.top_level_format);
-        return <span key={i} style={{ fontSize: 10, padding: "1px 5px", borderRadius: 3, ...colors }}>{f.format_name}</span>;
+        return <span key={i} style={{ fontSize: "10px", padding: "1px 5px", borderRadius: "var(--radius-sm)", ...colors }}>{f.format_name}</span>;
       })}
-    </div>
+    </Row>
   );
 }
 
@@ -278,7 +288,7 @@ const BookGridItem = memo(function BookGridItem({ book, isSelected, onToggleSele
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
-      borderRadius: 3, boxSizing: "border-box",
+      borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
       <div style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
@@ -288,17 +298,17 @@ const BookGridItem = memo(function BookGridItem({ book, isSelected, onToggleSele
         </div>
         <OwnershipBadge statusName={book.ownership_status} />
         {book.cover_image_url ? (
-          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: "var(--radius-sm)" }} />
         ) : (
-          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>No Cover</span>
           </div>
         )}
       </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
-          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</div>
         </div>
       )}
     </div>
@@ -314,35 +324,34 @@ const BookRow = memo(function BookRow({ book, isSelected, onToggleSelect, onClic
     <tr onClick={onClick} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)", background: isSelected ? "var(--green-light)" : undefined }}
       onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
       onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = ""; }}>
-      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }}
-        onClick={(e) => e.stopPropagation()}>
+      <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 28 }} onClick={(e) => e.stopPropagation()}>
         <input type="checkbox" checked={isSelected} onChange={() => onToggleSelect(book.item_id)} style={{ margin: 0, cursor: "pointer" }} />
       </td>
       {showThumbnails && (
         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
           {book.cover_image_url
-            ? <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+            ? <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "block" }} />
+            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
         </td>
       )}
       <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}>
-        <div style={{ fontWeight: "bold", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title}</div>
+        <div style={{ fontWeight: 700, fontSize: "var(--text-base)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title}</div>
         {book.series_name && (
-          <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.series_name}{book.series_number ? ` #${book.series_number}` : ""}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.series_name}{book.series_number ? ` #${book.series_number}` : ""}</div>
         )}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</td>
+      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(book.authors || []).join(", ")}</td>
       <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}><FormatBadges formats={book.formats} /></td>
       <td style={{ padding: "3px 8px", overflow: "hidden", whiteSpace: "nowrap" }}>
         {genreText
-          ? <div style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{genreText}{subgenreText && <span style={{ color: "var(--text-muted)" }}>{" — "}{subgenreText}</span>}</div>
-          : <span style={{ color: "var(--text-label)", fontSize: 11 }}>—</span>}
+          ? <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{genreText}{subgenreText && <span style={{ color: "var(--text-muted)" }}>{" — "}{subgenreText}</span>}</div>
+          : <span style={{ color: "var(--text-label)", fontSize: "var(--text-xs)" }}>—</span>}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <td style={{ padding: "3px 8px", fontSize: "var(--text-xs)", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {book.age_level || <span style={{ color: "var(--text-label)" }}>—</span>}
       </td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.reading_status || "—"}</td>
-      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.ownership_status}</td>
+      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.reading_status || "—"}</td>
+      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{book.ownership_status}</td>
       <td style={{ padding: "3px 8px", whiteSpace: "nowrap" }}><StarRatingDisplay rating={book.star_rating} /></td>
     </tr>
   );
@@ -356,7 +365,6 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
 
@@ -479,155 +487,154 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
       onDeleted(book.item_id);
     } catch (err) {
       setSaveError(err.message || "Delete failed.");
-      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
   }
 
+  const footer = !loading && !error ? (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label="Delete"
+        confirmLabel={deleting ? "Deleting…" : "Confirm"}
+        promptText="Delete this book?"
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </Row>
+    </Row>
+  ) : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontWeight: "bold", fontSize: 14 }}>{loading ? "Loading..." : title || "Book Detail"}</div>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
-        </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="md"
+      title={loading ? "Loading…" : title || "Book Detail"}
+      footer={footer}
+      footerJustify="between"
+    >
+      {loading && <div style={{ color: "var(--text-muted)" }}>Loading…</div>}
+      {error && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{error}</Alert>}
+      {saveError && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{saveError}</Alert>}
+      {saveSuccess && <Alert tone="success" style={{ marginBottom: "var(--space-5)" }}>{saveSuccess}</Alert>}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {loading && <div style={{ color: "#999" }}>Loading...</div>}
-          {error && <div style={alertError}>{error}</div>}
-          {saveError && <div style={alertError}>{saveError}</div>}
-          {saveSuccess && <div style={alertSuccess}>{saveSuccess}</div>}
-
-          {!loading && !error && (
-            <>
-              {coverUrl && (
-                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                  <img src={coverUrl} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{title}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{authorNames.filter(Boolean).join(", ")}</div>
-                  </div>
-                </div>
-              )}
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Title *</label>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+      {!loading && !error && (
+        <Stack gap={5}>
+          {coverUrl && (
+            <Row gap={5} align="start">
+              <CoverThumb src={coverUrl} alt="cover" size="md" />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-md)", marginBottom: 2 }}>{title}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{authorNames.filter(Boolean).join(", ")}</div>
               </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Author(s) *</label>
-                <NameList names={authorNames} onChange={setAuthorNames} addLabel="+ Author" placeholder="Author name" />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px", marginBottom: 10 }}>
-                <div>
-                  <label style={labelStyle}>Category</label>
-                  <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={selectStyle}>
-                    {[{ id: "3", label: "Fiction" }, { id: "4", label: "Non-Fiction" }].map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Ownership</label>
-                  <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={selectStyle}>
-                    {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Read Status</label>
-                  <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={selectStyle}>
-                    <option value="">-- None --</option>
-                    {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Format</label>
-                  <select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)} style={selectStyle}>
-                    <option value="">-- None --</option>
-                    {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Age Level</label>
-                  <select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)} style={selectStyle}>
-                    <option value="">-- None --</option>
-                    {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Star Rating</label>
-                  <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={selectStyle}>
-                    <option value="">-- None --</option>
-                    {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Genres</label>
-                <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "10px 16px", marginBottom: 10 }}>
-                <div>
-                  <label style={labelStyle}>Series</label>
-                  <input value={seriesName} onChange={(e) => setSeriesName(e.target.value)} style={inputStyle} placeholder="Series name" />
-                </div>
-                <div style={{ width: 90 }}>
-                  <label style={labelStyle}>Book #</label>
-                  <input value={seriesNumber} onChange={(e) => setSeriesNumber(e.target.value)} style={inputStyle} type="number" step="0.1" />
-                </div>
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Tags <span style={{ fontWeight: "normal", color: "#888" }}>(comma-separated)</span></label>
-                <input value={tagNames} onChange={(e) => setTagNames(e.target.value)} style={inputStyle} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 16px", marginBottom: 10 }}>
-                <div><label style={labelStyle}>ISBN-13</label><input value={isbn13} onChange={(e) => setIsbn13(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>ISBN-10</label><input value={isbn10} onChange={(e) => setIsbn10(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Language</label><input value={language} onChange={(e) => setLanguage(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Publisher</label><input value={publisher} onChange={(e) => setPublisher(e.target.value)} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Published Date</label><input value={publishedDate} onChange={(e) => setPublishedDate(e.target.value)} style={inputStyle} placeholder="YYYY-MM-DD" /></div>
-                <div><label style={labelStyle}>Page Count</label><input value={pageCount} onChange={(e) => setPageCount(e.target.value)} style={inputStyle} type="number" /></div>
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Cover Image URL</label>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                  {coverUrl && <img src={getImageUrl(coverUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
-                </div>
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Description</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical", fontFamily: "inherit" }} />
-              </div>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Notes</label>
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
-              </div>
-            </>
+            </Row>
           )}
-        </div>
 
-        {!loading && !error && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-            <div>
-              {!confirmDelete
-                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this book?</span>
-                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
-                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                  </div>
-              }
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
+          <FormField label="Title" required>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+          </FormField>
+
+          <FormField label="Author(s)" required>
+            <NameList names={authorNames} onChange={setAuthorNames} addLabel="+ Author" placeholder="Author name" />
+          </FormField>
+
+          <Grid cols={3} gap={5}>
+            <FormField label="Category">
+              <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                {[{ id: "3", label: "Fiction" }, { id: "4", label: "Non-Fiction" }].map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Ownership">
+              <Select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)}>
+                {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Read Status">
+              <Select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)}>
+                <option value="">-- None --</option>
+                {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Format">
+              <Select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)}>
+                <option value="">-- None --</option>
+                {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Age Level">
+              <Select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)}>
+                <option value="">-- None --</option>
+                {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Star Rating">
+              <Select value={starRating} onChange={(e) => setStarRating(e.target.value)}>
+                <option value="">-- None --</option>
+                {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
+
+          <FormField label="Genres">
+            <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
+          </FormField>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "var(--space-5) var(--space-7)" }}>
+            <FormField label="Series">
+              <Input value={seriesName} onChange={(e) => setSeriesName(e.target.value)} placeholder="Series name" />
+            </FormField>
+            <div style={{ width: 90 }}>
+              <FormField label="Book #">
+                <Input value={seriesNumber} onChange={(e) => setSeriesNumber(e.target.value)} type="number" step="0.1" />
+              </FormField>
             </div>
           </div>
-        )}
-      </div>
-    </div>
+
+          <FormField
+            label={<>Tags <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(comma-separated)</span></>}
+          >
+            <Input value={tagNames} onChange={(e) => setTagNames(e.target.value)} />
+          </FormField>
+
+          <Grid cols={3} gap={5}>
+            <FormField label="ISBN-13"><Input value={isbn13} onChange={(e) => setIsbn13(e.target.value)} /></FormField>
+            <FormField label="ISBN-10"><Input value={isbn10} onChange={(e) => setIsbn10(e.target.value)} /></FormField>
+            <FormField label="Language"><Input value={language} onChange={(e) => setLanguage(e.target.value)} /></FormField>
+            <FormField label="Publisher"><Input value={publisher} onChange={(e) => setPublisher(e.target.value)} /></FormField>
+            <FormField label="Published Date"><Input value={publishedDate} onChange={(e) => setPublishedDate(e.target.value)} placeholder="YYYY-MM-DD" /></FormField>
+            <FormField label="Page Count"><Input value={pageCount} onChange={(e) => setPageCount(e.target.value)} type="number" /></FormField>
+          </Grid>
+
+          <FormField label="Cover Image URL">
+            <Row gap={3} align="center">
+              <Input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} style={{ flex: 1 }} />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                Add Image
+              </Button>
+              {coverUrl && <CoverThumb src={getImageUrl(coverUrl)} alt="cover" size="sm" />}
+            </Row>
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </FormField>
+
+          <FormField label="Notes">
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </FormField>
+        </Stack>
+      )}
+    </Modal>
   );
 }
 
@@ -635,19 +642,18 @@ function BookDetailModal({ book, genres, formatDetails, ageLevels, readStatuses,
 
 function BulkField({ label, enabled, onToggle, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
+    <Stack gap={2}>
+      <Checkbox
+        label={<span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{label}</span>}
+        checked={enabled}
+        onChange={onToggle}
+      />
+      {enabled && <div style={{ paddingLeft: "var(--space-8)" }}>{children}</div>}
+    </Stack>
   );
 }
 
 function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, ageLevels, formatDetails, genres, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipStatusId, setOwnershipStatusId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updateReadStatus, setUpdateReadStatus] = useState(false);
@@ -665,7 +671,6 @@ function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, ageLevel
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
   const anyEnabled = updateOwnership || updateReadStatus || updateCategory || updateAgeLevel || updateRating || updateFormat || updateGenres;
@@ -687,76 +692,79 @@ function BookBulkEdit({ selectedBooks, ownershipStatuses, readStatuses, ageLevel
   }
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
     try { await bulkDeleteBooks(selectedBooks.map((b) => b.item_id)); onDeleted(); }
-    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    catch (err) { setError(err.message || "Failed to delete"); }
     finally { setDeleting(false); }
   }
 
+  const footer = (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label={`Delete ${selectedBooks.length} books`}
+        confirmLabel={deleting ? "…" : "Yes"}
+        cancelLabel="No"
+        promptText={`Delete ${selectedBooks.length}?`}
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving…" : `Apply to ${selectedBooks.length}`}
+        </Button>
+      </Row>
+    </Row>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedBooks.length} books</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
-        </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Read Status" enabled={updateReadStatus} onToggle={() => setUpdateReadStatus((p) => !p)}>
-            <select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)} style={fieldStyle}>
-              {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Category" enabled={updateCategory} onToggle={() => setUpdateCategory((p) => !p)}>
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={fieldStyle}>
-              <option value="3">Fiction</option>
-              <option value="4">Non-Fiction</option>
-            </select>
-          </BulkField>
-          <BulkField label="Age Level" enabled={updateAgeLevel} onToggle={() => setUpdateAgeLevel((p) => !p)}>
-            <select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)} style={fieldStyle}>
-              {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Star Rating" enabled={updateRating} onToggle={() => setUpdateRating((p) => !p)}>
-            <select value={starRating} onChange={(e) => setStarRating(e.target.value)} style={fieldStyle}>
-              {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Format" enabled={updateFormat} onToggle={() => setUpdateFormat((p) => !p)}>
-            <select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)} style={fieldStyle}>
-              {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Genre (replaces existing)" enabled={updateGenres} onToggle={() => setUpdateGenres((p) => !p)}>
-            <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
-          </BulkField>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <div>
-            {!confirmDelete
-              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedBooks.length} books</button>
-              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedBooks.length}?</span>
-                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
-                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
-                </span>
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedBooks.length}`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedBooks.length} books`}
+      footer={footer}
+      footerJustify="between"
+    >
+      <Stack gap={5}>
+        {error && <Alert tone="error">{error}</Alert>}
+        <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+          <Select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)}>
+            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Read Status" enabled={updateReadStatus} onToggle={() => setUpdateReadStatus((p) => !p)}>
+          <Select value={readStatusId} onChange={(e) => setReadStatusId(e.target.value)}>
+            {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Category" enabled={updateCategory} onToggle={() => setUpdateCategory((p) => !p)}>
+          <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <option value="3">Fiction</option>
+            <option value="4">Non-Fiction</option>
+          </Select>
+        </BulkField>
+        <BulkField label="Age Level" enabled={updateAgeLevel} onToggle={() => setUpdateAgeLevel((p) => !p)}>
+          <Select value={ageLevelId} onChange={(e) => setAgeLevelId(e.target.value)}>
+            {ageLevels.map((a) => <option key={a.age_level_id} value={a.age_level_id}>{a.age_level_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Star Rating" enabled={updateRating} onToggle={() => setUpdateRating((p) => !p)}>
+          <Select value={starRating} onChange={(e) => setStarRating(e.target.value)}>
+            {HALF_STAR_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Format" enabled={updateFormat} onToggle={() => setUpdateFormat((p) => !p)}>
+          <Select value={formatDetailId} onChange={(e) => setFormatDetailId(e.target.value)}>
+            {formatDetails.map((f) => <option key={f.format_detail_id} value={f.format_detail_id}>{f.top_level_format} — {f.format_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Genre (replaces existing)" enabled={updateGenres} onToggle={() => setUpdateGenres((p) => !p)}>
+          <GenrePicker genres={genres} selected={genreList} onChange={setGenreList} />
+        </BulkField>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -907,7 +915,6 @@ export default function BooksLibraryPage() {
       result = result.filter((b) => applySection(filters.subGenre, b.subgenres || []));
     }
     if (sectionActive(filters.format)) {
-      // Match on both top_level_format ("Physical") and format_name ("Paperback")
       result = result.filter((b) =>
         applySection(filters.format, (b.formats || []).flatMap((f) => [f.top_level_format, f.format_name]))
       );
@@ -948,7 +955,7 @@ export default function BooksLibraryPage() {
         return result.sort((a, b) =>
           flip * (a.reading_status || "").localeCompare(b.reading_status || "")
         );
-      default: // title
+      default:
         return result.sort((a, b) =>
           flip * (a.title_sort || a.title).localeCompare(b.title_sort || b.title)
         );
@@ -962,24 +969,28 @@ export default function BooksLibraryPage() {
 
   const allVisibleSelected = sortedBooks.length > 0 && sortedBooks.every((b) => selectedIds.has(b.item_id));
 
-  if (loading) return <div style={{ padding: 24 }}>Loading books...</div>;
-  if (error) return <div style={{ padding: 24, color: "#c62828" }}>Error: {error}</div>;
+  if (loading) return <div style={{ padding: "var(--space-9)" }}>Loading books...</div>;
+  if (error) return <div style={{ padding: "var(--space-9)" }}><Alert tone="error">Error: {error}</Alert></div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: "var(--text-base)" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "#888" }}>{sortedBooks.length} book{sortedBooks.length !== 1 ? "s" : ""}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <Row gap={5}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            {sortedBooks.length} book{sortedBooks.length !== 1 ? "s" : ""}
+          </span>
           {selectedIds.size > 0 && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "#1976d2", fontWeight: "bold" }}>{selectedIds.size} selected</span>
-              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
-              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
-            </span>
+            <Row gap={3}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--btn-primary-bg)", fontWeight: 700 }}>
+                {selectedIds.size} selected
+              </span>
+              <Button variant="primary" size="sm" onClick={() => setBulkEditOpen(true)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+            </Row>
           )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        </Row>
+        <Row gap={4}>
           <SegmentedButtons
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
@@ -994,7 +1005,7 @@ export default function BooksLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions((p) => !p)}>Captions</ToggleButton>
             </>
           )}
-        </div>
+        </Row>
       </div>
 
       {/* Main content */}
@@ -1012,9 +1023,9 @@ export default function BooksLibraryPage() {
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {sortedBooks.length === 0 ? (
-            <div style={{ padding: 24, color: "#999" }}>No books match the current filters.</div>
+            <div style={{ padding: "var(--space-9)", color: "var(--text-muted)" }}>No books match the current filters.</div>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
               {sortedBooks.map((b) => (
                 <BookGridItem key={b.item_id} book={b}
                   isSelected={selectedIds.has(b.item_id)}
@@ -1024,7 +1035,7 @@ export default function BooksLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}

@@ -9,10 +9,23 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
 // ─── Genre picker ─────────────────────────────────────────────────────────────
 
@@ -58,33 +71,33 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-        <select value={topSel} onChange={(e) => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 140 }}>
+    <Stack gap={2}>
+      <Row gap={3} wrap>
+        <Select value={topSel} onChange={(e) => handleTopChange(e.target.value)} style={{ width: "auto", minWidth: 140 }}>
           <option value="">Genre…</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
           <>
-            <select value={subSel} onChange={(e) => setSubSel(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 140 }}>
+            <Select value={subSel} onChange={(e) => setSubSel(e.target.value)} style={{ width: "auto", minWidth: 140 }}>
               <option value="">Subgenre…</option>
               {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-            </select>
-            <button type="button" onClick={add} style={btnSm}>Add</button>
+            </Select>
+            <Button variant="secondary" size="sm" onClick={add}>Add</Button>
           </>
         )}
-      </div>
+      </Row>
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {selected.map((g, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {labelFor(g)}
-              <button type="button" onClick={() => remove(i)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -104,37 +117,48 @@ function CopiesEditor({ copies, allPlatforms, ownershipStatuses, onChange }) {
   function remove(idx) { onChange(copies.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Platform</label>
-              <select value={copy.platform_id} onChange={e => update(i, "platform_id", e.target.value)} style={selectStyle}>
-                <option value="">Select platform…</option>
-                {allPlatforms.map(p => <option key={p.platform_id} value={p.platform_id}>{p.platform_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Edition</label>
-              <input value={copy.edition} onChange={e => update(i, "edition", e.target.value)} style={inputStyle} placeholder="e.g. Collector's Edition" />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={copy.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)} style={{ ...selectStyle, maxWidth: 200 }}>
-              <option value="">None</option>
-              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </div>
+        <div
+          key={i}
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Copy {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Platform">
+                <Select value={copy.platform_id} onChange={e => update(i, "platform_id", e.target.value)}>
+                  <option value="">Select platform…</option>
+                  {allPlatforms.map(p => <option key={p.platform_id} value={p.platform_id}>{p.platform_name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Edition">
+                <Input value={copy.edition} onChange={e => update(i, "edition", e.target.value)} placeholder="e.g. Collector's Edition" />
+              </FormField>
+            </Grid>
+            <FormField label="Ownership">
+              <Select value={copy.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)} style={{ maxWidth: 200 }}>
+                <option value="">None</option>
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Stack>
         </div>
       ))}
-      <button type="button" onClick={add} style={{ ...btnSm, marginTop: copies.length > 0 ? 0 : 0 }}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Copy
+      </Button>
+    </Stack>
   );
 }
 
@@ -184,7 +208,6 @@ export default function VideoGamesIngestPage() {
     if (coverFileRef.current) coverFileRef.current.value = "";
   }
 
-  // RAWG search state
   const [rawgQuery, setRawgQuery] = useState("");
   const [rawgResults, setRawgResults] = useState(null);
   const [rawgSearching, setRawgSearching] = useState(false);
@@ -281,152 +304,155 @@ export default function VideoGamesIngestPage() {
     setRawgQuery("");
   }
 
-  if (!form) return <PageContainer><p style={{ padding: 20, fontSize: 13 }}>Loading…</p></PageContainer>;
-
-
+  if (!form) return <PageContainer><p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p></PageContainer>;
 
   return (
     <PageContainer>
-      <div style={{ maxWidth: 680, padding: "16px 0", margin: "0 auto" }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: "var(--text-primary)" }}>Add Video Game</h2>
+      <div style={{ maxWidth: 680, padding: "var(--space-7) 0", margin: "0 auto" }}>
+        <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, marginBottom: "var(--space-7)", color: "var(--text-primary)" }}>
+          Add Video Game
+        </h2>
 
-        {error && <div style={alertError}>{error}</div>}
-        {success && <div style={alertSuccess}>{success}</div>}
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-        {/* RAWG Search */}
-        <div style={{ marginBottom: 14, padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 6 }}>Search RAWG</div>
-          <form onSubmit={handleRawgSearch} style={{ display: "flex", gap: 6, marginBottom: rawgResults || rawgError ? 8 : 0 }}>
-            <input
-              value={rawgQuery}
-              onChange={e => setRawgQuery(e.target.value)}
-              style={{ ...inputStyle, flex: 1 }}
-              placeholder="Game title…"
-            />
-            <button type="submit" disabled={rawgSearching || !rawgQuery.trim()} style={btnSecondary}>{rawgSearching ? "Searching…" : "Search"}</button>
-          </form>
-          {rawgError && <div style={{ fontSize: 12, color: "var(--error)", marginTop: 4 }}>{rawgError}</div>}
-          {rawgResults && rawgResults.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>No results found.</div>}
-          {rawgResults && rawgResults.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {rawgResults.map(r => (
-                <button
-                  key={r.rawg_id}
-                  type="button"
-                  onClick={() => applyRawgResult(r)}
-                  style={{ display: "flex", gap: 8, alignItems: "center", background: "none", border: "1px solid var(--border-input)", borderRadius: 3, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}
-                >
-                  {r.cover_image_url && <img src={r.cover_image_url} alt="" style={{ width: 28, height: 40, objectFit: "cover", borderRadius: 2, flexShrink: 0 }} />}
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>{r.title}</div>
-                    {(r.released || r.platforms?.length > 0) && (
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        {r.released}{r.released && r.platforms?.length > 0 ? " · " : ""}{r.platforms?.slice(0, 3).join(", ")}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} placeholder="e.g. Hollow Knight" autoFocus />
-          </div>
-
-          {/* Ownership / Play status */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Play Status</label>
-              <select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Release date */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Release Date</label>
-            <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={{ ...inputStyle, maxWidth: 200 }} placeholder="YYYY-MM-DD" />
-          </div>
-
-          {/* Developer(s) */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Developer(s)</label>
-            <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="e.g. Team Cherry" />
-          </div>
-
-          {/* Publisher(s) */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher(s)</label>
-            <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="e.g. Team Cherry" />
-          </div>
-
-          {/* Genre */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Genre</label>
-            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-          </div>
-
-          {/* Cover image */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input
-                value={form.coverImageUrl}
-                onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
-                style={{ ...inputStyle, flex: 1 }}
-                placeholder="https://…"
-              />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {coverPreview && (
-                <img src={coverPreview} alt="cover preview" style={{ width: 50, height: 70, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => setCoverPreview(null)} />
+          <Card surface>
+            <Stack gap={3}>
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Search RAWG
+              </div>
+              <form onSubmit={handleRawgSearch}>
+                <Row gap={3}>
+                  <Input
+                    value={rawgQuery}
+                    onChange={e => setRawgQuery(e.target.value)}
+                    placeholder="Game title…"
+                    style={{ flex: 1 }}
+                  />
+                  <Button type="submit" variant="secondary" disabled={rawgSearching || !rawgQuery.trim()}>
+                    {rawgSearching ? "Searching…" : "Search"}
+                  </Button>
+                </Row>
+              </form>
+              {rawgError && <div style={{ fontSize: "var(--text-sm)", color: "var(--error-text)" }}>{rawgError}</div>}
+              {rawgResults && rawgResults.length === 0 && (
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No results found.</div>
               )}
-            </div>
-          </div>
+              {rawgResults && rawgResults.length > 0 && (
+                <Stack gap={1}>
+                  {rawgResults.map(r => (
+                    <button
+                      key={r.rawg_id}
+                      type="button"
+                      onClick={() => applyRawgResult(r)}
+                      style={{
+                        display: "flex", gap: "var(--space-4)", alignItems: "center",
+                        background: "none",
+                        border: "1px solid var(--border-input)",
+                        borderRadius: "var(--radius-sm)",
+                        padding: "var(--space-2) var(--space-4)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        color: "var(--text-primary)",
+                        font: "inherit",
+                      }}
+                    >
+                      {r.cover_image_url && <img src={r.cover_image_url} alt="" style={{ width: 28, height: 40, objectFit: "cover", borderRadius: "var(--radius-sm)", flexShrink: 0 }} />}
+                      <div>
+                        <div style={{ fontSize: "var(--text-base)", fontWeight: 500 }}>{r.title}</div>
+                        {(r.released || r.platforms?.length > 0) && (
+                          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                            {r.released}{r.released && r.platforms?.length > 0 ? " · " : ""}{r.platforms?.slice(0, 3).join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </Card>
 
-          {/* Description */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={5}>
+              <FormField label="Title" required>
+                <Input value={form.title} onChange={e => set("title", e.target.value)} placeholder="e.g. Hollow Knight" autoFocus />
+              </FormField>
 
-          {/* Notes */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="Ownership" required>
+                  <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </Select>
+                </FormField>
+                <FormField label="Play Status">
+                  <Select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)}>
+                    <option value="">None</option>
+                    {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
+                  </Select>
+                </FormField>
+              </Grid>
 
-          {/* Copies */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Copies</label>
-            <CopiesEditor
-              copies={form.copies}
-              allPlatforms={allPlatforms}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("copies", v)}
-            />
-          </div>
+              <FormField label="Release Date">
+                <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY-MM-DD" style={{ maxWidth: 200 }} />
+              </FormField>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save Game"}</button>
-            <button type="button" onClick={handleReset} style={btnSecondary}>Clear</button>
-          </div>
-        </form>
+              <FormField label="Developer(s)">
+                <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="e.g. Team Cherry" />
+              </FormField>
+
+              <FormField label="Publisher(s)">
+                <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="e.g. Team Cherry" />
+              </FormField>
+
+              <FormField label="Genre">
+                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+              </FormField>
+
+              <FormField label="Cover Image URL">
+                <Row gap={3} align="start">
+                  <Input
+                    value={form.coverImageUrl}
+                    onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
+                    placeholder="https://…"
+                    style={{ flex: 1 }}
+                  />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                    Add Image
+                  </Button>
+                  {coverPreview && <CoverThumb src={coverPreview} alt="cover preview" size="md" />}
+                </Row>
+              </FormField>
+
+              <FormField label="Description">
+                <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+              </FormField>
+
+              <FormField label="Notes">
+                <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+              </FormField>
+
+              <FormField label="Copies">
+                <CopiesEditor
+                  copies={form.copies}
+                  allPlatforms={allPlatforms}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("copies", v)}
+                />
+              </FormField>
+
+              <Row gap={4}>
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? "Saving…" : "Save Game"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={handleReset}>Clear</Button>
+              </Row>
+            </Stack>
+          </form>
+        </Stack>
       </div>
     </PageContainer>
   );

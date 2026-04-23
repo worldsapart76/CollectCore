@@ -10,10 +10,23 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2, sectionStyle, sectionLabel } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
 // ─── Genre picker ─────────────────────────────────────────────────────────────
 
@@ -58,33 +71,33 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-        <select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 140 }}>
+    <Stack gap={2}>
+      <Row gap={3} wrap>
+        <Select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ width: "auto", minWidth: 140 }}>
           <option value="">Genre…</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
           <>
-            <select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 140 }}>
+            <Select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ width: "auto", minWidth: 140 }}>
               <option value="">Subgenre…</option>
               {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-            </select>
-            <button type="button" onClick={add} style={btnSm}>Add</button>
+            </Select>
+            <Button variant="secondary" size="sm" onClick={add}>Add</Button>
           </>
         )}
-      </div>
+      </Row>
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {selected.map((g, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {labelFor(g)}
-              <button type="button" onClick={() => remove(i)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -117,32 +130,33 @@ function TrackListEditor({ songs, onChange }) {
   function add() { onChange([...songs, { ...blankSong(), track_number: songs.length + 1 }]); }
   function remove(idx) { onChange(songs.filter((_, i) => i !== idx)); }
 
+  const rowGrid = { display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: "var(--space-2)", alignItems: "center" };
+
   return (
-    <div>
+    <Stack gap={2}>
       {songs.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: 4, marginBottom: 4, alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)", textAlign: "center" }}>#</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Title</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Duration</span>
-          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Disc</span>
+        <div style={rowGrid}>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)", textAlign: "center" }}>#</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Title</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Duration</span>
+          <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>Disc</span>
           <span />
         </div>
       )}
       {songs.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr 60px 40px 24px", gap: 4, marginBottom: 4, alignItems: "center" }}>
-          <input
+        <div key={i} style={rowGrid}>
+          <Input
             value={s.track_number}
             onChange={e => update(i, "track_number", e.target.value)}
-            style={{ ...inputStyle, textAlign: "center", padding: "2px 3px" }}
+            style={{ textAlign: "center", padding: "2px 3px" }}
             placeholder="#"
           />
-          <input
+          <Input
             value={s.title}
             onChange={e => update(i, "title", e.target.value)}
-            style={inputStyle}
             placeholder="Track title"
           />
-          <input
+          <Input
             value={s.duration_seconds ? formatDuration(s.duration_seconds) : (s._durStr || "")}
             onChange={e => {
               const next = [...songs];
@@ -150,19 +164,21 @@ function TrackListEditor({ songs, onChange }) {
               next[i] = { ...next[i], duration_seconds: parsed, _durStr: e.target.value };
               onChange(next);
             }}
-            style={{ ...inputStyle, padding: "2px 4px" }}
+            style={{ padding: "2px 4px" }}
             placeholder="m:ss"
           />
-          <input
+          <Input
             value={s.disc_number}
             onChange={e => update(i, "disc_number", parseInt(e.target.value, 10) || 1)}
-            style={{ ...inputStyle, textAlign: "center", padding: "2px 3px" }}
+            style={{ textAlign: "center", padding: "2px 3px" }}
           />
-          <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828", padding: "2px 5px" }}>✕</button>
+          <RemoveButton onClick={() => remove(i)} />
         </div>
       ))}
-      <button type="button" onClick={add} style={{ ...btnSm, marginTop: 2 }}>+ Track</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start", marginTop: "var(--space-1)" }}>
+        + Track
+      </Button>
+    </Stack>
   );
 }
 
@@ -182,57 +198,64 @@ function EditionsEditor({ editions, formatTypes, ownershipStatuses, onChange }) 
   function remove(idx) { onChange(editions.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {editions.map((e, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Edition {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Format</label>
-              <select value={e.format_type_id} onChange={ev => update(i, "format_type_id", ev.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Version Name</label>
-              <input value={e.version_name} onChange={ev => update(i, "version_name", ev.target.value)} style={inputStyle} placeholder="e.g. Limited Edition" />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Label</label>
-              <input value={e.label} onChange={ev => update(i, "label", ev.target.value)} style={inputStyle} placeholder="Record label" />
-            </div>
-            <div>
-              <label style={labelStyle}>Catalog #</label>
-              <input value={e.catalog_number} onChange={ev => update(i, "catalog_number", ev.target.value)} style={inputStyle} placeholder="e.g. SKZ-9988" />
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Barcode</label>
-              <input value={e.barcode} onChange={ev => update(i, "barcode", ev.target.value)} style={inputStyle} placeholder="UPC / EAN" />
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership</label>
-              <select value={e.ownership_status_id} onChange={ev => update(i, "ownership_status_id", ev.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={e.notes} onChange={ev => update(i, "notes", ev.target.value)} style={inputStyle} placeholder="Edition notes" />
-          </div>
+        <div
+          key={i}
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Edition {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Format">
+                <Select value={e.format_type_id} onChange={ev => update(i, "format_type_id", ev.target.value)}>
+                  <option value="">None</option>
+                  {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Version Name">
+                <Input value={e.version_name} onChange={ev => update(i, "version_name", ev.target.value)} placeholder="e.g. Limited Edition" />
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="Label">
+                <Input value={e.label} onChange={ev => update(i, "label", ev.target.value)} placeholder="Record label" />
+              </FormField>
+              <FormField label="Catalog #">
+                <Input value={e.catalog_number} onChange={ev => update(i, "catalog_number", ev.target.value)} placeholder="e.g. SKZ-9988" />
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="Barcode">
+                <Input value={e.barcode} onChange={ev => update(i, "barcode", ev.target.value)} placeholder="UPC / EAN" />
+              </FormField>
+              <FormField label="Ownership">
+                <Select value={e.ownership_status_id} onChange={ev => update(i, "ownership_status_id", ev.target.value)}>
+                  <option value="">None</option>
+                  {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                </Select>
+              </FormField>
+            </Grid>
+            <FormField label="Notes">
+              <Input value={e.notes} onChange={ev => update(i, "notes", ev.target.value)} placeholder="Edition notes" />
+            </FormField>
+          </Stack>
         </div>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Edition</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Edition
+      </Button>
+    </Stack>
   );
 }
 
@@ -254,6 +277,19 @@ function blankForm(ownershipStatuses, releaseTypes) {
     songs: [],
     editions: [],
   };
+}
+
+// ─── Section block (replaces commonStyles.sectionStyle) ───────────────────────
+
+function SectionBlock({ title, children }) {
+  return (
+    <Card surface>
+      <Stack gap={3}>
+        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text-secondary)" }}>{title}</div>
+        {children}
+      </Stack>
+    </Card>
+  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -283,7 +319,6 @@ export default function MusicIngestPage() {
     if (coverFileRef.current) coverFileRef.current.value = "";
   }
 
-  // Discogs search
   const [discogsQuery, setDiscogsQuery] = useState("");
   const [discogsResults, setDiscogsResults] = useState([]);
   const [discogsSearching, setDiscogsSearching] = useState(false);
@@ -412,158 +447,146 @@ export default function MusicIngestPage() {
     setError(""); setSuccess(""); setCoverPreview(null);
   }
 
-  if (!form) return <PageContainer><p style={{ padding: 20, fontSize: 13 }}>Loading…</p></PageContainer>;
-  if (error && !form.title && form.title !== "") return <PageContainer><div style={{ ...alertError, margin: 20 }}>{error}</div></PageContainer>;
-
-
+  if (!form) return <PageContainer><p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p></PageContainer>;
+  if (error && !form.title && form.title !== "") return <PageContainer><div style={{ margin: "var(--space-8)" }}><Alert tone="error">{error}</Alert></div></PageContainer>;
 
   return (
     <PageContainer>
-      <div style={{ maxWidth: 680, padding: "16px 0", margin: "0 auto" }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: "var(--text-primary)" }}>Add Music Release</h2>
+      <div style={{ maxWidth: 680, padding: "var(--space-7) 0", margin: "0 auto" }}>
+        <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, marginBottom: "var(--space-7)", color: "var(--text-primary)" }}>
+          Add Music Release
+        </h2>
 
-        {error && <div style={alertError}>{error}</div>}
-        {success && <div style={alertSuccess}>{success}</div>}
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-        {/* Discogs Search */}
-        <div style={{ ...sectionStyle, marginBottom: 16 }}>
-          <div style={sectionLabel}>Search Discogs</div>
-          <div style={{ display: "flex", gap: 6, marginBottom: discogsResults.length > 0 || discogsError ? 6 : 0 }}>
-            <input
-              value={discogsQuery}
-              onChange={e => setDiscogsQuery(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleDiscogsSearch()}
-              style={{ ...inputStyle, flex: 1 }}
-              placeholder="Artist, title, or both…"
-            />
-            <button type="button" onClick={handleDiscogsSearch} disabled={discogsSearching || discogsLoading} style={btnPrimary}>
-              {discogsSearching ? "Searching…" : "Search"}
-            </button>
-          </div>
-          {discogsLoading && <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Loading release…</div>}
-          {discogsError && <div style={{ fontSize: 12, color: "var(--error-border)" }}>{discogsError}</div>}
-          {discogsResults.length > 0 && (
-            <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 3 }}>
-              {discogsResults.map(r => (
-                <div
-                  key={r.discogs_id}
-                  onClick={() => handleDiscogsSelect(r)}
-                  style={{ display: "flex", gap: 8, padding: "6px 8px", borderBottom: "1px solid var(--border)", cursor: "pointer", alignItems: "center" }}
-                  onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
-                  onMouseLeave={e => e.currentTarget.style.background = ""}
-                >
-                  {r.thumb_url
-                    ? <img src={r.thumb_url} alt="" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 2, flexShrink: 0 }} />
-                    : <div style={{ width: 38, height: 38, background: "var(--surface-2)", borderRadius: 2, flexShrink: 0 }} />
-                  }
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{r.title}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      {r.artists?.join(", ")}{r.year ? ` · ${r.year}` : ""}
+          {/* Discogs Search */}
+          <SectionBlock title="Search Discogs">
+            <Row gap={3}>
+              <Input
+                value={discogsQuery}
+                onChange={e => setDiscogsQuery(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleDiscogsSearch()}
+                placeholder="Artist, title, or both…"
+                style={{ flex: 1 }}
+              />
+              <Button type="button" variant="primary" onClick={handleDiscogsSearch} disabled={discogsSearching || discogsLoading}>
+                {discogsSearching ? "Searching…" : "Search"}
+              </Button>
+            </Row>
+            {discogsLoading && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading release…</div>}
+            {discogsError && <div style={{ fontSize: "var(--text-sm)", color: "var(--error-text)" }}>{discogsError}</div>}
+            {discogsResults.length > 0 && (
+              <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                {discogsResults.map(r => (
+                  <div
+                    key={r.discogs_id}
+                    onClick={() => handleDiscogsSelect(r)}
+                    style={{
+                      display: "flex", gap: "var(--space-4)",
+                      padding: "var(--space-3) var(--space-4)",
+                      borderBottom: "1px solid var(--border)",
+                      cursor: "pointer", alignItems: "center",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-surface)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = ""; }}
+                  >
+                    {r.thumb_url
+                      ? <img src={r.thumb_url} alt="" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: "var(--radius-sm)", flexShrink: 0 }} />
+                      : <div style={{ width: 38, height: 38, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", flexShrink: 0 }} />
+                    }
+                    <div>
+                      <div style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>{r.title}</div>
+                      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                        {r.artists?.join(", ")}{r.year ? ` · ${r.year}` : ""}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            )}
+          </SectionBlock>
 
-        <form onSubmit={handleSubmit}>
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} placeholder="e.g. MIROH" autoFocus />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={5}>
+              <FormField label="Title" required>
+                <Input value={form.title} onChange={e => set("title", e.target.value)} placeholder="e.g. MIROH" autoFocus />
+              </FormField>
 
-          {/* Release type / Ownership */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Release Type *</label>
-              <select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="Release Type" required>
+                  <Select value={form.releaseTypeId} onChange={e => set("releaseTypeId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {releaseTypes.map(r => <option key={r.top_level_category_id} value={r.top_level_category_id}>{r.category_name}</option>)}
+                  </Select>
+                </FormField>
+                <FormField label="Ownership" required>
+                  <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </Select>
+                </FormField>
+              </Grid>
 
-          {/* Release date */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Release Date</label>
-            <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={{ ...inputStyle, maxWidth: 200 }} placeholder="YYYY-MM-DD" />
-          </div>
+              <FormField label="Release Date">
+                <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY-MM-DD" style={{ maxWidth: 200 }} />
+              </FormField>
 
-          {/* Artists */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Artist(s)</label>
-            <NameList names={form.artists} onChange={v => set("artists", v)} addLabel="+ Artist" placeholder="Artist name" />
-          </div>
+              <FormField label="Artist(s)">
+                <NameList names={form.artists} onChange={v => set("artists", v)} addLabel="+ Artist" placeholder="Artist name" />
+              </FormField>
 
-          {/* Genre */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Genre</label>
-            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-          </div>
+              <FormField label="Genre">
+                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+              </FormField>
 
-          {/* Cover image */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input
-                value={form.coverImageUrl}
-                onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
-                style={{ ...inputStyle, flex: 1 }}
-                placeholder="https://…"
-              />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {coverPreview && (
-                <img src={coverPreview} alt="cover preview" style={{ width: 50, height: 50, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => setCoverPreview(null)} />
-              )}
-            </div>
-          </div>
+              <FormField label="Cover Image URL">
+                <Row gap={3} align="start">
+                  <Input
+                    value={form.coverImageUrl}
+                    onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
+                    placeholder="https://…"
+                    style={{ flex: 1 }}
+                  />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                    Add Image
+                  </Button>
+                  {coverPreview && <CoverThumb src={coverPreview} alt="cover preview" size="sm" />}
+                </Row>
+              </FormField>
 
-          {/* Description */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-          </div>
+              <FormField label="Description">
+                <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+              </FormField>
 
-          {/* Notes */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <FormField label="Notes">
+                <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+              </FormField>
 
-          {/* Track list */}
-          <div style={sectionStyle}>
-            <div style={sectionLabel}>Track List</div>
-            <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
-          </div>
+              <SectionBlock title="Track List">
+                <TrackListEditor songs={form.songs} onChange={v => set("songs", v)} />
+              </SectionBlock>
 
-          {/* Editions */}
-          <div style={sectionStyle}>
-            <div style={sectionLabel}>Editions / Versions</div>
-            <EditionsEditor
-              editions={form.editions}
-              formatTypes={formatTypes}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("editions", v)}
-            />
-          </div>
+              <SectionBlock title="Editions / Versions">
+                <EditionsEditor
+                  editions={form.editions}
+                  formatTypes={formatTypes}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("editions", v)}
+                />
+              </SectionBlock>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save Release"}</button>
-            <button type="button" onClick={handleReset} style={btnSecondary}>Clear</button>
-          </div>
-        </form>
+              <Row gap={4}>
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? "Saving…" : "Save Release"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={handleReset}>Clear</Button>
+              </Row>
+            </Stack>
+          </form>
+        </Stack>
       </div>
     </PageContainer>
   );

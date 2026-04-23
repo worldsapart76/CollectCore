@@ -10,10 +10,22 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
+import {
+  Alert,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
 // ─── Copies editor ────────────────────────────────────────────────────────────
 
@@ -31,47 +43,52 @@ function CopiesEditor({ copies, formatTypes, ownershipStatuses, onChange }) {
   function remove(idx) { onChange(copies.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Format</label>
-              <select value={copy.format_type_id} onChange={e => update(i, "format_type_id", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership</label>
-              <select value={copy.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>ISBN-13</label>
-              <input value={copy.isbn_13} onChange={e => update(i, "isbn_13", e.target.value)} style={inputStyle} placeholder="978-…" />
-            </div>
-            <div>
-              <label style={labelStyle}>ISBN-10</label>
-              <input value={copy.isbn_10} onChange={e => update(i, "isbn_10", e.target.value)} style={inputStyle} placeholder="0-…" />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={copy.notes} onChange={e => update(i, "notes", e.target.value)} style={inputStyle} placeholder="e.g. Signed copy" />
-          </div>
-        </div>
+        <Card key={i} surface style={{ padding: "var(--space-4) var(--space-5)" }}>
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Copy {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Format">
+                <Select value={copy.format_type_id} onChange={e => update(i, "format_type_id", e.target.value)}>
+                  <option value="">Select…</option>
+                  {formatTypes.map(f => (
+                    <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Ownership">
+                <Select value={copy.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)}>
+                  <option value="">None</option>
+                  {ownershipStatuses.map(s => (
+                    <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                  ))}
+                </Select>
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="ISBN-13">
+                <Input value={copy.isbn_13} onChange={e => update(i, "isbn_13", e.target.value)} placeholder="978-…" />
+              </FormField>
+              <FormField label="ISBN-10">
+                <Input value={copy.isbn_10} onChange={e => update(i, "isbn_10", e.target.value)} placeholder="0-…" />
+              </FormField>
+            </Grid>
+            <FormField label="Notes">
+              <Input value={copy.notes} onChange={e => update(i, "notes", e.target.value)} placeholder="e.g. Signed copy" />
+            </FormField>
+          </Stack>
+        </Card>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Copy
+      </Button>
+    </Stack>
   );
 }
 
@@ -140,7 +157,6 @@ export default function TTRPGIngestPage() {
     });
   }, []);
 
-  // Load editions + lines when system changes
   useEffect(() => {
     if (!form?.systemId) { setSystemEditions([]); setLines([]); return; }
     const id = parseInt(form.systemId, 10);
@@ -203,147 +219,141 @@ export default function TTRPGIngestPage() {
     setError(""); setSuccess(""); setCoverPreview(null);
   }
 
-  if (!form) return <PageContainer><p style={{ padding: 20, fontSize: 13 }}>Loading…</p></PageContainer>;
+  if (!form) return (
+    <PageContainer>
+      <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p>
+    </PageContainer>
+  );
 
   return (
     <PageContainer>
-      <div style={{ maxWidth: 680, padding: "16px 0", margin: "0 auto" }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: "var(--text-primary)" }}>Add TTRPG Book</h2>
+      <div style={{ maxWidth: 680, padding: "var(--space-7) 0", margin: "0 auto" }}>
+        <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, marginBottom: "var(--space-7)", color: "var(--text-primary)" }}>
+          Add TTRPG Book
+        </h2>
 
-        {error && <div style={alertError}>{error}</div>}
-        {success && <div style={alertSuccess}>{success}</div>}
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-        <form onSubmit={handleSubmit}>
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} placeholder="e.g. Player's Handbook" autoFocus />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={5}>
+              <FormField label="Title" required>
+                <Input value={form.title} onChange={e => set("title", e.target.value)} placeholder="e.g. Player's Handbook" autoFocus />
+              </FormField>
 
-          {/* System + Ownership */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Game System *</label>
-              <select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }} style={selectStyle}>
-                <option value="">Select…</option>
-                {systems.map(s => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="Game System" required>
+                  <Select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }}>
+                    <option value="">Select…</option>
+                    {systems.map(s => (
+                      <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Ownership" required>
+                  <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {ownershipStatuses.map(s => (
+                      <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+              </Grid>
 
-          {/* System Edition + Line */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>System Edition</label>
-              <input
-                value={form.systemEditionName}
-                onChange={e => set("systemEditionName", e.target.value)}
-                style={inputStyle}
-                placeholder={form.systemId ? "e.g. 5e, 2e, 1st ed." : "Select a system first"}
-                disabled={!form.systemId}
-                list="edition-list"
-              />
-              <datalist id="edition-list">
-                {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
-              </datalist>
-            </div>
-            <div>
-              <label style={labelStyle}>Line / Setting</label>
-              <input
-                value={form.lineName}
-                onChange={e => set("lineName", e.target.value)}
-                style={inputStyle}
-                placeholder={form.systemId ? "e.g. Forgotten Realms" : "Select a system first"}
-                disabled={!form.systemId}
-                list="line-list"
-              />
-              <datalist id="line-list">
-                {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
-              </datalist>
-            </div>
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="System Edition">
+                  <Input
+                    value={form.systemEditionName}
+                    onChange={e => set("systemEditionName", e.target.value)}
+                    placeholder={form.systemId ? "e.g. 5e, 2e, 1st ed." : "Select a system first"}
+                    disabled={!form.systemId}
+                    list="edition-list"
+                  />
+                  <datalist id="edition-list">
+                    {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
+                  </datalist>
+                </FormField>
+                <FormField label="Line / Setting">
+                  <Input
+                    value={form.lineName}
+                    onChange={e => set("lineName", e.target.value)}
+                    placeholder={form.systemId ? "e.g. Forgotten Realms" : "Select a system first"}
+                    disabled={!form.systemId}
+                    list="line-list"
+                  />
+                  <datalist id="line-list">
+                    {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
+                  </datalist>
+                </FormField>
+              </Grid>
 
-          {/* Book Type + Release Date */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Book Type</label>
-              <select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {bookTypes.map(bt => <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Release Date</label>
-              <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY or YYYY-MM-DD" />
-            </div>
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="Book Type">
+                  <Select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {bookTypes.map(bt => (
+                      <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Release Date">
+                  <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY or YYYY-MM-DD" />
+                </FormField>
+              </Grid>
 
-          {/* Publisher */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher</label>
-            <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} placeholder="e.g. Wizards of the Coast" />
-          </div>
+              <FormField label="Publisher">
+                <Input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} placeholder="e.g. Wizards of the Coast" />
+              </FormField>
 
-          {/* Authors */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Author(s)</label>
-            <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="e.g. Gary Gygax" />
-          </div>
+              <FormField label="Author(s)">
+                <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="e.g. Gary Gygax" />
+              </FormField>
 
-          {/* Cover image */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input
-                value={form.coverImageUrl}
-                onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
-                style={{ ...inputStyle, flex: 1 }}
-                placeholder="https://…"
-              />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {coverPreview && (
-                <img src={coverPreview} alt="cover preview" style={{ width: 50, height: 70, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => setCoverPreview(null)} />
-              )}
-            </div>
-          </div>
+              <FormField label="Cover Image URL">
+                <Row gap={3} align="start">
+                  <Input
+                    value={form.coverImageUrl}
+                    onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
+                    placeholder="https://…"
+                    style={{ flex: 1 }}
+                  />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                    Add Image
+                  </Button>
+                  {coverPreview && <CoverThumb src={coverPreview} alt="cover preview" size="md" />}
+                </Row>
+              </FormField>
 
-          {/* Description */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
-          </div>
+              <FormField label="Description">
+                <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+              </FormField>
 
-          {/* Notes */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <FormField label="Notes">
+                <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+              </FormField>
 
-          {/* Copies */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Copies / Formats</label>
-            <CopiesEditor
-              copies={form.copies}
-              formatTypes={formatTypes}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("copies", v)}
-            />
-          </div>
+              <FormField label="Copies / Formats">
+                <CopiesEditor
+                  copies={form.copies}
+                  formatTypes={formatTypes}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("copies", v)}
+                />
+              </FormField>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save Book"}</button>
-            <button type="button" onClick={handleReset} style={btnSecondary}>Clear</button>
-          </div>
-        </form>
+              <Row gap={4}>
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? "Saving…" : "Save Book"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={handleReset}>
+                  Clear
+                </Button>
+              </Row>
+            </Stack>
+          </form>
+        </Stack>
       </div>
     </PageContainer>
   );

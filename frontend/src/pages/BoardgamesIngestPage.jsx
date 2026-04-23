@@ -8,9 +8,22 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import {
+  Alert,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
 // ─── Expansions editor ────────────────────────────────────────────────────────
 
@@ -28,34 +41,39 @@ function ExpansionsEditor({ expansions, ownershipStatuses, onChange }) {
   function remove(idx) { onChange(expansions.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {expansions.map((exp, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--surface-2)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Expansion {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={{ marginBottom: 6 }}>
-            <label style={labelStyle}>Title</label>
-            <input value={exp.title} onChange={e => update(i, "title", e.target.value)} style={inputStyle} placeholder="Expansion name" />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <div>
-              <label style={labelStyle}>Year</label>
-              <input value={exp.year_published} onChange={e => update(i, "year_published", e.target.value)} style={inputStyle} placeholder="YYYY" />
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership</label>
-              <select value={exp.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
+        <Card key={i} surface style={{ padding: "var(--space-4) var(--space-5)" }}>
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Expansion {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <FormField label="Title">
+              <Input value={exp.title} onChange={e => update(i, "title", e.target.value)} placeholder="Expansion name" />
+            </FormField>
+            <Grid cols={2} gap={4}>
+              <FormField label="Year">
+                <Input value={exp.year_published} onChange={e => update(i, "year_published", e.target.value)} placeholder="YYYY" />
+              </FormField>
+              <FormField label="Ownership">
+                <Select value={exp.ownership_status_id} onChange={e => update(i, "ownership_status_id", e.target.value)}>
+                  <option value="">None</option>
+                  {ownershipStatuses.map(s => (
+                    <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                  ))}
+                </Select>
+              </FormField>
+            </Grid>
+          </Stack>
+        </Card>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Expansion</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Expansion
+      </Button>
+    </Stack>
   );
 }
 
@@ -105,7 +123,6 @@ export default function BoardgamesIngestPage() {
     if (coverFileRef.current) coverFileRef.current.value = "";
   }
 
-  // BGG search state
   const [bggQuery, setBggQuery] = useState("");
   const [bggResults, setBggResults] = useState(null);
   const [bggSearching, setBggSearching] = useState(false);
@@ -220,151 +237,169 @@ export default function BoardgamesIngestPage() {
     }
   }
 
-  if (!form) return <PageContainer><p style={{ padding: 20, fontSize: 13 }}>Loading…</p></PageContainer>;
+  if (!form) return (
+    <PageContainer>
+      <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p>
+    </PageContainer>
+  );
 
   return (
     <PageContainer>
-      <div style={{ maxWidth: 680, padding: "16px 0", margin: "0 auto" }}>
-        <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, color: "var(--text-primary)" }}>Add Board Game</h2>
+      <div style={{ maxWidth: 680, padding: "var(--space-7) 0", margin: "0 auto" }}>
+        <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, marginBottom: "var(--space-7)", color: "var(--text-primary)" }}>
+          Add Board Game
+        </h2>
 
-        {error && <div style={alertError}>{error}</div>}
-        {success && <div style={alertSuccess}>{success}</div>}
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-        {/* BGG Search */}
-        <div style={{ marginBottom: 14, padding: "10px 12px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 4 }}>
-          <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 6 }}>Search BoardGameGeek</div>
-          <form onSubmit={handleBggSearch} style={{ display: "flex", gap: 6, marginBottom: bggResults || bggError ? 8 : 0 }}>
-            <input
-              value={bggQuery}
-              onChange={e => setBggQuery(e.target.value)}
-              style={{ ...inputStyle, flex: 1 }}
-              placeholder="Game title…"
-            />
-            <button type="submit" disabled={bggSearching || !bggQuery.trim()} style={btnSecondary}>
-              {bggSearching ? "Searching…" : "Search"}
-            </button>
-          </form>
-          {bggLoading && <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>Loading details…</div>}
-          {bggError && <div style={{ fontSize: 12, color: "var(--error)", marginTop: 4 }}>{bggError}</div>}
-          {bggResults && bggResults.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>No results found.</div>}
-          {bggResults && bggResults.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {bggResults.map(r => (
-                <button
-                  key={r.bgg_id}
-                  type="button"
-                  onClick={() => applyBggResult(r)}
-                  style={{ display: "flex", gap: 8, alignItems: "center", background: "none", border: "1px solid var(--border-input)", borderRadius: 3, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}
-                >
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>{r.title}</div>
-                    {r.year_published && <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{r.year_published}</div>}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} placeholder="e.g. Pandemic" autoFocus />
-          </div>
-
-          {/* Category + Ownership */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Player Count *</label>
-              <select value={form.categoryId} onChange={e => set("categoryId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Year + Players */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={labelStyle}>Year Published</label>
-              <input value={form.yearPublished} onChange={e => set("yearPublished", e.target.value)} style={inputStyle} placeholder="YYYY" />
-            </div>
-            <div>
-              <label style={labelStyle}>Min Players</label>
-              <input value={form.minPlayers} onChange={e => set("minPlayers", e.target.value)} style={inputStyle} placeholder="1" type="number" min="1" />
-            </div>
-            <div>
-              <label style={labelStyle}>Max Players</label>
-              <input value={form.maxPlayers} onChange={e => set("maxPlayers", e.target.value)} style={inputStyle} placeholder="4" type="number" min="1" />
-            </div>
-          </div>
-
-          {/* Designer(s) */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Designer(s)</label>
-            <NameList names={form.designers} onChange={v => set("designers", v)} addLabel="+ Designer" placeholder="e.g. Matt Leacock" />
-          </div>
-
-          {/* Publisher */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Publisher</label>
-            <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} placeholder="e.g. Z-Man Games" />
-          </div>
-
-          {/* Cover image */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input
-                value={form.coverImageUrl}
-                onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
-                style={{ ...inputStyle, flex: 1 }}
-                placeholder="https://…"
-              />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {coverPreview && (
-                <img src={coverPreview} alt="cover preview" style={{ width: 50, height: 70, objectFit: "cover", border: "1px solid var(--border)", borderRadius: 3 }} onError={() => setCoverPreview(null)} />
+          {/* BGG Search */}
+          <Card surface style={{ padding: "var(--space-5) var(--space-6)" }}>
+            <Stack gap={3}>
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Search BoardGameGeek
+              </div>
+              <form onSubmit={handleBggSearch}>
+                <Row gap={3} align="stretch">
+                  <Input
+                    value={bggQuery}
+                    onChange={e => setBggQuery(e.target.value)}
+                    placeholder="Game title…"
+                    style={{ flex: 1 }}
+                  />
+                  <Button type="submit" variant="secondary" disabled={bggSearching || !bggQuery.trim()}>
+                    {bggSearching ? "Searching…" : "Search"}
+                  </Button>
+                </Row>
+              </form>
+              {bggLoading && <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>Loading details…</div>}
+              {bggError && <div style={{ fontSize: "var(--text-sm)", color: "var(--error-text)" }}>{bggError}</div>}
+              {bggResults && bggResults.length === 0 && (
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>No results found.</div>
               )}
-            </div>
-          </div>
+              {bggResults && bggResults.length > 0 && (
+                <Stack gap={1}>
+                  {bggResults.map(r => (
+                    <button
+                      key={r.bgg_id}
+                      type="button"
+                      onClick={() => applyBggResult(r)}
+                      style={{
+                        display: "flex", gap: "var(--space-4)", alignItems: "center",
+                        background: "none",
+                        border: "1px solid var(--border-input)",
+                        borderRadius: "var(--radius-sm)",
+                        padding: "var(--space-2) var(--space-4)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        color: "var(--text-primary)",
+                        font: "inherit",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: "var(--text-base)", fontWeight: 500 }}>{r.title}</div>
+                        {r.year_published && (
+                          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{r.year_published}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </Card>
 
-          {/* Description */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={5}>
+              <FormField label="Title" required>
+                <Input value={form.title} onChange={e => set("title", e.target.value)} placeholder="e.g. Pandemic" autoFocus />
+              </FormField>
 
-          {/* Notes */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-          </div>
+              <Grid cols={2} gap={5}>
+                <FormField label="Player Count" required>
+                  <Select value={form.categoryId} onChange={e => set("categoryId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {categories.map(c => (
+                      <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Ownership" required>
+                  <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                    <option value="">Select…</option>
+                    {ownershipStatuses.map(s => (
+                      <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                    ))}
+                  </Select>
+                </FormField>
+              </Grid>
 
-          {/* Expansions */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ ...labelStyle, marginBottom: 6 }}>Expansions</label>
-            <ExpansionsEditor
-              expansions={form.expansions}
-              ownershipStatuses={ownershipStatuses}
-              onChange={v => set("expansions", v)}
-            />
-          </div>
+              <Grid cols={3} gap={5}>
+                <FormField label="Year Published">
+                  <Input value={form.yearPublished} onChange={e => set("yearPublished", e.target.value)} placeholder="YYYY" />
+                </FormField>
+                <FormField label="Min Players">
+                  <Input value={form.minPlayers} onChange={e => set("minPlayers", e.target.value)} placeholder="1" type="number" min="1" />
+                </FormField>
+                <FormField label="Max Players">
+                  <Input value={form.maxPlayers} onChange={e => set("maxPlayers", e.target.value)} placeholder="4" type="number" min="1" />
+                </FormField>
+              </Grid>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Save Game"}</button>
-            <button type="button" onClick={handleReset} style={btnSecondary}>Clear</button>
-          </div>
-        </form>
+              <FormField label="Designer(s)">
+                <NameList names={form.designers} onChange={v => set("designers", v)} addLabel="+ Designer" placeholder="e.g. Matt Leacock" />
+              </FormField>
+
+              <FormField label="Publisher">
+                <Input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} placeholder="e.g. Z-Man Games" />
+              </FormField>
+
+              <FormField label="Cover Image URL">
+                <Row gap={3} align="start">
+                  <Input
+                    value={form.coverImageUrl}
+                    onChange={e => { set("coverImageUrl", e.target.value); setCoverPreview(e.target.value || null); }}
+                    placeholder="https://…"
+                    style={{ flex: 1 }}
+                  />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                    Add Image
+                  </Button>
+                  {coverPreview && (
+                    <CoverThumb src={coverPreview} alt="cover preview" size="md" />
+                  )}
+                </Row>
+              </FormField>
+
+              <FormField label="Description">
+                <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+              </FormField>
+
+              <FormField label="Notes">
+                <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+              </FormField>
+
+              <FormField label="Expansions">
+                <ExpansionsEditor
+                  expansions={form.expansions}
+                  ownershipStatuses={ownershipStatuses}
+                  onChange={v => set("expansions", v)}
+                />
+              </FormField>
+
+              <Row gap={4}>
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? "Saving…" : "Save Game"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={handleReset}>
+                  Clear
+                </Button>
+              </Row>
+            </Stack>
+          </form>
+        </Stack>
       </div>
     </PageContainer>
   );

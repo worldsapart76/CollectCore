@@ -21,27 +21,36 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, GRID_SIZES } from "../styles/commonStyles";
+import { GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
-const OWNERSHIP_BADGE_COLORS = {
-  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
-};
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmButton,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  Modal,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  ownershipToneFromInitial,
+} from "../components/primitives";
 
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  const tone = ownershipToneFromInitial(initial);
   return (
-    <div style={{
-      position: "absolute", bottom: 4, left: 4,
-      background: "#000", color,
-      fontWeight: 700, fontSize: 12, lineHeight: "12px",
-      padding: "3px 5px", borderRadius: 4, zIndex: 2,
-    }}>
-      {initial}
+    <div style={{ position: "absolute", bottom: 4, left: 4, zIndex: 2 }}>
+      <Badge tone={tone}>{initial}</Badge>
     </div>
   );
 }
@@ -175,33 +184,33 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-        <select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130 }}>
+    <Stack gap={2}>
+      <Row gap={3} wrap>
+        <Select value={topSel} onChange={e => handleTopChange(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
           <option value="">Genre…</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
           <>
-            <select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ ...selectStyle, width: "auto", minWidth: 130 }}>
+            <Select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ width: "auto", minWidth: 130 }}>
               <option value="">Subgenre…</option>
               {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-            </select>
-            <button type="button" onClick={add} style={btnSm}>Add</button>
+            </Select>
+            <Button variant="secondary" size="sm" onClick={add}>Add</Button>
           </>
         )}
-      </div>
+      </Row>
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {selected.map((g, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {labelFor(g)}
-              <button type="button" onClick={() => remove(i)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -217,37 +226,48 @@ function CopiesEditor({ copies, allPlatforms, ownershipStatuses, onChange }) {
   function remove(idx) { onChange(copies.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
-            <div>
-              <label style={labelStyle}>Platform</label>
-              <select value={copy.platform_id || ""} onChange={e => update(i, "platform_id", e.target.value)} style={selectStyle}>
-                <option value="">Select platform…</option>
-                {allPlatforms.map(p => <option key={p.platform_id} value={p.platform_id}>{p.platform_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Edition</label>
-              <input value={copy.edition || ""} onChange={e => update(i, "edition", e.target.value)} style={inputStyle} placeholder="e.g. Collector's Edition" />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={copy.ownership_status_id || ""} onChange={e => update(i, "ownership_status_id", e.target.value)} style={{ ...selectStyle, maxWidth: 200 }}>
-              <option value="">None</option>
-              {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </div>
+        <div
+          key={i}
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Copy {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Platform">
+                <Select value={copy.platform_id || ""} onChange={e => update(i, "platform_id", e.target.value)}>
+                  <option value="">Select platform…</option>
+                  {allPlatforms.map(p => <option key={p.platform_id} value={p.platform_id}>{p.platform_name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Edition">
+                <Input value={copy.edition || ""} onChange={e => update(i, "edition", e.target.value)} placeholder="e.g. Collector's Edition" />
+              </FormField>
+            </Grid>
+            <FormField label="Ownership">
+              <Select value={copy.ownership_status_id || ""} onChange={e => update(i, "ownership_status_id", e.target.value)} style={{ maxWidth: 200 }}>
+                <option value="">None</option>
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Stack>
         </div>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Copy
+      </Button>
+    </Stack>
   );
 }
 
@@ -259,7 +279,7 @@ const VideoGameGridItem = memo(function VideoGameGridItem({ game, isSelected, on
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
-      borderRadius: 3, boxSizing: "border-box",
+      borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
       <div style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
@@ -270,17 +290,17 @@ const VideoGameGridItem = memo(function VideoGameGridItem({ game, isSelected, on
         </div>
         <OwnershipBadge statusName={game.ownership_status} />
         {game.cover_image_url ? (
-          <img src={getImageUrl(game.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+          <img src={getImageUrl(game.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: "var(--radius-sm)" }} />
         ) : (
-          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>No Cover</span>
           </div>
         )}
       </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
-          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{game.title}</div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(game.platforms || []).join(", ")}</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{game.title}</div>
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(game.platforms || []).join(", ")}</div>
         </div>
       )}
     </div>
@@ -293,7 +313,6 @@ function VideoGameDetailModal({ itemId, ownershipStatuses, playStatuses, allGenr
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const coverFileRef = useRef(null);
 
@@ -373,131 +392,120 @@ function VideoGameDetailModal({ itemId, ownershipStatuses, playStatuses, allGenr
       onDeleted();
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
   }
 
+  const footer = form ? (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label="Delete"
+        confirmLabel={deleting ? "Deleting…" : "Confirm"}
+        promptText="Delete this game?"
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </Row>
+    </Row>
+  ) : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "Game Detail"}</div>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
-        </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="md"
+      title={!form ? "Loading…" : form.title || "Game Detail"}
+      footer={footer}
+      footerJustify="between"
+    >
+      {!form && !error && <div style={{ color: "var(--text-muted)" }}>Loading…</div>}
+      {error && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{error}</Alert>}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
-          {error && <div style={alertError}>{error}</div>}
-
-          {form && (
-            <>
-              {form.coverImageUrl && (
-                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                  <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{form.developers.filter(Boolean).join(", ")}</div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Title *</label>
-                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={labelStyle}>Ownership *</label>
-                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Play Status</label>
-                  <select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)} style={selectStyle}>
-                    <option value="">None</option>
-                    {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
-                  </select>
+      {form && (
+        <Stack gap={5}>
+          {form.coverImageUrl && (
+            <Row gap={5} align="start">
+              <CoverThumb src={getImageUrl(form.coverImageUrl)} alt="cover" size="md" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-md)", marginBottom: 2 }}>{form.title}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                  {form.developers.filter(Boolean).join(", ")}
                 </div>
               </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Release Date</label>
-                <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={{ ...inputStyle, maxWidth: 180 }} placeholder="YYYY-MM-DD" />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Developer(s)</label>
-                <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="Developer name" />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Publisher(s)</label>
-                <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="Publisher name" />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Genre</label>
-                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Cover Image URL</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                  {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Description</label>
-                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 60, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Notes</label>
-                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 4 }}>
-                <label style={{ ...labelStyle, marginBottom: 6 }}>Copies</label>
-                <CopiesEditor
-                  copies={form.copies}
-                  allPlatforms={allPlatforms}
-                  ownershipStatuses={ownershipStatuses}
-                  onChange={v => set("copies", v)}
-                />
-              </div>
-            </>
+            </Row>
           )}
-        </div>
 
-        {form && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-            <div>
-              {!confirmDelete
-                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this game?</span>
-                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
-                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                  </div>
-              }
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <FormField label="Title" required>
+            <Input value={form.title} onChange={e => set("title", e.target.value)} />
+          </FormField>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Ownership" required>
+              <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Play Status">
+              <Select value={form.playStatusId} onChange={e => set("playStatusId", e.target.value)}>
+                <option value="">None</option>
+                {playStatuses.map(s => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
+
+          <FormField label="Release Date">
+            <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY-MM-DD" style={{ maxWidth: 180 }} />
+          </FormField>
+
+          <FormField label="Developer(s)">
+            <NameList names={form.developers} onChange={v => set("developers", v)} addLabel="+ Developer" placeholder="Developer name" />
+          </FormField>
+
+          <FormField label="Publisher(s)">
+            <NameList names={form.publishers} onChange={v => set("publishers", v)} addLabel="+ Publisher" placeholder="Publisher name" />
+          </FormField>
+
+          <FormField label="Genre">
+            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+          </FormField>
+
+          <FormField label="Cover Image URL">
+            <Row gap={3} align="start">
+              <Input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} placeholder="https://…" style={{ flex: 1 }} />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                Add Image
+              </Button>
+              {form.coverImageUrl && <CoverThumb src={getImageUrl(form.coverImageUrl)} alt="cover" size="sm" />}
+            </Row>
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+          </FormField>
+
+          <FormField label="Notes">
+            <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+          </FormField>
+
+          <FormField label="Copies">
+            <CopiesEditor
+              copies={form.copies}
+              allPlatforms={allPlatforms}
+              ownershipStatuses={ownershipStatuses}
+              onChange={v => set("copies", v)}
+            />
+          </FormField>
+        </Stack>
+      )}
+    </Modal>
   );
 }
 
@@ -505,19 +513,18 @@ function VideoGameDetailModal({ itemId, ownershipStatuses, playStatuses, allGenr
 
 function BulkField({ label, enabled, onToggle, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
+    <Stack gap={2}>
+      <Checkbox
+        label={<span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{label}</span>}
+        checked={enabled}
+        onChange={onToggle}
+      />
+      {enabled && <div style={{ paddingLeft: "var(--space-8)" }}>{children}</div>}
+    </Stack>
   );
 }
 
 function VideoGameBulkEdit({ selectedIds, ownershipStatuses, playStatuses, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updatePlayStatus, setUpdatePlayStatus] = useState(false);
@@ -525,10 +532,10 @@ function VideoGameBulkEdit({ selectedIds, ownershipStatuses, playStatuses, onClo
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
   const anyEnabled = updateOwnership || updatePlayStatus;
+  const noun = selectedIds.length === 1 ? "game" : "games";
 
   async function handleSave() {
     if (!anyEnabled) { setError("Select at least one field to update."); return; }
@@ -542,52 +549,55 @@ function VideoGameBulkEdit({ selectedIds, ownershipStatuses, playStatuses, onClo
   }
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
     try { await bulkDeleteVideoGames(selectedIds); onDeleted(); }
-    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    catch (err) { setError(err.message || "Failed to delete"); }
     finally { setDeleting(false); }
   }
 
+  const footer = (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label={`Delete ${selectedIds.length} ${noun}`}
+        confirmLabel={deleting ? "…" : "Yes"}
+        cancelLabel="No"
+        promptText={`Delete ${selectedIds.length}?`}
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving…" : `Apply to ${selectedIds.length}`}
+        </Button>
+      </Row>
+    </Row>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
-        </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Play Status" enabled={updatePlayStatus} onToggle={() => setUpdatePlayStatus((p) => !p)}>
-            <select value={playStatusId} onChange={(e) => setPlayStatusId(e.target.value)} style={fieldStyle}>
-              {playStatuses.map((s) => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <div>
-            {!confirmDelete
-              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} game{selectedIds.length !== 1 ? "s" : ""}</button>
-              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
-                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
-                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
-                </span>
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedIds.length} ${noun}`}
+      footer={footer}
+      footerJustify="between"
+    >
+      <Stack gap={5}>
+        {error && <Alert tone="error">{error}</Alert>}
+        <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+          <Select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)}>
+            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+        <BulkField label="Play Status" enabled={updatePlayStatus} onToggle={() => setUpdatePlayStatus((p) => !p)}>
+          <Select value={playStatusId} onChange={(e) => setPlayStatusId(e.target.value)}>
+            {playStatuses.map((s) => <option key={s.play_status_id} value={s.play_status_id}>{s.status_name}</option>)}
+          </Select>
+        </BulkField>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -736,26 +746,28 @@ export default function VideoGamesLibraryPage() {
 
   const allVisibleSelected = sortedGames.length > 0 && sortedGames.every(g => selectedIds.has(g.item_id));
 
-  if (loading) return <div style={{ padding: 24, fontSize: 13 }}>Loading…</div>;
-  if (error) return <div style={{ padding: 24 }}><p style={alertError}>{error}</p></div>;
+  if (loading) return <div style={{ padding: "var(--space-9)", fontSize: "var(--text-base)" }}>Loading…</div>;
+  if (error) return <div style={{ padding: "var(--space-9)" }}><Alert tone="error">{error}</Alert></div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: "var(--text-base)" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <Row gap={5}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {sortedGames.length} game{sortedGames.length !== 1 ? "s" : ""}
           </span>
           {selectedIds.size > 0 && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selectedIds.size} selected</span>
-              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
-              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
-            </span>
+            <Row gap={3}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--btn-primary-bg)", fontWeight: 700 }}>
+                {selectedIds.size} selected
+              </span>
+              <Button variant="primary" size="sm" onClick={() => setBulkEditOpen(true)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+            </Row>
           )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        </Row>
+        <Row gap={4}>
           <SegmentedButtons
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
@@ -770,7 +782,7 @@ export default function VideoGamesLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
-        </div>
+        </Row>
       </div>
 
       {/* Body */}
@@ -786,9 +798,9 @@ export default function VideoGamesLibraryPage() {
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {sortedGames.length === 0 ? (
-            <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No games match current filters.</p>
+            <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>No games match current filters.</p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
               {sortedGames.map(g => (
                 <VideoGameGridItem key={g.item_id} game={g}
                   isSelected={selectedIds.has(g.item_id)}
@@ -798,7 +810,7 @@ export default function VideoGamesLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -863,18 +875,18 @@ export default function VideoGamesLibraryPage() {
                       {showThumbnails && (
                         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
                           {g.cover_image_url
-                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                            ? <img src={getImageUrl(g.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
                         </td>
                       )}
                       <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{g.title}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.platforms || []).join(", ") || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.developers || []).join(", ") || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.platforms || []).join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{(g.developers || []).join(", ") || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                         {(g.genres || []).slice(0, 2).join(", ")}{g.genres?.length > 2 ? "…" : ""}
                       </td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.play_status || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.ownership_status || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.play_status || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.ownership_status || "—"}</td>
                     </tr>
                   );
                 })}

@@ -23,27 +23,36 @@ import {
   uploadCover,
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, row2, GRID_SIZES } from "../styles/commonStyles";
+import { GRID_SIZES } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
-
-const OWNERSHIP_BADGE_COLORS = {
-  O: "#00ff66", W: "#ffd600", T: "#ff3b3b", B: "#00bfff",
-};
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  ConfirmButton,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  Modal,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+  ownershipToneFromInitial,
+} from "../components/primitives";
 
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
-  const color = OWNERSHIP_BADGE_COLORS[initial] || "#ffffff";
+  const tone = ownershipToneFromInitial(initial);
   return (
-    <div style={{
-      position: "absolute", bottom: 4, left: 4,
-      background: "#000", color,
-      fontWeight: 700, fontSize: 12, lineHeight: "12px",
-      padding: "3px 5px", borderRadius: 4, zIndex: 2,
-    }}>
-      {initial}
+    <div style={{ position: "absolute", bottom: 4, left: 4, zIndex: 2 }}>
+      <Badge tone={tone}>{initial}</Badge>
     </div>
   );
 }
@@ -125,47 +134,60 @@ function CopiesEditor({ copies, formatTypes, ownershipStatuses, onChange }) {
   function remove(idx) { onChange(copies.filter((_, i) => i !== idx)); }
 
   return (
-    <div>
+    <Stack gap={4}>
       {copies.map((copy, i) => (
-        <div key={i} style={{ marginBottom: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg-surface)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--text-secondary)" }}>Copy {i + 1}</span>
-            <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕ Remove</button>
-          </div>
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Format</label>
-              <select value={copy.format_type_id || ""} onChange={e => update(i, "format_type_id", e.target.value)} style={selectStyle}>
-                <option value="">Select…</option>
-                {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership</label>
-              <select value={copy.ownership_status_id || ""} onChange={e => update(i, "ownership_status_id", e.target.value)} style={selectStyle}>
-                <option value="">None</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>ISBN-13</label>
-              <input value={copy.isbn_13 || ""} onChange={e => update(i, "isbn_13", e.target.value)} style={inputStyle} placeholder="978-…" />
-            </div>
-            <div>
-              <label style={labelStyle}>ISBN-10</label>
-              <input value={copy.isbn_10 || ""} onChange={e => update(i, "isbn_10", e.target.value)} style={inputStyle} placeholder="0-…" />
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={copy.notes || ""} onChange={e => update(i, "notes", e.target.value)} style={inputStyle} />
-          </div>
+        <div
+          key={i}
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-surface)",
+          }}
+        >
+          <Stack gap={3}>
+            <Row justify="between">
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)" }}>
+                Copy {i + 1}
+              </span>
+              <RemoveButton showLabel label="Remove" onClick={() => remove(i)} />
+            </Row>
+            <Grid cols={2} gap={4}>
+              <FormField label="Format">
+                <Select value={copy.format_type_id || ""} onChange={e => update(i, "format_type_id", e.target.value)}>
+                  <option value="">Select…</option>
+                  {formatTypes.map(f => (
+                    <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Ownership">
+                <Select value={copy.ownership_status_id || ""} onChange={e => update(i, "ownership_status_id", e.target.value)}>
+                  <option value="">None</option>
+                  {ownershipStatuses.map(s => (
+                    <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                  ))}
+                </Select>
+              </FormField>
+            </Grid>
+            <Grid cols={2} gap={4}>
+              <FormField label="ISBN-13">
+                <Input value={copy.isbn_13 || ""} onChange={e => update(i, "isbn_13", e.target.value)} placeholder="978-…" />
+              </FormField>
+              <FormField label="ISBN-10">
+                <Input value={copy.isbn_10 || ""} onChange={e => update(i, "isbn_10", e.target.value)} placeholder="0-…" />
+              </FormField>
+            </Grid>
+            <FormField label="Notes">
+              <Input value={copy.notes || ""} onChange={e => update(i, "notes", e.target.value)} />
+            </FormField>
+          </Stack>
         </div>
       ))}
-      <button type="button" onClick={add} style={btnSm}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+        + Add Copy
+      </Button>
+    </Stack>
   );
 }
 
@@ -177,7 +199,7 @@ const TtrpgGridItem = memo(function TtrpgGridItem({ book, isSelected, onToggleSe
     <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
-      borderRadius: 3, boxSizing: "border-box",
+      borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
       <div style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
@@ -188,17 +210,17 @@ const TtrpgGridItem = memo(function TtrpgGridItem({ book, isSelected, onToggleSe
         </div>
         <OwnershipBadge statusName={book.ownership_status} />
         {book.cover_image_url ? (
-          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: 2 }} />
+          <img src={getImageUrl(book.cover_image_url)} alt="" style={{ width: w, height: h, objectFit: "cover", display: "block", borderRadius: "var(--radius-sm)" }} />
         ) : (
-          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: 2, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>No Cover</span>
+          <div style={{ width: w, height: h, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>No Cover</span>
           </div>
         )}
       </div>
       {showCaptions && (
         <div style={{ padding: "3px 2px 0", maxWidth: w }}>
-          <div style={{ fontSize: 11, fontWeight: "700", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.category_name || ""}</div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)" }}>{book.title}</div>
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.category_name || ""}</div>
         </div>
       )}
     </div>
@@ -211,7 +233,6 @@ function TtrpgDetailModal({ itemId, systems, bookTypes, formatTypes, ownershipSt
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [systemEditions, setSystemEditions] = useState([]);
   const [lines, setLines] = useState([]);
@@ -315,146 +336,149 @@ function TtrpgDetailModal({ itemId, systems, bookTypes, formatTypes, ownershipSt
       onDeleted();
     } catch (err) {
       setError(err.message || "Delete failed.");
-      setConfirmDelete(false);
     } finally {
       setDeleting(false);
     }
   }
 
+  const footer = form ? (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label="Delete"
+        confirmLabel={deleting ? "Deleting…" : "Confirm"}
+        promptText="Delete this book?"
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </Row>
+    </Row>
+  ) : null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", borderRadius: 6, width: 700, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 4px 24px rgba(0,0,0,0.18)" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <div style={{ fontWeight: "bold", fontSize: 14 }}>{!form ? "Loading..." : form.title || "TTRPG Book Detail"}</div>
-          <button type="button" onClick={onClose} style={{ ...btnSm, fontSize: 14, padding: "2px 8px" }}>✕</button>
-        </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="md"
+      title={!form ? "Loading…" : form.title || "TTRPG Book Detail"}
+      footer={footer}
+      footerJustify="between"
+    >
+      {!form && !error && <div style={{ color: "var(--text-muted)" }}>Loading…</div>}
+      {error && <Alert tone="error" style={{ marginBottom: "var(--space-5)" }}>{error}</Alert>}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          {!form && !error && <div style={{ color: "#999" }}>Loading…</div>}
-          {error && <div style={alertError}>{error}</div>}
-
-          {form && (
-            <>
-              {form.coverImageUrl && (
-                <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-                  <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 100, width: "auto", borderRadius: 3, border: "1px solid #ddd", flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: "bold", fontSize: 14, marginBottom: 2 }}>{form.title}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>{form.authors.filter(Boolean).join(", ")}</div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Title *</label>
-                <input value={form.title} onChange={e => set("title", e.target.value)} style={inputStyle} />
-              </div>
-
-              <div style={row2}>
-                <div>
-                  <label style={labelStyle}>Game System *</label>
-                  <select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }} style={selectStyle}>
-                    {systems.map(s => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Ownership *</label>
-                  <select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)} style={selectStyle}>
-                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-                  </select>
+      {form && (
+        <Stack gap={5}>
+          {form.coverImageUrl && (
+            <Row gap={5} align="start">
+              <CoverThumb src={getImageUrl(form.coverImageUrl)} alt="cover" size="md" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: "var(--text-md)", marginBottom: 2 }}>{form.title}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                  {form.authors.filter(Boolean).join(", ")}
                 </div>
               </div>
-
-              <div style={row2}>
-                <div>
-                  <label style={labelStyle}>System Edition</label>
-                  <input value={form.systemEditionName} onChange={e => set("systemEditionName", e.target.value)} style={inputStyle} placeholder="e.g. 5e" list="edit-edition-list" />
-                  <datalist id="edit-edition-list">
-                    {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label style={labelStyle}>Line / Setting</label>
-                  <input value={form.lineName} onChange={e => set("lineName", e.target.value)} style={inputStyle} placeholder="e.g. Forgotten Realms" list="edit-line-list" />
-                  <datalist id="edit-line-list">
-                    {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
-                  </datalist>
-                </div>
-              </div>
-
-              <div style={row2}>
-                <div>
-                  <label style={labelStyle}>Book Type</label>
-                  <select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)} style={selectStyle}>
-                    <option value="">Select…</option>
-                    {bookTypes.map(bt => <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Release Date</label>
-                  <input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} style={inputStyle} placeholder="YYYY or YYYY-MM-DD" />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Publisher</label>
-                <input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} style={inputStyle} />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Author(s)</label>
-                <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="Author name" />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Cover Image URL</label>
-                <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                  <input value={form.coverImageUrl} onChange={e => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="https://…" />
-                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-                  <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-                  {form.coverImageUrl && <img src={getImageUrl(form.coverImageUrl)} alt="cover" style={{ height: 40, width: "auto", borderRadius: 2, border: "1px solid #ddd", flexShrink: 0 }} />}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>Description</label>
-                <textarea value={form.description} onChange={e => set("description", e.target.value)} style={{ ...inputStyle, height: 70, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Notes</label>
-                <textarea value={form.notes} onChange={e => set("notes", e.target.value)} style={{ ...inputStyle, height: 50, resize: "vertical" }} />
-              </div>
-
-              <div style={{ marginBottom: 4 }}>
-                <label style={{ ...labelStyle, marginBottom: 6 }}>Copies / Formats</label>
-                <CopiesEditor copies={form.copies} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} onChange={v => set("copies", v)} />
-              </div>
-            </>
+            </Row>
           )}
-        </div>
 
-        {form && (
-          <div style={{ padding: "10px 16px", borderTop: "1px solid #e0e0e0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-            <div>
-              {!confirmDelete
-                ? <button type="button" onClick={() => setConfirmDelete(true)} style={btnDanger}>Delete</button>
-                : <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#c62828" }}>Delete this book?</span>
-                    <button type="button" onClick={handleDelete} disabled={deleting} style={btnDanger}>{deleting ? "Deleting..." : "Confirm"}</button>
-                    <button type="button" onClick={() => setConfirmDelete(false)} style={btnSecondary}>Cancel</button>
-                  </div>
-              }
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
-              <button type="button" onClick={handleSave} disabled={saving} style={btnPrimary}>{saving ? "Saving..." : "Save"}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <FormField label="Title" required>
+            <Input value={form.title} onChange={e => set("title", e.target.value)} />
+          </FormField>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Game System" required>
+              <Select value={form.systemId} onChange={e => { set("systemId", e.target.value); set("systemEditionName", ""); set("lineName", ""); }}>
+                {systems.map(s => (
+                  <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Ownership" required>
+              <Select value={form.ownershipStatusId} onChange={e => set("ownershipStatusId", e.target.value)}>
+                {ownershipStatuses.map(s => (
+                  <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                ))}
+              </Select>
+            </FormField>
+          </Grid>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="System Edition">
+              <Input value={form.systemEditionName} onChange={e => set("systemEditionName", e.target.value)} placeholder="e.g. 5e" list="edit-edition-list" />
+              <datalist id="edit-edition-list">
+                {systemEditions.map(ed => <option key={ed.edition_id} value={ed.edition_name} />)}
+              </datalist>
+            </FormField>
+            <FormField label="Line / Setting">
+              <Input value={form.lineName} onChange={e => set("lineName", e.target.value)} placeholder="e.g. Forgotten Realms" list="edit-line-list" />
+              <datalist id="edit-line-list">
+                {lines.map(ln => <option key={ln.line_id} value={ln.line_name} />)}
+              </datalist>
+            </FormField>
+          </Grid>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Book Type">
+              <Select value={form.bookTypeId} onChange={e => set("bookTypeId", e.target.value)}>
+                <option value="">Select…</option>
+                {bookTypes.map(bt => (
+                  <option key={bt.book_type_id} value={bt.book_type_id}>{bt.book_type_name}</option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Release Date">
+              <Input value={form.releaseDate} onChange={e => set("releaseDate", e.target.value)} placeholder="YYYY or YYYY-MM-DD" />
+            </FormField>
+          </Grid>
+
+          <FormField label="Publisher">
+            <Input value={form.publisherName} onChange={e => set("publisherName", e.target.value)} />
+          </FormField>
+
+          <FormField label="Author(s)">
+            <NameList names={form.authors} onChange={v => set("authors", v)} addLabel="+ Author" placeholder="Author name" />
+          </FormField>
+
+          <FormField label="Cover Image URL">
+            <Row gap={3} align="start">
+              <Input
+                value={form.coverImageUrl}
+                onChange={e => set("coverImageUrl", e.target.value)}
+                placeholder="https://…"
+                style={{ flex: 1 }}
+              />
+              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+              <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                Add Image
+              </Button>
+              {form.coverImageUrl && <CoverThumb src={getImageUrl(form.coverImageUrl)} alt="cover" size="sm" />}
+            </Row>
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+          </FormField>
+
+          <FormField label="Notes">
+            <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+          </FormField>
+
+          <FormField label="Copies / Formats">
+            <CopiesEditor
+              copies={form.copies}
+              formatTypes={formatTypes}
+              ownershipStatuses={ownershipStatuses}
+              onChange={v => set("copies", v)}
+            />
+          </FormField>
+        </Stack>
+      )}
+    </Modal>
   );
 }
 
@@ -462,19 +486,18 @@ function TtrpgDetailModal({ itemId, systems, bookTypes, formatTypes, ownershipSt
 
 function BulkField({ label, enabled, onToggle, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-        <input type="checkbox" checked={enabled} onChange={onToggle} style={{ marginRight: 8 }} />
-        <span style={{ fontWeight: "bold", fontSize: 13 }}>{label}</span>
-      </label>
-      {enabled && <div style={{ marginTop: 5, paddingLeft: 24 }}>{children}</div>}
-    </div>
+    <Stack gap={2}>
+      <Checkbox
+        label={<span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{label}</span>}
+        checked={enabled}
+        onChange={onToggle}
+      />
+      {enabled && <div style={{ paddingLeft: "var(--space-8)" }}>{children}</div>}
+    </Stack>
   );
 }
 
 function TtrpgBulkEdit({ selectedIds, systems, ownershipStatuses, onClose, onSaved, onDeleted }) {
-  const fieldStyle = { width: "100%", padding: "5px 6px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 };
-
   const [updateOwnership, setUpdateOwnership] = useState(false);
   const [ownershipId, setOwnershipId] = useState(String(ownershipStatuses[0]?.ownership_status_id || ""));
   const [updateSystem, setUpdateSystem] = useState(false);
@@ -482,10 +505,10 @@ function TtrpgBulkEdit({ selectedIds, systems, ownershipStatuses, onClose, onSav
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
 
   const anyEnabled = updateOwnership || updateSystem;
+  const noun = selectedIds.length === 1 ? "book" : "books";
 
   async function handleSave() {
     if (!anyEnabled) { setError("Select at least one field to update."); return; }
@@ -499,52 +522,59 @@ function TtrpgBulkEdit({ selectedIds, systems, ownershipStatuses, onClose, onSav
   }
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return; }
     setDeleting(true);
     try { await bulkDeleteTtrpg(selectedIds); onDeleted(); }
-    catch (err) { setError(err.message || "Failed to delete"); setConfirmDelete(false); }
+    catch (err) { setError(err.message || "Failed to delete"); }
     finally { setDeleting(false); }
   }
 
+  const footer = (
+    <Row justify="between" gap={4} style={{ width: "100%" }}>
+      <ConfirmButton
+        label={`Delete ${selectedIds.length} ${noun}`}
+        confirmLabel={deleting ? "…" : "Yes"}
+        cancelLabel="No"
+        promptText={`Delete ${selectedIds.length}?`}
+        onConfirm={handleDelete}
+        busy={deleting}
+        disabled={saving}
+      />
+      <Row gap={4}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving…" : `Apply to ${selectedIds.length}`}
+        </Button>
+      </Row>
+    </Row>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, width: 420, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <span style={{ fontWeight: "bold", fontSize: 14 }}>Bulk Edit — {selectedIds.length} book{selectedIds.length !== 1 ? "s" : ""}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 15, cursor: "pointer", color: "#666" }}>✕</button>
-        </div>
-        {error && <div style={{ margin: "8px 14px 0", padding: "7px 10px", background: "#ffebee", border: "1px solid #c62828", borderRadius: 3, fontSize: 13, color: "#c62828", flexShrink: 0 }}>{error}</div>}
-        <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1 }}>
-          <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
-            <select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)} style={fieldStyle}>
-              {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </BulkField>
-          <BulkField label="Game System" enabled={updateSystem} onToggle={() => setUpdateSystem((p) => !p)}>
-            <select value={systemId} onChange={(e) => setSystemId(e.target.value)} style={fieldStyle}>
-              {systems.map((s) => <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>)}
-            </select>
-          </BulkField>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderTop: "1px solid #e0e0e0", flexShrink: 0 }}>
-          <div>
-            {!confirmDelete
-              ? <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #c62828", borderRadius: 3, background: "#fff", color: "#c62828" }}>Delete {selectedIds.length} book{selectedIds.length !== 1 ? "s" : ""}</button>
-              : <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                  <span style={{ color: "#c62828", fontWeight: "bold" }}>Delete {selectedIds.length}?</span>
-                  <button onClick={handleDelete} disabled={deleting} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "none", borderRadius: 3, background: "#c62828", color: "#fff" }}>{deleting ? "..." : "Yes"}</button>
-                  <button onClick={() => setConfirmDelete(false)} style={{ padding: "5px 10px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>No</button>
-                </span>
-            }
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{ padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: "#fff" }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "5px 16px", fontSize: 13, cursor: "pointer", border: "1px solid #1565c0", borderRadius: 3, background: "#1565c0", color: "#fff", fontWeight: "bold" }}>{saving ? "Saving..." : `Apply to ${selectedIds.length}`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedIds.length} ${noun}`}
+      footer={footer}
+      footerJustify="between"
+    >
+      <Stack gap={5}>
+        {error && <Alert tone="error">{error}</Alert>}
+        <BulkField label="Ownership" enabled={updateOwnership} onToggle={() => setUpdateOwnership((p) => !p)}>
+          <Select value={ownershipId} onChange={(e) => setOwnershipId(e.target.value)}>
+            {ownershipStatuses.map((s) => (
+              <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+            ))}
+          </Select>
+        </BulkField>
+        <BulkField label="Game System" enabled={updateSystem} onToggle={() => setUpdateSystem((p) => !p)}>
+          <Select value={systemId} onChange={(e) => setSystemId(e.target.value)}>
+            {systems.map((s) => (
+              <option key={s.top_level_category_id} value={s.top_level_category_id}>{s.category_name}</option>
+            ))}
+          </Select>
+        </BulkField>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -692,22 +722,24 @@ export default function TTRPGLibraryPage() {
   const allVisibleSelected = sorted.length > 0 && sorted.every(b => selected.has(b.item_id));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: 13 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", fontSize: "var(--text-base)" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-sidebar)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+        <Row gap={5}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {loading ? "Loading…" : `${sorted.length} book${sorted.length !== 1 ? "s" : ""}${sorted.length !== items.length ? ` of ${items.length}` : ""}`}
           </span>
           {selected.size > 0 && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: "var(--btn-primary-bg)", fontWeight: "bold" }}>{selected.size} selected</span>
-              <button onClick={() => setBulkEditOpen(true)} style={{ ...btnPrimary, fontSize: 12, padding: "3px 10px" }}>Edit</button>
-              <button onClick={clearSelection} style={{ ...btnSecondary, fontSize: 12, padding: "3px 8px" }}>Clear</button>
-            </span>
+            <Row gap={3}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--btn-primary-bg)", fontWeight: 700 }}>
+                {selected.size} selected
+              </span>
+              <Button variant="primary" size="sm" onClick={() => setBulkEditOpen(true)}>Edit</Button>
+              <Button variant="secondary" size="sm" onClick={clearSelection}>Clear</Button>
+            </Row>
           )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        </Row>
+        <Row gap={4}>
           <SegmentedButtons
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
@@ -722,10 +754,14 @@ export default function TTRPGLibraryPage() {
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
-        </div>
+        </Row>
       </div>
 
-      {error && <div style={{ ...alertError, margin: "8px 12px" }}>{error}</div>}
+      {error && (
+        <div style={{ margin: "var(--space-4) var(--space-6)" }}>
+          <Alert tone="error">{error}</Alert>
+        </div>
+      )}
 
       {/* Body */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -741,11 +777,11 @@ export default function TTRPGLibraryPage() {
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
           {loading ? (
-            <p style={{ padding: 20, fontSize: 13 }}>Loading…</p>
+            <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)" }}>Loading…</p>
           ) : sorted.length === 0 ? (
-            <p style={{ padding: 20, fontSize: 13, color: "var(--text-secondary)" }}>No books found.</p>
+            <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>No books found.</p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 12, alignContent: "flex-start" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
               {sorted.map(b => (
                 <TtrpgGridItem key={b.item_id} book={b}
                   isSelected={selected.has(b.item_id)}
@@ -755,7 +791,7 @@ export default function TTRPGLibraryPage() {
               ))}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
@@ -820,18 +856,18 @@ export default function TTRPGLibraryPage() {
                       {showThumbnails && (
                         <td style={{ padding: "3px 6px", verticalAlign: "middle", width: 50 }}>
                           {b.cover_image_url
-                            ? <img src={getImageUrl(b.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)", display: "block" }} />
-                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: 2 }} />}
+                            ? <img src={getImageUrl(b.cover_image_url)} alt="" style={{ width: 42, height: 60, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "block" }} />
+                            : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
                         </td>
                       )}
                       <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.title}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.category_name}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.category_name}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                         {[b.system_edition_name, b.line_name].filter(Boolean).join(" / ") || "—"}
                       </td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.book_type_name || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.authors?.length ? b.authors.join(", ") : "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.copies_summary || (b.copy_count > 0 ? `${b.copy_count} cop${b.copy_count !== 1 ? "ies" : "y"}` : "—")}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.book_type_name || "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.authors?.length ? b.authors.join(", ") : "—"}</td>
+                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{b.copies_summary || (b.copy_count > 0 ? `${b.copy_count} cop${b.copy_count !== 1 ? "ies" : "y"}` : "—")}</td>
                     </tr>
                   );
                 })}

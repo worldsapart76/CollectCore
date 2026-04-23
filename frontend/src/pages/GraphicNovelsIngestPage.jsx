@@ -13,10 +13,24 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, alertWarn, row2 } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import { getImageUrl } from "../utils/imageUrl";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
 const HALF_STAR_OPTIONS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 const GN_COLLECTION_TYPE_CODE = "graphicnovels";
@@ -32,24 +46,28 @@ function TagInput({ tags, onChange }) {
     setInput("");
   }
   return (
-    <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)}
+    <Stack gap={2}>
+      <Row gap={2}>
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder="e.g. Spider-Man, X-Men, Dark Phoenix Saga" style={{ ...inputStyle, flex: 1 }} />
-        <button type="button" onClick={add} style={btnSm}>Add</button>
-      </div>
+          placeholder="e.g. Spider-Man, X-Men, Dark Phoenix Saga"
+          style={{ flex: 1 }}
+        />
+        <Button variant="secondary" size="sm" onClick={add}>Add</Button>
+      </Row>
       {tags.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <Row gap={2} wrap>
           {tags.map((t, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 6px", background: "var(--green-light)", border: "1px solid var(--border-input)", borderRadius: 10, display: "flex", alignItems: "center", gap: 4, color: "var(--green)" }}>
+            <Badge key={i} tone="tag">
               {t}
-              <button type="button" onClick={() => onChange(tags.filter((_, j) => j !== i))} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 11, color: "#555", padding: 0, lineHeight: 1 }}>✕</button>
-            </span>
+              <RemoveButton onClick={() => onChange(tags.filter((_, j) => j !== i))} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
           ))}
-        </div>
+        </Row>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -68,40 +86,40 @@ function SourceSeriesList({ entries, onChange }) {
   function remove(idx) { onChange(entries.filter((_, i) => i !== idx)); }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <Stack gap={3}>
       {entries.map((entry, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px auto", gap: 6, alignItems: "center" }}>
-          <input
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px auto", gap: "var(--space-3)", alignItems: "center" }}>
+          <Input
             value={entry.sourceSeriesName}
             onChange={(e) => update(i, "sourceSeriesName", e.target.value)}
             placeholder="e.g. Amazing Spider-Man vol. 1"
-            style={inputStyle}
           />
-          <input
-            type="number" min="0"
+          <Input
+            type="number"
+            min="0"
             value={entry.startIssue}
             onChange={(e) => update(i, "startIssue", e.target.value)}
             placeholder="Start #"
-            style={inputStyle}
           />
-          <input
-            type="number" min="0"
+          <Input
+            type="number"
+            min="0"
             value={entry.endIssue}
             onChange={(e) => update(i, "endIssue", e.target.value)}
             placeholder="End #"
-            style={inputStyle}
           />
           {entries.length > 1
-            ? <button type="button" onClick={() => remove(i)} style={{ ...btnSm, color: "#c62828" }}>✕</button>
-            : <span style={{ width: 26 }} />
-          }
+            ? <RemoveButton onClick={() => remove(i)} />
+            : <span style={{ width: 26 }} />}
         </div>
       ))}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, color: "var(--text-secondary)" }}>
-        <button type="button" onClick={add} style={{ ...btnSm, alignSelf: "flex-start" }}>+ Series</button>
+      <Row gap={4} align="center" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+        <Button variant="secondary" size="sm" onClick={add} style={{ alignSelf: "flex-start" }}>
+          + Series
+        </Button>
         <span>Series name · Start # · End #</span>
-      </div>
-    </div>
+      </Row>
+    </Stack>
   );
 }
 
@@ -125,13 +143,11 @@ function inferCategoryId(publisherName, categories) {
 function inferPublisherId(publisherName, publishers) {
   if (!publisherName) return "";
   const apiLower = publisherName.toLowerCase();
-  // 1. Exact or full substring match
   let match = publishers.find((p) => {
     const pLower = p.publisher_name.toLowerCase();
     return pLower === apiLower || apiLower.includes(pLower) || pLower.includes(apiLower);
   });
   if (match) return String(match.publisher_id);
-  // 2. Word-level match: any significant word (4+ chars) shared between names
   const apiWords = apiLower.split(/\W+/).filter((w) => w.length >= 4);
   match = publishers.find((p) => {
     const pLower = p.publisher_name.toLowerCase();
@@ -143,33 +159,27 @@ function inferPublisherId(publisherName, publishers) {
 // ─── Source series parser ──────────────────────────────────────────────────────
 
 function _parseSingleSeriesEntry(entry) {
-  // Returns an array — comma-separated issue groups become separate rows;
-  // hyphen-separated numbers within a group are a contiguous range (one row).
   const trimmed = entry.trim();
   if (!trimmed) return [];
   const hashIdx = trimmed.lastIndexOf("#");
   if (hashIdx === -1) return [{ sourceSeriesName: trimmed, startIssue: "", endIssue: "" }];
   const seriesName = trimmed.slice(0, hashIdx).replace(/,\s*$/, "").trim();
   const issueStr = trimmed.slice(hashIdx + 1).trim();
-  // Each comma-separated segment is a discrete issue or range
   const groups = issueStr.split(",").map((s) => s.trim()).filter(Boolean);
   if (groups.length === 0) return [{ sourceSeriesName: seriesName, startIssue: "", endIssue: "" }];
   return groups.map((group) => {
     const nums = (group.match(/\d+/g) || []).map(Number);
     if (nums.length === 0) return { sourceSeriesName: seriesName, startIssue: "", endIssue: "" };
     if (nums.length === 1) return { sourceSeriesName: seriesName, startIssue: String(nums[0]), endIssue: "" };
-    // Two numbers = start-end range (e.g. "35-37")
     return { sourceSeriesName: seriesName, startIssue: String(nums[0]), endIssue: String(nums[nums.length - 1]) };
   });
 }
 
 function _splitMultiSeries(entry) {
-  // Split "Series A #1, Series B #2" on ", CapitalLetter" — but not on ", 49" (bare issue numbers)
   const segments = entry.split(/,\s*(?=[A-Z])/);
   const parts = [];
   let current = segments[0];
   for (let i = 1; i < segments.length; i++) {
-    // If this segment contains a year "(YYYY)" it starts a new series
     if (/\(\d{4}\)/.test(segments[i])) {
       parts.push(current);
       current = segments[i];
@@ -259,8 +269,6 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
   useEffect(() => {
     if (initialValues && Object.keys(initialValues).length > 0) {
       setForm((prev) => ({ ...prev, ...initialValues }));
-      // If the API returned a publisher name but no match was found in the list,
-      // pre-fill the "new publisher" input so it's ready to add in one click.
       if (initialValues._publisherName && !initialValues.publisherId) {
         setNewPublisherName(initialValues._publisherName);
       } else {
@@ -342,201 +350,197 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ border: "1px solid var(--border-card)", borderRadius: 6, padding: 16, background: "var(--bg-surface)" }}>
-      {error && <div style={alertError}>{error}</div>}
-      {success && <div style={alertSuccess}>{success}</div>}
+    <Card surface>
+      <form onSubmit={handleSubmit}>
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-      {/* Cover preview — shown whenever a URL is present so the user can verify before saving */}
-      {form.coverImageUrl && (
-        <div style={{ marginBottom: 12, display: "flex", gap: 12, alignItems: "flex-start" }}>
-          <img
-            src={getImageUrl(form.coverImageUrl)}
-            alt="cover preview"
-            style={{ height: 150, width: "auto", maxWidth: 110, objectFit: "contain", borderRadius: 3, border: "1px solid var(--border-card)", background: "var(--bg-surface)", flexShrink: 0 }}
-          />
-          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Cover preview</div>
-            <div style={{ wordBreak: "break-all" }}>{form.coverImageUrl}</div>
-            <button type="button" onClick={() => set("coverImageUrl", "")} style={{ ...btnSm, marginTop: 6, color: "#c62828" }}>Remove</button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Title *</label>
-        <input value={form.title} onChange={(e) => set("title", e.target.value)} required style={inputStyle} />
-      </div>
-
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>Publisher Group *</label>
-          <select value={form.topLevelCategoryId} onChange={(e) => set("topLevelCategoryId", e.target.value)} required style={selectStyle}>
-            <option value="">-- Select --</option>
-            {categories.map((c) => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={labelStyle}>Ownership *</label>
-          <select value={form.ownershipStatusId} onChange={(e) => set("ownershipStatusId", e.target.value)} required style={selectStyle}>
-            <option value="">-- Select --</option>
-            {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>Format Type</label>
-          <select value={form.formatTypeId} onChange={(e) => set("formatTypeId", e.target.value)} style={selectStyle}>
-            <option value="">-- None --</option>
-            {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={labelStyle}>Era</label>
-          <select value={form.eraId} onChange={(e) => set("eraId", e.target.value)} style={selectStyle}>
-            <option value="">-- None --</option>
-            {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>Read Status</label>
-          <select value={form.readingStatusId} onChange={(e) => set("readingStatusId", e.target.value)} style={selectStyle}>
-            <option value="">-- None --</option>
-            {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={labelStyle}>Volume #</label>
-          <input type="number" min="0" step="0.5" value={form.seriesNumber} onChange={(e) => set("seriesNumber", e.target.value)} style={inputStyle} />
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
-          <label style={{ ...labelStyle, marginBottom: 0 }}>Series Name</label>
-          {form.title.trim() && (
-            <button
-              type="button"
-              onClick={() => set("seriesName", form.title.trim())}
-              style={{ ...btnSm, fontSize: 10 }}
-              title="Copy title to series name"
-            >
-              ← Copy Title
-            </button>
+          {form.coverImageUrl && (
+            <Row gap={5} align="start">
+              <img
+                src={getImageUrl(form.coverImageUrl)}
+                alt="cover preview"
+                style={{
+                  height: 150, width: "auto", maxWidth: 110, objectFit: "contain",
+                  borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
+                  background: "var(--bg-surface)", flexShrink: 0,
+                }}
+              />
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Cover preview</div>
+                <div style={{ wordBreak: "break-all" }}>{form.coverImageUrl}</div>
+                <Button variant="secondary" size="sm" onClick={() => set("coverImageUrl", "")} style={{ marginTop: "var(--space-3)", color: "var(--danger-text)" }}>
+                  Remove
+                </Button>
+              </div>
+            </Row>
           )}
-        </div>
-        <input value={form.seriesName} onChange={(e) => set("seriesName", e.target.value)} placeholder="e.g. Amazing Spider-Man Omnibus" style={inputStyle} />
-      </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Source Series (comic run collected)</label>
-        <SourceSeriesList entries={form.sourceSeries} onChange={(v) => set("sourceSeries", v)} />
-      </div>
+          <FormField label="Title" required>
+            <Input value={form.title} onChange={(e) => set("title", e.target.value)} required />
+          </FormField>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Issue Notes (annuals, crossovers, one-shots)</label>
-        <input value={form.issueNotes} onChange={(e) => set("issueNotes", e.target.value)} placeholder="e.g. + Annual #1, King-Size Special #1" style={inputStyle} />
-      </div>
+          <Grid cols={2} gap={5}>
+            <FormField label="Publisher Group" required>
+              <Select value={form.topLevelCategoryId} onChange={(e) => set("topLevelCategoryId", e.target.value)} required>
+                <option value="">-- Select --</option>
+                {categories.map((c) => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Ownership" required>
+              <Select value={form.ownershipStatusId} onChange={(e) => set("ownershipStatusId", e.target.value)} required>
+                <option value="">-- Select --</option>
+                {ownershipStatuses.map((s) => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Writer(s)</label>
-        <NameList names={form.writers} onChange={(v) => set("writers", v)} addLabel="+ Writer" placeholder="Writer name" />
-      </div>
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Artist(s)</label>
-        <NameList names={form.artists} onChange={(v) => set("artists", v)} addLabel="+ Artist" placeholder="Artist name" />
-      </div>
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Tags (characters, teams, story arcs)</label>
-        <TagInput tags={form.tags} onChange={(v) => set("tags", v)} />
-      </div>
+          <Grid cols={2} gap={5}>
+            <FormField label="Format Type">
+              <Select value={form.formatTypeId} onChange={(e) => set("formatTypeId", e.target.value)}>
+                <option value="">-- None --</option>
+                {formatTypes.map((f) => <option key={f.format_type_id} value={f.format_type_id}>{f.format_type_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Era">
+              <Select value={form.eraId} onChange={(e) => set("eraId", e.target.value)}>
+                <option value="">-- None --</option>
+                {eras.map((e) => <option key={e.era_id} value={e.era_id}>{e.era_name}{e.era_years ? ` (${e.era_years})` : ""}</option>)}
+              </Select>
+            </FormField>
+          </Grid>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Publisher</label>
-        <select value={form.publisherId} onChange={(e) => set("publisherId", e.target.value)} style={selectStyle}>
-          <option value="">-- None --</option>
-          {localPublishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
-        </select>
-        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-          <input value={newPublisherName} onChange={(e) => setNewPublisherName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPublisher(); } }}
-            placeholder="New publisher name…" style={{ ...inputStyle, fontSize: 11 }} />
-          <button type="button" onClick={addPublisher} disabled={addingPublisher} style={btnSm}>Add</button>
-        </div>
-      </div>
+          <Grid cols={2} gap={5}>
+            <FormField label="Read Status">
+              <Select value={form.readingStatusId} onChange={(e) => set("readingStatusId", e.target.value)}>
+                <option value="">-- None --</option>
+                {readStatuses.map((s) => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Volume #">
+              <Input type="number" min="0" step="0.5" value={form.seriesNumber} onChange={(e) => set("seriesNumber", e.target.value)} />
+            </FormField>
+          </Grid>
 
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>Published Date</label>
-          <input value={form.publishedDate} onChange={(e) => set("publishedDate", e.target.value)} placeholder="YYYY or YYYY-MM-DD" style={inputStyle} />
-        </div>
-        <div>
-          <label style={labelStyle}>Page Count</label>
-          <input type="number" min="0" value={form.pageCount} onChange={(e) => set("pageCount", e.target.value)} style={inputStyle} />
-        </div>
-      </div>
-
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>ISBN-13</label>
-          <input value={form.isbn13} onChange={(e) => set("isbn13", e.target.value)} style={inputStyle} />
-        </div>
-        <div>
-          <label style={labelStyle}>ISBN-10</label>
-          <input value={form.isbn10} onChange={(e) => set("isbn10", e.target.value)} style={inputStyle} />
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Edition Notes</label>
-        <input value={form.editionNotes} onChange={(e) => set("editionNotes", e.target.value)} placeholder="e.g. First Printing, 2019 Reprint" style={inputStyle} />
-      </div>
-
-      <div style={row2}>
-        <div>
-          <label style={labelStyle}>Star Rating</label>
-          <select value={form.starRating} onChange={(e) => set("starRating", e.target.value)} style={selectStyle}>
-            <option value="">-- None --</option>
-            {HALF_STAR_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={labelStyle}>Cover Image URL</label>
-          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-            <input value={form.coverImageUrl} onChange={(e) => set("coverImageUrl", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-            <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-            <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
+          <div>
+            <Row gap={3} align="baseline" style={{ marginBottom: "var(--space-1)" }}>
+              <label className="cc-label" style={{ marginBottom: 0 }}>Series Name</label>
+              {form.title.trim() && (
+                <Button variant="secondary" size="sm" onClick={() => set("seriesName", form.title.trim())} title="Copy title to series name">
+                  ← Copy Title
+                </Button>
+              )}
+            </Row>
+            <Input value={form.seriesName} onChange={(e) => set("seriesName", e.target.value)} placeholder="e.g. Amazing Spider-Man Omnibus" />
           </div>
-        </div>
-      </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Description</label>
-        <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-      </div>
+          <FormField label="Source Series (comic run collected)">
+            <SourceSeriesList entries={form.sourceSeries} onChange={(v) => set("sourceSeries", v)} />
+          </FormField>
 
-      <div style={{ marginBottom: 16 }}>
-        <label style={labelStyle}>Notes</label>
-        <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-      </div>
+          <FormField label="Issue Notes (annuals, crossovers, one-shots)">
+            <Input value={form.issueNotes} onChange={(e) => set("issueNotes", e.target.value)} placeholder="e.g. + Annual #1, King-Size Special #1" />
+          </FormField>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <button type="submit" disabled={saving} style={btnPrimary}>{saving ? "Saving…" : "Add Graphic Novel"}</button>
-        <button type="button" onClick={() => setForm(blankForm(ownershipStatuses))} style={btnSecondary}>Clear</button>
-      </div>
-    </form>
+          <FormField label="Writer(s)">
+            <NameList names={form.writers} onChange={(v) => set("writers", v)} addLabel="+ Writer" placeholder="Writer name" />
+          </FormField>
+          <FormField label="Artist(s)">
+            <NameList names={form.artists} onChange={(v) => set("artists", v)} addLabel="+ Artist" placeholder="Artist name" />
+          </FormField>
+          <FormField label="Tags (characters, teams, story arcs)">
+            <TagInput tags={form.tags} onChange={(v) => set("tags", v)} />
+          </FormField>
+
+          <FormField label="Publisher">
+            <Stack gap={2}>
+              <Select value={form.publisherId} onChange={(e) => set("publisherId", e.target.value)}>
+                <option value="">-- None --</option>
+                {localPublishers.map((p) => <option key={p.publisher_id} value={p.publisher_id}>{p.publisher_name}</option>)}
+              </Select>
+              <Row gap={2}>
+                <Input
+                  value={newPublisherName}
+                  onChange={(e) => setNewPublisherName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPublisher(); } }}
+                  placeholder="New publisher name…"
+                  style={{ flex: 1, fontSize: "var(--text-xs)" }}
+                />
+                <Button variant="secondary" size="sm" onClick={addPublisher} disabled={addingPublisher}>
+                  Add
+                </Button>
+              </Row>
+            </Stack>
+          </FormField>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Published Date">
+              <Input value={form.publishedDate} onChange={(e) => set("publishedDate", e.target.value)} placeholder="YYYY or YYYY-MM-DD" />
+            </FormField>
+            <FormField label="Page Count">
+              <Input type="number" min="0" value={form.pageCount} onChange={(e) => set("pageCount", e.target.value)} />
+            </FormField>
+          </Grid>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="ISBN-13">
+              <Input value={form.isbn13} onChange={(e) => set("isbn13", e.target.value)} />
+            </FormField>
+            <FormField label="ISBN-10">
+              <Input value={form.isbn10} onChange={(e) => set("isbn10", e.target.value)} />
+            </FormField>
+          </Grid>
+
+          <FormField label="Edition Notes">
+            <Input value={form.editionNotes} onChange={(e) => set("editionNotes", e.target.value)} placeholder="e.g. First Printing, 2019 Reprint" />
+          </FormField>
+
+          <Grid cols={2} gap={5}>
+            <FormField label="Star Rating">
+              <Select value={form.starRating} onChange={(e) => set("starRating", e.target.value)}>
+                <option value="">-- None --</option>
+                {HALF_STAR_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Cover Image URL">
+              <Row gap={3} align="start">
+                <Input value={form.coverImageUrl} onChange={(e) => set("coverImageUrl", e.target.value)} style={{ flex: 1 }} />
+                <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                  Add Image
+                </Button>
+              </Row>
+            </FormField>
+          </Grid>
+
+          <FormField label="Description">
+            <Textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={3} />
+          </FormField>
+
+          <FormField label="Notes">
+            <Textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} />
+          </FormField>
+
+          <Row gap={4}>
+            <Button type="submit" variant="primary" disabled={saving}>
+              {saving ? "Saving…" : "Add Graphic Novel"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setForm(blankForm(ownershipStatuses))}>
+              Clear
+            </Button>
+          </Row>
+        </Stack>
+      </form>
+    </Card>
   );
 }
 
 // ─── Lookup tab (ISBN + title search) ────────────────────────────────────────
 
 function IsbnLookupTab({ publishers, formatTypes, eras, ownershipStatuses, readStatuses, categories, onCreated }) {
-  const [lookupType, setLookupType] = useState("title"); // "isbn" | "title"
-  const [searchSource, setSearchSource] = useState("google"); // "comicvine" | "google"
+  const [lookupType, setLookupType] = useState("title");
+  const [searchSource, setSearchSource] = useState("google");
   const [isbn, setIsbn] = useState("");
   const [titleQuery, setTitleQuery] = useState("");
   const [looking, setLooking] = useState(false);
@@ -642,167 +646,178 @@ function IsbnLookupTab({ publishers, formatTypes, eras, ownershipStatuses, readS
   }
 
   const subTabStyle = (active) => ({
-    fontSize: 12,
-    padding: "4px 12px",
+    fontSize: "var(--text-sm)",
+    padding: "var(--space-2) var(--space-6)",
     border: "none",
     borderBottom: active ? "2px solid var(--btn-primary-bg)" : "2px solid transparent",
     background: "none",
     color: active ? "var(--btn-primary-bg)" : "var(--text-secondary)",
-    fontWeight: active ? "bold" : "normal",
+    fontWeight: active ? 700 : 400,
     cursor: "pointer",
   });
 
   return (
-    <div>
-      {/* Lookup controls panel */}
-      <div style={{ marginBottom: 16, padding: 12, border: "1px solid var(--border-card)", borderRadius: 6, background: "var(--bg-surface)" }}>
-      {/* ISBN / Title toggle */}
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border-card)", marginBottom: 12 }}>
-        <button type="button" style={subTabStyle(lookupType === "title")} onClick={() => { setLookupType("title"); setLookupError(null); setMultiResults(null); setPrefill(null); }}>Keyword</button>
-        <button type="button" style={subTabStyle(lookupType === "isbn")} onClick={() => { setLookupType("isbn"); setLookupError(null); setTitleResults([]); }}>ISBN</button>
-      </div>
+    <Stack gap={5}>
+      <Card surface>
+        <Stack gap={5}>
+          <Row gap={0} style={{ borderBottom: "1px solid var(--border)" }}>
+            <button type="button" style={subTabStyle(lookupType === "title")} onClick={() => { setLookupType("title"); setLookupError(null); setMultiResults(null); setPrefill(null); }}>Keyword</button>
+            <button type="button" style={subTabStyle(lookupType === "isbn")} onClick={() => { setLookupType("isbn"); setLookupError(null); setTitleResults([]); }}>ISBN</button>
+          </Row>
 
-      {lookupType === "isbn" && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, maxWidth: 520, alignItems: "center" }}>
-          <input
-            value={isbn}
-            onChange={(e) => setIsbn(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doIsbnLookup(); } }}
-            placeholder="ISBN-13 or ISBN-10"
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <select
-            value={searchSource}
-            onChange={(e) => { setSearchSource(e.target.value); setLookupError(null); setPrefill(null); setMultiResults(null); }}
-            style={{ ...selectStyle, width: "auto", fontSize: 12 }}
-          >
-            <option value="comicvine">Comic Vine + All</option>
-            <option value="google">Google Books</option>
-          </select>
-          <button onClick={doIsbnLookup} disabled={looking} style={btnPrimary}>{looking ? "Looking up…" : "Look up"}</button>
-        </div>
-      )}
-
-      {lookupType === "title" && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8, maxWidth: 600, alignItems: "center" }}>
-            <input
-              value={titleQuery}
-              onChange={(e) => setTitleQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doTitleSearch(); } }}
-              placeholder="Title, author, or keyword…"
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <select
-              value={searchSource}
-              onChange={(e) => { setSearchSource(e.target.value); setTitleResults([]); setLookupError(null); }}
-              style={{ ...selectStyle, width: "auto", fontSize: 12 }}
-            >
-              <option value="comicvine">Comic Vine</option>
-              <option value="google">Google Books</option>
-            </select>
-            <button onClick={doTitleSearch} disabled={looking} style={btnPrimary}>{looking ? "Searching…" : "Search"}</button>
-          </div>
-          {titleResults.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
-              {titleResults.map((r, i) => (
-                <div
-                  key={i}
-                  onClick={() => applyResult(r, "")}
-                  style={{ width: 130, cursor: "pointer", border: "2px solid var(--border-card)", borderRadius: 4, overflow: "hidden", background: "var(--bg-surface)", display: "flex", flexDirection: "column" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--btn-primary-bg)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-card)"; }}
-                >
-                  {r.cover_image_url
-                    ? <img src={r.cover_image_url} alt="" style={{ width: 130, height: 185, objectFit: "cover", display: "block", flexShrink: 0 }} />
-                    : <div style={{ width: 130, height: 185, background: "var(--bg-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>No Image</span>
-                      </div>
-                  }
-                  <div style={{ padding: "6px 7px", display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: "bold", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{r.title}</div>
-                    {r.publisher_name && <div style={{ fontSize: 10, color: "var(--btn-primary-bg)", fontWeight: "bold", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.publisher_name}</div>}
-                    {r.writer_names?.filter(Boolean).length > 0 && <div style={{ fontSize: 10, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>✍ {r.writer_names.join(", ")}</div>}
-                    {r.artist_names?.filter(Boolean).length > 0 && <div style={{ fontSize: 10, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🎨 {r.artist_names.join(", ")}</div>}
-                    {r.published_date && <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{r.published_date}</div>}
-                    {r.isbn_13 && <div style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 1 }}>{r.isbn_13}</div>}
-                    {r.page_count > 0 && <div style={{ fontSize: 9, color: "var(--text-secondary)" }}>{r.page_count} pp.</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {lookupError && <div style={alertWarn}>{lookupError}</div>}
-
-      {/* Multiple results — image picker */}
-      {multiResults && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 13, marginBottom: 10, color: "var(--text-secondary)" }}>
-            {multiResults.results.length} editions found — choose one:
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            {multiResults.results.map((r, i) => (
-              <div
-                key={i}
-                onClick={() => applyResult(r, multiResults.fallbackIsbn)}
-                style={{
-                  width: 110, cursor: "pointer", border: "2px solid var(--border-card)", borderRadius: 4, overflow: "hidden",
-                  background: "var(--bg-surface)",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--btn-primary-bg)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-card)"; }}
+          {lookupType === "isbn" && (
+            <Row gap={4} align="center" style={{ maxWidth: 520 }}>
+              <Input
+                value={isbn}
+                onChange={(e) => setIsbn(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doIsbnLookup(); } }}
+                placeholder="ISBN-13 or ISBN-10"
+                style={{ flex: 1 }}
+              />
+              <Select
+                value={searchSource}
+                onChange={(e) => { setSearchSource(e.target.value); setLookupError(null); setPrefill(null); setMultiResults(null); }}
+                style={{ width: "auto", fontSize: "var(--text-sm)" }}
               >
-                {r.cover_image_url ? (
-                  <img src={r.cover_image_url} alt="" style={{ width: 110, height: 160, objectFit: "cover", display: "block" }} />
-                ) : (
-                  <div style={{ width: 110, height: 160, background: "var(--bg-surface)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>No Image</span>
-                  </div>
-                )}
-                <div style={{ padding: "5px 6px" }}>
-                  <div style={{ fontSize: 11, fontWeight: "bold", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "—"}</div>
-                  {r.writer_names?.length > 0 && (
-                    <div style={{ fontSize: 10, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.writer_names.join(", ")}</div>
-                  )}
-                  {r.published_date && <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{r.published_date}</div>}
-                  {r.api_source && <div style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 2 }}>{r.api_source}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                <option value="comicvine">Comic Vine + All</option>
+                <option value="google">Google Books</option>
+              </Select>
+              <Button variant="primary" onClick={doIsbnLookup} disabled={looking}>
+                {looking ? "Looking up…" : "Look up"}
+              </Button>
+            </Row>
+          )}
 
-      </div>{/* end lookup controls panel */}
+          {lookupType === "title" && (
+            <Stack gap={4}>
+              <Row gap={4} align="center" style={{ maxWidth: 600 }}>
+                <Input
+                  value={titleQuery}
+                  onChange={(e) => setTitleQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doTitleSearch(); } }}
+                  placeholder="Title, author, or keyword…"
+                  style={{ flex: 1 }}
+                />
+                <Select
+                  value={searchSource}
+                  onChange={(e) => { setSearchSource(e.target.value); setTitleResults([]); setLookupError(null); }}
+                  style={{ width: "auto", fontSize: "var(--text-sm)" }}
+                >
+                  <option value="comicvine">Comic Vine</option>
+                  <option value="google">Google Books</option>
+                </Select>
+                <Button variant="primary" onClick={doTitleSearch} disabled={looking}>
+                  {looking ? "Searching…" : "Search"}
+                </Button>
+              </Row>
+              {titleResults.length > 0 && (
+                <Row gap={5} wrap>
+                  {titleResults.map((r, i) => (
+                    <div
+                      key={i}
+                      onClick={() => applyResult(r, "")}
+                      style={{
+                        width: 130, cursor: "pointer",
+                        border: "2px solid var(--border)",
+                        borderRadius: "var(--radius-md)",
+                        overflow: "hidden",
+                        background: "var(--bg-surface)",
+                        display: "flex", flexDirection: "column",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--green-vivid)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; }}
+                    >
+                      {r.cover_image_url
+                        ? <img src={r.cover_image_url} alt="" style={{ width: 130, height: 185, objectFit: "cover", display: "block", flexShrink: 0 }} />
+                        : <div style={{ width: 130, height: 185, background: "var(--bg-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>No Image</span>
+                          </div>
+                      }
+                      <Stack gap={1} style={{ padding: "var(--space-3) var(--space-3)", flex: 1 }}>
+                        <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{r.title}</div>
+                        {r.publisher_name && <div style={{ fontSize: "10px", color: "var(--btn-primary-bg)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.publisher_name}</div>}
+                        {r.writer_names?.filter(Boolean).length > 0 && <div style={{ fontSize: "10px", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>✍ {r.writer_names.join(", ")}</div>}
+                        {r.artist_names?.filter(Boolean).length > 0 && <div style={{ fontSize: "10px", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🎨 {r.artist_names.join(", ")}</div>}
+                        {r.published_date && <div style={{ fontSize: "10px", color: "var(--text-secondary)" }}>{r.published_date}</div>}
+                        {r.isbn_13 && <div style={{ fontSize: "9px", color: "var(--text-secondary)" }}>{r.isbn_13}</div>}
+                        {r.page_count > 0 && <div style={{ fontSize: "9px", color: "var(--text-secondary)" }}>{r.page_count} pp.</div>}
+                      </Stack>
+                    </div>
+                  ))}
+                </Row>
+              )}
+            </Stack>
+          )}
+
+          {lookupError && <Alert tone="warn">{lookupError}</Alert>}
+
+          {multiResults && (
+            <Stack gap={4}>
+              <div style={{ fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>
+                {multiResults.results.length} editions found — choose one:
+              </div>
+              <Row gap={5} wrap>
+                {multiResults.results.map((r, i) => (
+                  <div
+                    key={i}
+                    onClick={() => applyResult(r, multiResults.fallbackIsbn)}
+                    style={{
+                      width: 110, cursor: "pointer",
+                      border: "2px solid var(--border)",
+                      borderRadius: "var(--radius-md)",
+                      overflow: "hidden",
+                      background: "var(--bg-surface)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--green-vivid)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; }}
+                  >
+                    {r.cover_image_url ? (
+                      <img src={r.cover_image_url} alt="" style={{ width: 110, height: 160, objectFit: "cover", display: "block" }} />
+                    ) : (
+                      <div style={{ width: 110, height: 160, background: "var(--bg-surface)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ fontSize: "10px", color: "var(--text-secondary)" }}>No Image</span>
+                      </div>
+                    )}
+                    <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+                      <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "—"}</div>
+                      {r.writer_names?.length > 0 && (
+                        <div style={{ fontSize: "10px", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.writer_names.join(", ")}</div>
+                      )}
+                      {r.published_date && <div style={{ fontSize: "10px", color: "var(--text-secondary)" }}>{r.published_date}</div>}
+                      {r.api_source && <div style={{ fontSize: "9px", color: "var(--text-secondary)", marginTop: 2 }}>{r.api_source}</div>}
+                    </div>
+                  </div>
+                ))}
+              </Row>
+            </Stack>
+          )}
+        </Stack>
+      </Card>
 
       {prefill !== null && (
-        <div>
+        <Stack gap={4}>
           {prefill.title && (
-            <div style={alertSuccess}>
+            <Alert tone="success">
               Found: <strong>{prefill.title}</strong>
               {prefill.writers?.filter(Boolean).length ? ` — ${prefill.writers.filter(Boolean).join(", ")}` : ""}
               {prefill._publisherName ? ` — ${prefill._publisherName}` : ""}
-              {prefill.apiSource ? <span style={{ fontSize: 11, opacity: 0.7 }}> ({prefill.apiSource})</span> : ""}
+              {prefill.apiSource ? <span style={{ fontSize: "var(--text-xs)", opacity: 0.7 }}> ({prefill.apiSource})</span> : ""}
               {" "}— review and complete the form below, then save.
-            </div>
+            </Alert>
           )}
           {prefill._raw && (
-            <div style={{ marginBottom: 12 }}>
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                style={{ ...btnSm, fontSize: 11 }}
-              >
+            <div>
+              <Button variant="secondary" size="sm" onClick={() => setShowRaw((v) => !v)}>
                 {showRaw ? "Hide raw API data" : "Show raw API data"}
-              </button>
+              </Button>
               {showRaw && (
                 <pre style={{
-                  marginTop: 6, padding: "8px 10px", background: "var(--bg-surface)",
-                  border: "1px solid var(--border-card)", borderRadius: 3,
-                  fontSize: 11, lineHeight: 1.5, overflowX: "auto", maxHeight: 400, overflowY: "auto",
+                  marginTop: "var(--space-3)", padding: "var(--space-4) var(--space-5)",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "var(--text-xs)", lineHeight: 1.5,
+                  overflowX: "auto", maxHeight: 400, overflowY: "auto",
                   whiteSpace: "pre-wrap", wordBreak: "break-all",
                 }}>
                   {JSON.stringify(prefill._raw, null, 2)}
@@ -820,9 +835,9 @@ function IsbnLookupTab({ publishers, formatTypes, eras, ownershipStatuses, readS
             initialValues={prefill}
             onCreated={onCreated}
           />
-        </div>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -850,12 +865,12 @@ export default function GraphicNovelsIngestPage() {
   }, []);
 
   const tabStyle = (active) => ({
-    fontSize: 13,
-    padding: "6px 14px",
+    fontSize: "var(--text-base)",
+    padding: "var(--space-3) var(--space-6)",
     cursor: "pointer",
     borderBottom: active ? "2px solid var(--btn-primary-bg)" : "2px solid transparent",
     color: active ? "var(--btn-primary-bg)" : "var(--text-secondary)",
-    fontWeight: active ? "bold" : "normal",
+    fontWeight: active ? 700 : 400,
     background: "none",
     border: "none",
   });
@@ -863,13 +878,13 @@ export default function GraphicNovelsIngestPage() {
   return (
     <PageContainer title="Add Graphic Novel">
       <div style={{ maxWidth: 860, margin: "0 auto" }}>
-        <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: 13 }}>
+        <div style={{ marginBottom: "var(--space-2)", color: "var(--text-secondary)", fontSize: "var(--text-base)" }}>
           {createdCount > 0 && `${createdCount} item${createdCount !== 1 ? "s" : ""} added this session.`}
         </div>
-        <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border-card)", marginBottom: 16 }}>
+        <Row gap={0} style={{ borderBottom: "1px solid var(--border)", marginBottom: "var(--space-7)" }}>
           <button style={tabStyle(tab === "title")} onClick={() => setTab("title")}>Lookup</button>
           <button style={tabStyle(tab === "manual")} onClick={() => setTab("manual")}>Manual Entry</button>
-        </div>
+        </Row>
 
         {tab === "manual" && (
           <ManualForm

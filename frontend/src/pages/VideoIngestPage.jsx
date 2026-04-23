@@ -11,12 +11,38 @@ import {
   uploadCover,
 } from "../api";
 import PageContainer from "../components/layout/PageContainer";
-import { labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, alertError, alertSuccess, row2, sectionStyle, sectionLabel } from "../styles/commonStyles";
 import NameList from "../components/shared/NameList";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CoverThumb,
+  FormField,
+  Grid,
+  Input,
+  RemoveButton,
+  Row,
+  Select,
+  Stack,
+  Textarea,
+} from "../components/primitives";
 
-// TV Series uses seasons sub-table; all others use copies
 const TV_CATEGORY = "TV Series";
+
+// ─── Section block (replaces commonStyles.sectionStyle) ───────────────────────
+
+function SectionBlock({ title, children }) {
+  return (
+    <Card surface>
+      <Stack gap={3}>
+        <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--text-secondary)" }}>{title}</div>
+        {children}
+      </Stack>
+    </Card>
+  );
+}
 
 // ─── Genre picker ─────────────────────────────────────────────────────────────
 
@@ -48,130 +74,115 @@ function GenrePicker({ allGenres, selected, onChange }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-        <select value={topSel} onChange={e => { setTopSel(e.target.value); setSubSel(""); }} style={{ ...selectStyle, flex: 1 }}>
+    <Stack gap={2}>
+      <Row gap={3} align="center">
+        <Select value={topSel} onChange={e => { setTopSel(e.target.value); setSubSel(""); }} style={{ flex: 1 }}>
           <option value="">— Genre —</option>
           {allGenres.map(g => <option key={g.top_genre_id} value={g.top_genre_id}>{g.genre_name}</option>)}
-        </select>
+        </Select>
         {subGenres.length > 0 && (
-          <select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+          <Select value={subSel} onChange={e => setSubSel(e.target.value)} style={{ flex: 1 }}>
             <option value="">— Subgenre (optional) —</option>
             {subGenres.map(s => <option key={s.sub_genre_id} value={s.sub_genre_id}>{s.sub_genre_name}</option>)}
-          </select>
+          </Select>
         )}
-        <button type="button" onClick={add} style={btnSm}>+ Add</button>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {selected.map((g, i) => (
-          <span key={i} style={{ fontSize: 11, background: "var(--tag-bg)", border: "1px solid var(--tag-border)", borderRadius: 10, padding: "1px 8px", display: "flex", gap: 4, alignItems: "center" }}>
-            {labelFor(g)}
-            <button type="button" onClick={() => remove(i)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 11, color: "#c62828" }}>✕</button>
-          </span>
-        ))}
-      </div>
-    </div>
+        <Button variant="secondary" size="sm" onClick={add}>+ Add</Button>
+      </Row>
+      {selected.length > 0 && (
+        <Row gap={2} wrap>
+          {selected.map((g, i) => (
+            <Badge key={i} tone="tag">
+              {labelFor(g)}
+              <RemoveButton onClick={() => remove(i)} style={{ marginLeft: "var(--space-1)" }} />
+            </Badge>
+          ))}
+        </Row>
+      )}
+    </Stack>
   );
 }
 
 // ─── Copies editor (Movie / Miniseries / Concert) ─────────────────────────────
 
 function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
-
-
   function addCopy() {
     onChange([...copies, { format_type_id: null, ownership_status_id: null, notes: "" }]);
   }
-
   function updateCopy(idx, field, val) {
-    const next = copies.map((c, i) => i === idx ? { ...c, [field]: val } : c);
-    onChange(next);
+    onChange(copies.map((c, i) => i === idx ? { ...c, [field]: val } : c));
   }
-
   function removeCopy(idx) {
     onChange(copies.filter((_, i) => i !== idx));
   }
 
   return (
-    <div>
+    <Stack gap={3}>
       {copies.map((c, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 6, marginBottom: 6, alignItems: "end" }}>
-          <div>
-            <label style={labelStyle}>Format</label>
-            <select value={c.format_type_id || ""} onChange={e => updateCopy(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
+          <FormField label="Format">
+            <Select value={c.format_type_id || ""} onChange={e => updateCopy(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Format —</option>
               {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+            </Select>
+          </FormField>
+          <FormField label="Ownership">
+            <Select value={c.ownership_status_id || ""} onChange={e => updateCopy(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Status —</option>
               {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Notes</label>
-            <input value={c.notes || ""} onChange={e => updateCopy(i, "notes", e.target.value)} placeholder="Notes" style={inputStyle} />
-          </div>
-          <button type="button" onClick={() => removeCopy(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
+            </Select>
+          </FormField>
+          <FormField label="Notes">
+            <Input value={c.notes || ""} onChange={e => updateCopy(i, "notes", e.target.value)} placeholder="Notes" />
+          </FormField>
+          <RemoveButton onClick={() => removeCopy(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
         </div>
       ))}
-      <button type="button" onClick={addCopy} style={btnSm}>+ Add Copy</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={addCopy} style={{ alignSelf: "flex-start" }}>+ Add Copy</Button>
+    </Stack>
   );
 }
 
 // ─── Seasons editor (TV Series) ───────────────────────────────────────────────
 
 function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
-
-
   function addSeason() {
     const nextNum = seasons.length > 0 ? Math.max(...seasons.map(s => s.season_number)) + 1 : 1;
     onChange([...seasons, { season_number: nextNum, episode_count: null, format_type_id: null, ownership_status_id: null, notes: "" }]);
   }
-
   function updateSeason(idx, field, val) {
-    const next = seasons.map((s, i) => i === idx ? { ...s, [field]: val } : s);
-    onChange(next);
+    onChange(seasons.map((s, i) => i === idx ? { ...s, [field]: val } : s));
   }
-
   function removeSeason(idx) {
     onChange(seasons.filter((_, i) => i !== idx));
   }
 
   return (
-    <div>
+    <Stack gap={3}>
       {seasons.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: 6, marginBottom: 6, alignItems: "end" }}>
-          <div>
-            <label style={labelStyle}>Season #</label>
-            <input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} style={inputStyle} min={1} />
-          </div>
-          <div>
-            <label style={labelStyle}>Episodes</label>
-            <input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" style={inputStyle} min={1} />
-          </div>
-          <div>
-            <label style={labelStyle}>Format</label>
-            <select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
+          <FormField label="Season #">
+            <Input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} min={1} />
+          </FormField>
+          <FormField label="Episodes">
+            <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
+          </FormField>
+          <FormField label="Format">
+            <Select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Format —</option>
               {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Ownership</label>
-            <select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)} style={selectStyle}>
+            </Select>
+          </FormField>
+          <FormField label="Ownership">
+            <Select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
               <option value="">— Status —</option>
               {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
-            </select>
-          </div>
-          <button type="button" onClick={() => removeSeason(i)} style={{ ...btnSm, color: "#c62828", alignSelf: "flex-end", marginBottom: 1 }}>✕</button>
+            </Select>
+          </FormField>
+          <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
         </div>
       ))}
-      <button type="button" onClick={addSeason} style={btnSm}>+ Add Season</button>
-    </div>
+      <Button variant="secondary" size="sm" onClick={addSeason} style={{ alignSelf: "flex-start" }}>+ Add Season</Button>
+    </Stack>
   );
 }
 
@@ -217,45 +228,51 @@ function TmdbSearchPanel({ videoTypeName, onSelect }) {
   }
 
   return (
-    <div style={sectionStyle}>
-      <div style={sectionLabel}>Search TMDB</div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <input
+    <SectionBlock title="Search TMDB">
+      <Row gap={3}>
+        <Input
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={e => e.key === "Enter" && doSearch()}
           placeholder={`Search TMDB for ${mediaType === "tv" ? "TV shows" : "movies"}…`}
-          style={{ ...inputStyle, flex: 1 }}
+          style={{ flex: 1 }}
         />
-        <button type="button" onClick={doSearch} style={btnPrimary} disabled={loading}>
+        <Button type="button" variant="primary" onClick={doSearch} disabled={loading}>
           {loading ? "Searching…" : "Search"}
-        </button>
-      </div>
-      {error && <div style={alertError}>{error}</div>}
+        </Button>
+      </Row>
+      {error && <Alert tone="error">{error}</Alert>}
       {results.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <Stack gap={2}>
           {results.map(r => (
             <div
               key={r.tmdb_id}
-              style={{ display: "flex", gap: 8, padding: "6px 8px", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 3, cursor: "pointer", alignItems: "center" }}
+              style={{
+                display: "flex", gap: "var(--space-4)",
+                padding: "var(--space-3) var(--space-4)",
+                background: "var(--bg-base)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                cursor: "pointer", alignItems: "center",
+              }}
               onClick={() => pickResult(r)}
             >
               {r.cover_image_url && (
-                <img src={r.cover_image_url} alt="" style={{ width: 32, height: 48, objectFit: "cover", borderRadius: 2, flexShrink: 0 }} />
+                <img src={r.cover_image_url} alt="" style={{ width: 32, height: 48, objectFit: "cover", borderRadius: "var(--radius-sm)", flexShrink: 0 }} />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: "bold" }}>{r.title}{r.year ? ` (${r.year})` : ""}</div>
-                {r.overview && <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.overview}</div>}
+                <div style={{ fontSize: "var(--text-base)", fontWeight: 700 }}>{r.title}{r.year ? ` (${r.year})` : ""}</div>
+                {r.overview && <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.overview}</div>}
               </div>
               {loadingDetail === r.tmdb_id
-                ? <span style={{ fontSize: 11 }}>Loading…</span>
-                : <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Select</span>
+                ? <span style={{ fontSize: "var(--text-xs)" }}>Loading…</span>
+                : <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Select</span>
               }
             </div>
           ))}
-        </div>
+        </Stack>
       )}
-    </div>
+    </SectionBlock>
   );
 }
 
@@ -319,8 +336,6 @@ export default function VideoIngestPage() {
     }).catch(e => setError(e.message || "Failed to load lookup data. Is the backend running?"));
   }, []);
 
-
-
   const selectedCategory = categories.find(c => String(c.top_level_category_id) === String(form.top_level_category_id));
   const isTV = selectedCategory?.category_name === TV_CATEGORY;
 
@@ -338,7 +353,6 @@ export default function VideoIngestPage() {
       cast_names: detail.cast?.length ? detail.cast : f.cast_names,
       api_source: "tmdb",
       external_work_id: String(detail.tmdb_id),
-      // Pre-fill seasons for TV
       seasons: isTV && detail.seasons?.length
         ? detail.seasons.map(s => ({
             season_number: s.season_number,
@@ -392,127 +406,109 @@ export default function VideoIngestPage() {
   return (
     <PageContainer title="Add Video">
       <div style={{ maxWidth: 700, margin: "0 auto" }}>
-        {error && <div style={alertError}>{error}</div>}
-        {success && <div style={alertSuccess}>{success}</div>}
+        <Stack gap={5}>
+          {error && <Alert tone="error">{error}</Alert>}
+          {success && <Alert tone="success">{success}</Alert>}
 
-        {/* TMDB search panel (shown when category is selected) */}
-        {selectedCategory && (
-          <TmdbSearchPanel videoTypeName={selectedCategory.category_name} onSelect={handleTmdbSelect} />
-        )}
-
-        <form onSubmit={handleSubmit}>
-          {/* Content type + Ownership */}
-          <div style={row2}>
-            <div>
-              <label style={labelStyle}>Content Type *</label>
-              <select
-                value={form.top_level_category_id}
-                onChange={e => {
-                  set("top_level_category_id", e.target.value);
-                  // Reset sub-tables when switching category type
-                  setForm(f => ({ ...f, top_level_category_id: e.target.value, copies: [], seasons: [] }));
-                }}
-                style={selectStyle}
-                required
-              >
-                <option value="">— Select type —</option>
-                {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Ownership *</label>
-              <select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)} style={selectStyle} required>
-                <option value="">— Status —</option>
-                {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Title */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Title *</label>
-            <input value={form.title} onChange={e => set("title", e.target.value)} placeholder="Title" style={inputStyle} required />
-          </div>
-
-          {/* Release date + Runtime + Watch status */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={labelStyle}>Release Date</label>
-              <input type="date" value={form.release_date} onChange={e => set("release_date", e.target.value)} style={inputStyle} />
-            </div>
-            {!isTV && (
-              <div>
-                <label style={labelStyle}>Runtime (min)</label>
-                <input type="number" value={form.runtime_minutes} onChange={e => set("runtime_minutes", e.target.value)} placeholder="e.g. 120" style={inputStyle} min={1} />
-              </div>
-            )}
-            <div>
-              <label style={labelStyle}>Watch Status</label>
-              <select value={form.reading_status_id} onChange={e => set("reading_status_id", e.target.value)} style={selectStyle}>
-                <option value="">— Status —</option>
-                {watchStatuses.map(s => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Cover image URL */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Cover Image URL</label>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <input value={form.cover_image_url} onChange={e => set("cover_image_url", e.target.value)} placeholder="https://..." style={{ ...inputStyle, flex: 1 }} />
-              <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
-              <button type="button" onClick={() => coverFileRef.current?.click()} style={{ padding: "4px 10px", fontSize: 12, whiteSpace: "nowrap" }}>Add Image</button>
-              {form.cover_image_url && (
-                <img src={form.cover_image_url} alt="" style={{ height: 48, width: 32, objectFit: "cover", borderRadius: 2, border: "1px solid var(--border)" }} />
-              )}
-            </div>
-          </div>
-
-          {/* Directors */}
-          <div style={sectionStyle}>
-            <div style={sectionLabel}>Director(s) / Creator(s)</div>
-            <NameList names={form.director_names} onChange={v => set("director_names", v)} addLabel="+ Director" placeholder="Director name" />
-          </div>
-
-          {/* Cast */}
-          <div style={sectionStyle}>
-            <div style={sectionLabel}>Cast</div>
-            <NameList names={form.cast_names} onChange={v => set("cast_names", v)} addLabel="+ Cast member" placeholder="Cast member name" />
-          </div>
-
-          {/* Genres */}
-          <div style={sectionStyle}>
-            <div style={sectionLabel}>Genres</div>
-            <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
-          </div>
-
-          {/* Copies (non-TV) or Seasons (TV) */}
-          {isTV ? (
-            <div style={sectionStyle}>
-              <div style={sectionLabel}>Seasons</div>
-              <SeasonsEditor seasons={form.seasons} onChange={v => set("seasons", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
-            </div>
-          ) : (
-            <div style={sectionStyle}>
-              <div style={sectionLabel}>Copies / Formats</div>
-              <CopiesEditor copies={form.copies} onChange={v => set("copies", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
-            </div>
+          {selectedCategory && (
+            <TmdbSearchPanel videoTypeName={selectedCategory.category_name} onSelect={handleTmdbSelect} />
           )}
 
-          {/* Description + Notes */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={labelStyle}>Description</label>
-            <textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Notes</label>
-            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={5}>
+              <Grid cols={2} gap={5}>
+                <FormField label="Content Type" required>
+                  <Select
+                    value={form.top_level_category_id}
+                    onChange={e => {
+                      setForm(f => ({ ...f, top_level_category_id: e.target.value, copies: [], seasons: [] }));
+                    }}
+                    required
+                  >
+                    <option value="">— Select type —</option>
+                    {categories.map(c => <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>)}
+                  </Select>
+                </FormField>
+                <FormField label="Ownership" required>
+                  <Select value={form.ownership_status_id} onChange={e => set("ownership_status_id", e.target.value)} required>
+                    <option value="">— Status —</option>
+                    {ownershipStatuses.map(s => <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>)}
+                  </Select>
+                </FormField>
+              </Grid>
 
-          <button type="submit" style={btnPrimary} disabled={saving}>
-            {saving ? "Saving…" : "Add Video"}
-          </button>
-        </form>
+              <FormField label="Title" required>
+                <Input value={form.title} onChange={e => set("title", e.target.value)} placeholder="Title" required />
+              </FormField>
+
+              <Grid cols={3} gap={5}>
+                <FormField label="Release Date">
+                  <Input type="date" value={form.release_date} onChange={e => set("release_date", e.target.value)} />
+                </FormField>
+                {!isTV && (
+                  <FormField label="Runtime (min)">
+                    <Input type="number" value={form.runtime_minutes} onChange={e => set("runtime_minutes", e.target.value)} placeholder="e.g. 120" min={1} />
+                  </FormField>
+                )}
+                <FormField label="Watch Status">
+                  <Select value={form.reading_status_id} onChange={e => set("reading_status_id", e.target.value)}>
+                    <option value="">— Status —</option>
+                    {watchStatuses.map(s => <option key={s.read_status_id} value={s.read_status_id}>{s.status_name}</option>)}
+                  </Select>
+                </FormField>
+              </Grid>
+
+              <FormField label="Cover Image URL">
+                <Row gap={3} align="start">
+                  <Input value={form.cover_image_url} onChange={e => set("cover_image_url", e.target.value)} placeholder="https://..." style={{ flex: 1 }} />
+                  <input type="file" accept="image/*" ref={coverFileRef} onChange={handleCoverFile} style={{ display: "none" }} />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => coverFileRef.current?.click()}>
+                    Add Image
+                  </Button>
+                  {form.cover_image_url && (
+                    <CoverThumb src={form.cover_image_url} alt="" size="sm" />
+                  )}
+                </Row>
+              </FormField>
+
+              <SectionBlock title="Director(s) / Creator(s)">
+                <NameList names={form.director_names} onChange={v => set("director_names", v)} addLabel="+ Director" placeholder="Director name" />
+              </SectionBlock>
+
+              <SectionBlock title="Cast">
+                <NameList names={form.cast_names} onChange={v => set("cast_names", v)} addLabel="+ Cast member" placeholder="Cast member name" />
+              </SectionBlock>
+
+              <SectionBlock title="Genres">
+                <GenrePicker allGenres={allGenres} selected={form.genres} onChange={v => set("genres", v)} />
+              </SectionBlock>
+
+              {isTV ? (
+                <SectionBlock title="Seasons">
+                  <SeasonsEditor seasons={form.seasons} onChange={v => set("seasons", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
+                </SectionBlock>
+              ) : (
+                <SectionBlock title="Copies / Formats">
+                  <CopiesEditor copies={form.copies} onChange={v => set("copies", v)} formatTypes={formatTypes} ownershipStatuses={ownershipStatuses} />
+                </SectionBlock>
+              )}
+
+              <FormField label="Description">
+                <Textarea value={form.description} onChange={e => set("description", e.target.value)} rows={3} />
+              </FormField>
+
+              <FormField label="Notes">
+                <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+              </FormField>
+
+              <Row>
+                <Button type="submit" variant="primary" disabled={saving}>
+                  {saving ? "Saving…" : "Add Video"}
+                </Button>
+              </Row>
+            </Stack>
+          </form>
+        </Stack>
       </div>
     </PageContainer>
   );
