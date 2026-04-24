@@ -68,6 +68,7 @@
   --badge-formerly-owned: #607d8b;
   --badge-pending-out:    #ff9900;
   --badge-pending-in:     #00bfff;
+  --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 
   /* Accents */
@@ -181,6 +182,7 @@
   --badge-formerly-owned: #607d8b;
   --badge-pending-out:    #ff9900;
   --badge-pending-in:     #00bfff;
+  --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 
   /* Accents */

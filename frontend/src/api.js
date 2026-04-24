@@ -1,3 +1,5 @@
+import { isAdmin } from './utils/env';
+
 const API = import.meta.env.VITE_API_BASE_URL ?? '';
 
 async function handleJsonResponse(res, fallbackMessage) {
@@ -28,7 +30,12 @@ export async function fetchOwnershipStatuses(collectionTypeId = null) {
     ? `${API}/ownership-statuses?collection_type_id=${collectionTypeId}`
     : `${API}/ownership-statuses`;
   const res = await fetch(url);
-  return handleJsonResponse(res, "Failed to fetch ownership statuses");
+  const rows = await handleJsonResponse(res, "Failed to fetch ownership statuses");
+  // Admin DB never contains Catalog copies; hide the status from all admin pickers.
+  if (isAdmin) {
+    return rows.filter(r => r.status_code !== 'catalog');
+  }
+  return rows;
 }
 
 export async function fetchConsumptionStatuses(collectionTypeId) {

@@ -12,7 +12,13 @@ import {
   updatePhotocardCopy,
   deletePhotocardCopy,
 } from "../../api";
-import { API_BASE } from "../../utils/imageUrl";
+import { API_BASE, getImageUrl } from "../../utils/imageUrl";
+
+function resolveCardSrc(path) {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${getImageUrl(path)}?v=${Date.now()}`;
+}
 import { COLLECTION_TYPE_IDS } from "../../constants/collectionTypes";
 
 /**
@@ -524,7 +530,7 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
       }}>
         {path ? (
           <img
-            src={`${API_BASE}/images/library/${path.replace(/^.*[\\/]/, "")}?v=${Date.now()}`}
+            src={resolveCardSrc(path)}
             alt={label}
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />

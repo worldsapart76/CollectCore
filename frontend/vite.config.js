@@ -29,6 +29,7 @@ const PROXY_PATHS = [
   '/upload-cover',
   '/images',
   '/shutdown',
+  '/catalog',
 ]
 
 // Frontend sub-paths that share a prefix with backend routes.

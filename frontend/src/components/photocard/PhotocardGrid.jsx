@@ -1,4 +1,4 @@
-import { API_BASE } from "../../utils/imageUrl";
+import { API_BASE, getImageUrl } from "../../utils/imageUrl";
 
 /**
  * PhotocardGrid — displays cards in a compact grid.
@@ -40,6 +40,12 @@ const BADGE_LETTER_COLORS = {
 
 // Render order for non-Owned/non-Wanted statuses (bottom-right)
 const OTHER_STATUS_ORDER = ["T", "P", "I", "B", "F"];
+
+function resolveCardSrc(path) {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${getImageUrl(path)}?v=${Date.now()}`;
+}
 
 function getCopyBadges(copies) {
   if (!copies || copies.length === 0) return { primary: null, other: null };
@@ -200,6 +206,7 @@ function CardCell({
           primaryBadge={primary}
           otherBadges={other}
           isSpecial={card.is_special}
+          hasBack={!isFrontsBacksMode && !!card.back_image_path}
         />
 
         {/* Back image (fronts+backs mode) */}
@@ -234,7 +241,7 @@ function CardCell({
   );
 }
 
-function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpecial }) {
+function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpecial, hasBack }) {
   return (
     <div
       style={{
@@ -245,7 +252,7 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
     >
       {path ? (
         <img
-          src={`${API_BASE}/images/library/${path.replace(/^.*[\\/]/, "")}?v=${Date.now()}`}
+          src={resolveCardSrc(path)}
           alt={side}
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         />
@@ -271,6 +278,11 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
             </span>
           ))}
         </div>
+      )}
+
+      {/* Back-image indicator — top-left */}
+      {hasBack && side === "front" && (
+        <div style={styles.backBadge}>B</div>
       )}
 
       {/* Special star — top-right */}
@@ -347,6 +359,23 @@ const styles = {
     fontSize: "26px",
     lineHeight: 1,
     textShadow: "-1px -1px 0 var(--accent-special-shadow), 1px -1px 0 var(--accent-special-shadow), -1px 1px 0 var(--accent-special-shadow), 1px 1px 0 var(--accent-special-shadow)",
+  },
+  backBadge: {
+    position: "absolute",
+    top: 4,
+    left: 4,
+    background: "var(--badge-bg)",
+    color: "var(--badge-back)",
+    fontWeight: "bold",
+    fontSize: "var(--text-sm)",
+    padding: "2px 4px",
+    minWidth: 20,
+    height: 20,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "var(--radius-sm)",
+    lineHeight: 1,
   },
   caption: {
     padding: "3px 4px",
