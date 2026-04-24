@@ -16,7 +16,7 @@ DATA_ROOT = Path(_data_root_env) if _data_root_env else APP_ROOT
 
 DB_PATH = DATA_ROOT / "data" / "collectcore.db"
 logger.info("Using DB path: %s", DB_PATH)
-SCHEMA_PATH = APP_ROOT / "backend" / "sql" / "schema.sql"
+SCHEMA_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
