@@ -124,9 +124,7 @@ instructed:
 
 These are intentionally not yet built. Do not implement without instruction:
 
-1. Design system / CSS consolidation — replace inline styles with a centralized theme or CSS approach. Prerequisite for maintainable theming and consistent UI.
-    - **Sub-item: Dark mode** — current implementation is not usable; requires the design system foundation before a full revision is practical.
-    - **Sub-item: Admin UI polish** — the Admin page (especially the new Lookup Management tab) is functional but clunky. Layout, density, and interaction patterns need a design pass; likely easier after the design-system consolidation lands.
+All completed as of 4/23/2026
 
 ---
 
@@ -186,30 +184,38 @@ and fallback option in `C:\Dev\ARCHITECTURE.md` Decision A.
 - **Fallback:** Unraid self-hosting retained in ARCHITECTURE.md Decision A if the
   cloud path later proves unworkable.
 
-**Prerequisites before Railway deployment** (blocking; see
-`C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` Phase 0c):
-- Image field schema finalization — complete as of 2026-04-21 (photocard copy/edition refactor done)
+**Prerequisites before Railway deployment** — all complete as of 2026-04-23.
+Phase 0c (photocard copies, image field schema, validation + error handling)
+is closed. See `fancy-stirring-hollerith.md` Phase 0c for the settled detail.
 
-Resolve against local SQLite before the DB leaves the machine; iterating on
-migrations against a live Railway DB is much harder.
+**Multi-user model** (ARCHITECTURE.md Decision B) — DECIDED 2026-04-23: two-tier
+(admin cloud + guest local).
+- **Admin tier** (household only): Railway API auth, full CRUD, images in R2
+- **Guest tier** (friends): no account, local SQLite on device, no cloud writes;
+  starter catalog pulled from R2 as read-only hosted data
+- Keeps R2 + Railway costs bounded to the household; no subscription fees for
+  external users. One codebase, one binary per platform; tier decided at login.
 
-**Multi-user model** (ARCHITECTURE.md Decision B) is still UNDECIDED. With cloud
-resolved, Option B (single instance + user accounts) fits more naturally than
-per-user Railway services, but not yet committed.
+**Collection sharing** (Decision E): replaced by trading export/import
+(`.html` with embedded JSON). **DEFERRED to post-deployment** — see
+fancy-stirring-hollerith.md "Post-deployment roadmap" item PD2.
 
-**Collection sharing** (deferred pending multi-user model):
-Ability to share a specific collection (e.g. Graphic Novels) with another user in
-read-only view. The viewer sees the shared collection alongside their own without
-it overriding their own records for the same module. Each user retains full
-independent ownership of their own data.
+**Admin catalog publish UI**: **DEFERRED to post-deployment**. v1 ships with
+CLI-only catalog refresh via `tools/prepare_mobile_seed.py`. In-app publish
+flow is item PD1 in the post-deployment roadmap. Consider adding an
+`in_public_catalog BOOLEAN DEFAULT 0` column to `tbl_items` during Phase 0b
+as a cheap schema hook so the CLI and future UI agree on what "published"
+means without a later migration.
 
-**Mobile:** Full plan (Capacitor, thin-client API approach, Android APK, iOS
-TestFlight or PWA via browser) is documented in
+**Mobile:** Full plan (Capacitor, thin-client for admin / embedded SQLite for
+guest, Android APK, iOS TestFlight or PWA via browser) is documented in
 `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md`.
-- **Phase 0** (desktop code prep: API base URL externalization, imageUrl.js helper,
-  VITE_ENABLED_MODULES config) — complete 2026-04-13
-- **Phase 0b** (R2 bucket setup + seed DB preparation) — not yet started
-- **Phase 0c** (backend schema prerequisites above) — not yet started
+- **Phase 0** (desktop code prep) — complete 2026-04-13
+- **Phase 0c** (backend schema prerequisites) — complete 2026-04-23
+- **Phase 0b** (R2 bucket setup + seed DB preparation) — not yet started;
+  now the only code blocker before Railway deployment
+- Path A (embedded SQLite) is now permanent as the guest runtime, not
+  transitional
 - PWA is viable since the Railway URL is reachable; TestFlight remains optional.
 
 **Listing tracker impact on cloud:** open question — see `docs/listing_tracker_design_plan_v3.md`

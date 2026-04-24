@@ -265,6 +265,7 @@ export default function VideoGamesIngestPage() {
       setForm(blankForm(ownershipStatuses));
       setCoverPreview(null);
       setRawgQuery(""); setRawgResults(null);
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err.message || "Save failed.");
     } finally {

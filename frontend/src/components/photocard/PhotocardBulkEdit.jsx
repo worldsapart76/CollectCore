@@ -6,6 +6,7 @@ import {
   bulkUpdatePhotocards,
   bulkDeletePhotocards,
 } from "../../api";
+import { COLLECTION_TYPE_IDS } from "../../constants/collectionTypes";
 
 /**
  * PhotocardBulkEdit — bulk edit panel for selected photocards.
@@ -80,9 +81,8 @@ export default function PhotocardBulkEdit({
   useEffect(() => {
     async function load() {
       try {
-        const statusData = await fetchOwnershipStatuses();
-        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
-        setOwnershipStatuses(statusData.filter(s => !HIDDEN.has(s.status_name)));
+        const statusData = await fetchOwnershipStatuses(COLLECTION_TYPE_IDS.photocards);
+        setOwnershipStatuses(statusData);
         if (statusData.length > 0) {
           setOwnershipStatusId(String(statusData[0].ownership_status_id));
         }

@@ -105,8 +105,7 @@ export default function PhotocardLibraryPage() {
         setCards(cardData);
         setGroups(groupData);
         setCategories(categoryData);
-        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
-        setOwnershipStatuses(statusData.filter(s => !HIDDEN.has(s.status_name)));
+        setOwnershipStatuses(statusData);
       } catch (err) {
         setError(err.message || "Failed to load library");
       } finally {

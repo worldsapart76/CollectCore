@@ -217,6 +217,7 @@ function ManualForm({ ownershipStatuses, readStatuses, ageLevels, formatDetails,
       setSaveSuccess(`Added "${result.title}" (item #${result.item_id})`);
       resetForm();
       onCreated?.();
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       const msg = err.message || "Failed to save.";
       if (msg.includes("already exists")) {

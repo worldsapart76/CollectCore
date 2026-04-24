@@ -435,6 +435,7 @@ export default function MusicIngestPage() {
       setSuccess(`${typeLabel} "${form.title}" saved.`);
       setForm(blankForm(ownershipStatuses, releaseTypes));
       setCoverPreview(null);
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err.message || "Save failed.");
     } finally {

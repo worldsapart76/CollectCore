@@ -13,6 +13,7 @@ import {
   deletePhotocardCopy,
 } from "../../api";
 import { API_BASE } from "../../utils/imageUrl";
+import { COLLECTION_TYPE_IDS } from "../../constants/collectionTypes";
 
 /**
  * PhotocardDetailModal — view and edit a single photocard.
@@ -80,9 +81,8 @@ export default function PhotocardDetailModal({
 
   // Load ownership statuses once on mount
   useEffect(() => {
-    const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
-    fetchOwnershipStatuses()
-      .then(all => setOwnershipStatuses(all.filter(s => !HIDDEN.has(s.status_name))))
+    fetchOwnershipStatuses(COLLECTION_TYPE_IDS.photocards)
+      .then(setOwnershipStatuses)
       .catch(() => {});
   }, []);
 

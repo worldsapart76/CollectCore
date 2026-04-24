@@ -324,38 +324,50 @@ def search_video_cast(q: Optional[str] = None, db=Depends(get_db)):
 
 
 @router.get("/tmdb-search")
-def tmdb_search(q: str, media_type: str = "movie"):
-    """Proxy TMDB search. media_type = 'movie' or 'tv'."""
+def tmdb_search(q: str, media_type: str = "movie", year: Optional[str] = None, page: int = 1):
+    """Proxy TMDB search. media_type = 'movie' or 'tv'. Optional year filter + pagination."""
     if not q or not q.strip():
-        return []
+        return {"results": [], "page": 1, "total_pages": 0, "total_results": 0}
     if not TMDB_API_KEY:
         raise HTTPException(status_code=503, detail="TMDB_API_KEY not configured.")
     if media_type not in ("movie", "tv"):
         media_type = "movie"
+    try:
+        page_num = max(1, int(page))
+    except (TypeError, ValueError):
+        page_num = 1
     encoded = urllib.parse.quote(q.strip())
-    url = f"https://api.themoviedb.org/3/search/{media_type}?api_key={urllib.parse.quote(TMDB_API_KEY)}&query={encoded}&page=1"
+    url = f"https://api.themoviedb.org/3/search/{media_type}?api_key={urllib.parse.quote(TMDB_API_KEY)}&query={encoded}&page={page_num}"
+    if year and str(year).strip():
+        year_param = "primary_release_year" if media_type == "movie" else "first_air_date_year"
+        url += f"&{year_param}={urllib.parse.quote(str(year).strip())}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "CollectCore/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
         results = []
         img_base = "https://image.tmdb.org/t/p/w300"
-        for item in data.get("results", [])[:10]:
+        for item in data.get("results", []):
             poster = item.get("poster_path")
             title = item.get("title") or item.get("name") or ""
-            year = ""
+            year_out = ""
             date_str = item.get("release_date") or item.get("first_air_date") or ""
             if date_str:
-                year = date_str[:4]
+                year_out = date_str[:4]
             results.append({
                 "tmdb_id": item.get("id"),
                 "title": title,
-                "year": year,
+                "year": year_out,
                 "overview": (item.get("overview") or "")[:300],
                 "cover_image_url": img_base + poster if poster else None,
                 "media_type": media_type,
             })
-        return results
+        return {
+            "results": results,
+            "page": data.get("page", page_num),
+            "total_pages": data.get("total_pages", 1),
+            "total_results": data.get("total_results", len(results)),
+        }
     except HTTPException:
         raise
     except Exception as e:

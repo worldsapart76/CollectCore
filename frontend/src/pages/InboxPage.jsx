@@ -351,8 +351,7 @@ export default function InboxPage() {
       .then(([g, c, os, inbox]) => {
         setGroups(g);
         setCategories(c);
-        const HIDDEN = new Set(["Formerly Owned", "Borrowed"]);
-        setOwnershipStatuses(os.filter(s => !HIDDEN.has(s.status_name)));
+        setOwnershipStatuses(os);
         setInboxFiles(inbox);
         // Preserve stored value if still valid; otherwise default to first item
         setGroupId((prev) =>

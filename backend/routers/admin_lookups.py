@@ -25,6 +25,12 @@ Registry fields (per entry):
     cleanable      If True, rows appear in the scan-for-unused cleanup.
     mergeable      If False, merge is blocked (cascades into other lookup
                    tables, or rich-data copy rows would be lost).
+    implicit_filter Optional dict of {column: value} applied as a fixed WHERE
+                   filter on list queries and auto-populated as defaults when
+                   creating new rows. Used when one physical table holds rows
+                   for multiple conceptual lookups (e.g. lkup_top_level_categories
+                   scoped to a specific collection_type_id).
+    creatable      If True, new rows can be added via the admin UI (POST).
 """
 
 from typing import Any, Dict, List, Optional
@@ -33,6 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from constants import TTRPG_COLLECTION_TYPE_ID
 from dependencies import get_db
 
 router = APIRouter(tags=["admin"])
@@ -375,6 +382,19 @@ _LOOKUP_REGISTRY_LIST: List[Dict[str, Any]] = [
     },
     # ── TTRPG ────────────────────────────────────────────────────────────────
     {
+        "label": "TTRPG Systems", "table": "lkup_top_level_categories",
+        "pk": "top_level_category_id", "name_col": "category_name",
+        "sort_col": "sort_order", "secondary_cols": [], "scope": [],
+        "implicit_filter": {"collection_type_id": TTRPG_COLLECTION_TYPE_ID},
+        "creatable": True,
+        "refs": [
+            {"table": "tbl_ttrpg_details",             "fk": "top_level_category_id", "dedupe_cols": None},
+            {"table": "lkup_ttrpg_system_editions",    "fk": "system_category_id",    "dedupe_cols": None},
+            {"table": "lkup_ttrpg_lines",              "fk": "system_category_id",    "dedupe_cols": None},
+        ],
+        "cleanable": False, "mergeable": False,  # cascades into child lookups
+    },
+    {
         "label": "TTRPG System Editions", "table": "lkup_ttrpg_system_editions",
         "pk": "edition_id", "name_col": "edition_name",
         "sort_col": "sort_order", "secondary_cols": [],
@@ -456,6 +476,7 @@ def get_lookup_registry():
             "scope": [{"col": s["col"], "label": s["label"]} for s in e["scope"]],
             "mergeable": e["mergeable"],
             "cleanable": e["cleanable"],
+            "creatable": e.get("creatable", False),
         }
         for e in _LOOKUP_REGISTRY_LIST
     ]
@@ -522,12 +543,22 @@ def list_lookup_rows(table: str, db=Depends(get_db)):
         f"l.{entry['sort_col']}, l.{entry['name_col']}"
         if entry["sort_col"] else f"l.{entry['name_col']}"
     )
+
+    where_parts: List[str] = []
+    params: Dict[str, Any] = {}
+    implicit = entry.get("implicit_filter") or {}
+    for i, (col, val) in enumerate(implicit.items()):
+        p = f"imp_{i}"
+        where_parts.append(f"l.{col} = :{p}")
+        params[p] = val
+    where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
     sql = (
         f"SELECT {', '.join(select_parts)} FROM {table} l "
-        f"{' '.join(joins)} ORDER BY {order_by}"
+        f"{' '.join(joins)} {where_clause} ORDER BY {order_by}"
     )
 
-    rows = db.execute(text(sql)).fetchall()
+    rows = db.execute(text(sql), params).fetchall()
 
     has_sort = bool(entry["sort_col"])
     sec_cols = [c for c, _ in entry["secondary_cols"]]
@@ -574,6 +605,78 @@ def list_lookup_rows(table: str, db=Depends(get_db)):
         "mergeable": entry["mergeable"],
         "rows": results,
     }
+
+
+class LookupCreateRequest(BaseModel):
+    name: str
+    sort_order: Optional[int] = None
+    secondary: Optional[Dict[str, Optional[str]]] = None
+    scope: Optional[Dict[str, int]] = None
+
+
+@router.post("/admin/lookups/{table}")
+def create_lookup_row(table: str, req: LookupCreateRequest, db=Depends(get_db)):
+    """Create a new active row in a managed lookup. Requires entry['creatable']."""
+    entry = _LOOKUP_REGISTRY.get(table)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown lookup table: {table}")
+    if not entry.get("creatable"):
+        raise HTTPException(status_code=400, detail=f"{entry['label']} does not support creating new rows.")
+
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+
+    cols: List[str] = [entry["name_col"], "is_active"]
+    placeholders: List[str] = [":name", "1"]
+    params: Dict[str, Any] = {"name": name}
+
+    if entry["sort_col"]:
+        cols.append(entry["sort_col"])
+        placeholders.append(":sort_order")
+        params["sort_order"] = int(req.sort_order) if req.sort_order is not None else 0
+
+    valid_secondary = {c for c, _ in entry["secondary_cols"]}
+    if req.secondary:
+        for col, val in req.secondary.items():
+            if col not in valid_secondary:
+                raise HTTPException(status_code=400, detail=f"Unknown field: {col}")
+            cols.append(col)
+            placeholders.append(f":sec_{col}")
+            params[f"sec_{col}"] = val if val != "" else None
+
+    scope_cols = {s["col"] for s in entry["scope"]}
+    if scope_cols:
+        if not req.scope:
+            raise HTTPException(status_code=400, detail=f"{entry['label']} requires scope values.")
+        for col in scope_cols:
+            if col not in req.scope or req.scope[col] is None:
+                raise HTTPException(status_code=400, detail=f"Missing scope value: {col}")
+            cols.append(col)
+            placeholders.append(f":scope_{col}")
+            params[f"scope_{col}"] = int(req.scope[col])
+
+    implicit = entry.get("implicit_filter") or {}
+    for col, val in implicit.items():
+        cols.append(col)
+        placeholders.append(f":imp_{col}")
+        params[f"imp_{col}"] = val
+
+    sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
+    try:
+        result = db.execute(text(sql), params)
+        db.commit()
+    except Exception as ex:
+        db.rollback()
+        msg = str(ex)
+        if "UNIQUE" in msg.upper() or "constraint" in msg.lower():
+            raise HTTPException(
+                status_code=409,
+                detail="Another row with this value already exists in the same scope.",
+            )
+        raise HTTPException(status_code=500, detail=f"Create failed: {msg}")
+
+    return {"ok": True, "id": result.lastrowid}
 
 
 class LookupPatchRequest(BaseModel):

@@ -206,6 +206,7 @@ export default function TTRPGIngestPage() {
       await createTtrpg(payload);
       setSuccess(`"${form.title}" saved.`);
       setForm(blankForm(ownershipStatuses));
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
       setCoverPreview(null);
     } catch (err) {
       setError(err.message || "Save failed.");

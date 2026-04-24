@@ -181,6 +181,7 @@ export default function BoardgamesIngestPage() {
       setForm(blankForm(ownershipStatuses));
       setCoverPreview(null);
       setBggQuery(""); setBggResults(null);
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err.message || "Save failed.");
     } finally {

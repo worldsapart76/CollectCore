@@ -176,7 +176,7 @@ export default function ExportPage() {
     }
     if (sectionActive(filters.ownership)) {
       result = result.filter((c) =>
-        applySection(filters.ownership, [String(c.ownership_status_id)])
+        applySection(filters.ownership, (c.copies || []).map((cp) => String(cp.ownership_status_id)))
       );
     }
     if (sectionActive(filters.backImage)) {

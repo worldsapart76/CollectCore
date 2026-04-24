@@ -189,22 +189,31 @@ function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
 // ─── TMDB search panel ────────────────────────────────────────────────────────
 
 function TmdbSearchPanel({ videoTypeName, onSelect }) {
+  const defaultMediaType = videoTypeName === "TV Series" ? "tv" : "movie";
   const [query, setQuery] = useState("");
+  const [year, setYear] = useState("");
+  const [mediaType, setMediaType] = useState(defaultMediaType);
   const [results, setResults] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalResults, setTotalResults] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(null);
   const [error, setError] = useState("");
 
-  const mediaType = videoTypeName === "TV Series" ? "tv" : "movie";
+  useEffect(() => { setMediaType(defaultMediaType); }, [defaultMediaType]);
 
-  async function doSearch() {
+  async function doSearch(requestedPage = 1) {
     if (!query.trim()) return;
     setLoading(true);
     setError("");
-    setResults([]);
+    if (requestedPage === 1) setResults([]);
     try {
-      const data = await tmdbSearch(query, mediaType);
-      setResults(data);
+      const data = await tmdbSearch(query, mediaType, { year, page: requestedPage });
+      setResults(data.results || []);
+      setPage(data.page || requestedPage);
+      setTotalPages(data.total_pages || 0);
+      setTotalResults(data.total_results || 0);
     } catch (e) {
       setError(e.message || "TMDB search failed");
     } finally {
@@ -220,6 +229,10 @@ function TmdbSearchPanel({ videoTypeName, onSelect }) {
       onSelect(detail);
       setResults([]);
       setQuery("");
+      setYear("");
+      setPage(1);
+      setTotalPages(0);
+      setTotalResults(0);
     } catch (e) {
       setError(e.message || "Failed to fetch TMDB detail");
     } finally {
@@ -230,20 +243,38 @@ function TmdbSearchPanel({ videoTypeName, onSelect }) {
   return (
     <SectionBlock title="Search TMDB">
       <Row gap={3}>
+        <Select value={mediaType} onChange={e => setMediaType(e.target.value)} style={{ width: 100 }}>
+          <option value="movie">Movie</option>
+          <option value="tv">TV</option>
+        </Select>
         <Input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && doSearch()}
+          onKeyDown={e => e.key === "Enter" && doSearch(1)}
           placeholder={`Search TMDB for ${mediaType === "tv" ? "TV shows" : "movies"}…`}
           style={{ flex: 1 }}
         />
-        <Button type="button" variant="primary" onClick={doSearch} disabled={loading}>
+        <Input
+          type="number"
+          value={year}
+          onChange={e => setYear(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && doSearch(1)}
+          placeholder="Year"
+          min={1800}
+          max={new Date().getFullYear() + 5}
+          style={{ width: 90 }}
+        />
+        <Button type="button" variant="primary" onClick={() => doSearch(1)} disabled={loading}>
           {loading ? "Searching…" : "Search"}
         </Button>
       </Row>
       {error && <Alert tone="error">{error}</Alert>}
       {results.length > 0 && (
         <Stack gap={2}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+            Showing {results.length} of {totalResults} result{totalResults === 1 ? "" : "s"}
+            {totalPages > 1 && ` (page ${page} of ${totalPages})`}
+          </div>
           {results.map(r => (
             <div
               key={r.tmdb_id}
@@ -270,6 +301,17 @@ function TmdbSearchPanel({ videoTypeName, onSelect }) {
               }
             </div>
           ))}
+          {totalPages > 1 && (
+            <Row gap={2} style={{ justifyContent: "center", marginTop: "var(--space-2)" }}>
+              <Button type="button" variant="secondary" size="sm" disabled={loading || page <= 1} onClick={() => doSearch(page - 1)}>
+                ← Prev
+              </Button>
+              <span style={{ fontSize: "var(--text-xs)", alignSelf: "center" }}>Page {page} / {totalPages}</span>
+              <Button type="button" variant="secondary" size="sm" disabled={loading || page >= totalPages} onClick={() => doSearch(page + 1)}>
+                Next →
+              </Button>
+            </Row>
+          )}
         </Stack>
       )}
     </SectionBlock>
@@ -396,6 +438,7 @@ export default function VideoIngestPage() {
       await createVideo(payload);
       setSuccess(`"${form.title}" added.`);
       setForm(f => ({ ...BLANK, top_level_category_id: f.top_level_category_id }));
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError(e.message || "Save failed.");
     } finally {

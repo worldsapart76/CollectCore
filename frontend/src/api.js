@@ -668,6 +668,18 @@ export async function fetchLookupRows(table) {
   return handleJsonResponse(res, "Failed to fetch lookup rows.");
 }
 
+export async function createLookupRow(table, payload) {
+  const res = await fetch(
+    `${API}/admin/lookups/${encodeURIComponent(table)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  return handleJsonResponse(res, "Failed to create lookup row.");
+}
+
 export async function patchLookupRow(table, rowId, patch) {
   const res = await fetch(
     `${API}/admin/lookups/${encodeURIComponent(table)}/${rowId}`,
@@ -892,8 +904,10 @@ export async function fetchVideoGenres() {
 }
 
 
-export async function tmdbSearch(q, mediaType = "movie") {
+export async function tmdbSearch(q, mediaType = "movie", { year, page } = {}) {
   const params = new URLSearchParams({ q, media_type: mediaType });
+  if (year && String(year).trim()) params.set("year", String(year).trim());
+  if (page) params.set("page", String(page));
   const res = await fetch(`${API}/video/tmdb-search?${params}`);
   return handleJsonResponse(res, "TMDB search failed");
 }

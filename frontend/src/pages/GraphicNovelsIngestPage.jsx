@@ -342,6 +342,7 @@ function ManualForm({ publishers, formatTypes, eras, ownershipStatuses, readStat
       setSuccess(`Created: "${result.graphicnovel?.title || form.title}" (ID: ${result.item_id})`);
       setForm(blankForm(ownershipStatuses));
       onCreated?.();
+      document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError(e.message);
     } finally {

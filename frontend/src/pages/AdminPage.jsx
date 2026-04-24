@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
 import {
+  createLookupRow,
   deactivateLookups,
   deleteLookupRow,
   downloadBackupByToken,
@@ -434,6 +435,8 @@ function LookupManagementTab() {
   const [mergeState, setMergeState] = useState(null);      // { sourceId, targetId } or null
   const [merging, setMerging] = useState(false);
   const [toast, setToast] = useState(null);                // { kind, msg }
+  const [addDraft, setAddDraft] = useState(null);          // { name, sort_order, secondary, scope } or null
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     fetchLookupRegistry()
@@ -451,6 +454,7 @@ function LookupManagementTab() {
     setScopeFilter({});
     setEditingId(null);
     setEditDraft(null);
+    setAddDraft(null);
   }, [selectedTable]);
 
   async function loadTable(table) {
@@ -554,6 +558,53 @@ function LookupManagementTab() {
     }
   }
 
+  function beginAdd() {
+    if (!selectedEntry) return;
+    setAddDraft({
+      name: "",
+      sort_order: selectedEntry.sort_col ? "0" : "",
+      secondary: Object.fromEntries(selectedEntry.secondary_cols.map(c => [c.col, ""])),
+      scope: Object.fromEntries(selectedEntry.scope.map(s => [s.col, ""])),
+    });
+  }
+  function cancelAdd() { setAddDraft(null); }
+  async function saveAdd() {
+    if (!addDraft || !selectedEntry) return;
+    const name = addDraft.name.trim();
+    if (!name) { setToast({ kind: "error", msg: "Name is required." }); return; }
+    const payload = { name };
+    if (selectedEntry.sort_col && addDraft.sort_order !== "") {
+      const n = Number(addDraft.sort_order);
+      if (!Number.isNaN(n)) payload.sort_order = n;
+    }
+    const sec = {};
+    for (const { col } of selectedEntry.secondary_cols) {
+      const v = addDraft.secondary[col];
+      if (v !== "" && v != null) sec[col] = v;
+    }
+    if (Object.keys(sec).length > 0) payload.secondary = sec;
+    if (selectedEntry.scope.length > 0) {
+      const scope = {};
+      for (const s of selectedEntry.scope) {
+        const v = addDraft.scope[s.col];
+        if (!v) { setToast({ kind: "error", msg: `${s.label} is required.` }); return; }
+        scope[s.col] = Number(v);
+      }
+      payload.scope = scope;
+    }
+    setAdding(true);
+    try {
+      await createLookupRow(selectedTable, payload);
+      await loadTable(selectedTable);
+      setAddDraft(null);
+      setToast({ kind: "ok", msg: "Added." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Add failed." });
+    } finally {
+      setAdding(false);
+    }
+  }
+
   function startMerge(row) { setMergeState({ sourceId: row.id, targetId: "" }); }
   function cancelMerge() { setMergeState(null); }
   async function confirmMerge() {
@@ -642,6 +693,79 @@ function LookupManagementTab() {
               </label>
             );
           })}
+        </div>
+      )}
+
+      {/* Add new row */}
+      {selectedEntry?.creatable && (
+        <div style={{ marginBottom: 10 }}>
+          {!addDraft ? (
+            <button
+              onClick={beginAdd}
+              style={{ padding: "4px 10px", fontSize: "0.85rem", cursor: "pointer" }}
+            >
+              + Add new
+            </button>
+          ) : (
+            <div style={{
+              display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+              padding: 8, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 3,
+            }}>
+              <input
+                type="text"
+                autoFocus
+                placeholder={`New ${selectedEntry.label} name…`}
+                value={addDraft.name}
+                onChange={e => setAddDraft(d => ({ ...d, name: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") saveAdd(); if (e.key === "Escape") cancelAdd(); }}
+                style={{ padding: "3px 6px", fontSize: "0.85rem", minWidth: 200 }}
+              />
+              {selectedEntry.sort_col && (
+                <label style={{ fontSize: "0.8rem", color: "#555" }}>
+                  Sort:&nbsp;
+                  <input
+                    type="number"
+                    value={addDraft.sort_order}
+                    onChange={e => setAddDraft(d => ({ ...d, sort_order: e.target.value }))}
+                    style={{ padding: "3px 6px", fontSize: "0.85rem", width: 70 }}
+                  />
+                </label>
+              )}
+              {selectedEntry.secondary_cols.map(sc => (
+                <label key={sc.col} style={{ fontSize: "0.8rem", color: "#555" }}>
+                  {sc.label}:&nbsp;
+                  <input
+                    type="text"
+                    value={addDraft.secondary[sc.col] ?? ""}
+                    onChange={e => setAddDraft(d => ({ ...d, secondary: { ...d.secondary, [sc.col]: e.target.value } }))}
+                    style={{ padding: "3px 6px", fontSize: "0.85rem" }}
+                  />
+                </label>
+              ))}
+              {selectedEntry.scope.map((s, i) => {
+                const opts = tableData?.scope_options?.[i]?.options || [];
+                return (
+                  <label key={s.col} style={{ fontSize: "0.8rem", color: "#555" }}>
+                    {s.label}:&nbsp;
+                    <select
+                      value={addDraft.scope[s.col] ?? ""}
+                      onChange={e => setAddDraft(d => ({ ...d, scope: { ...d.scope, [s.col]: e.target.value } }))}
+                      style={{ padding: "3px 6px", fontSize: "0.85rem" }}
+                    >
+                      <option value="">(select)</option>
+                      {opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </label>
+                );
+              })}
+              <button onClick={saveAdd} disabled={adding} style={{ padding: "3px 10px", fontSize: "0.85rem" }}>
+                {adding ? "Saving…" : "Save"}
+              </button>
+              <button onClick={cancelAdd} disabled={adding} style={{ padding: "3px 10px", fontSize: "0.85rem" }}>
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       )}
 
