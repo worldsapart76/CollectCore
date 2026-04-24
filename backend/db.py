@@ -41,9 +41,11 @@ def _run_migrations(conn) -> None:
         logger.info("Migration: renamed lkup_book_read_statuses -> lkup_consumption_statuses")
 
     # Migration: deactivate Copper Age era (data quality — era was never used in GN module)
-    raw.execute(
-        "UPDATE lkup_graphicnovel_eras SET is_active = 0 WHERE era_name = 'Copper Age'"
-    )
+    # Guarded for fresh DBs where schema.sql hasn't run yet (migrations execute before schema).
+    if "lkup_graphicnovel_eras" in tables:
+        raw.execute(
+            "UPDATE lkup_graphicnovel_eras SET is_active = 0 WHERE era_name = 'Copper Age'"
+        )
 
 
 def init_db() -> None:
