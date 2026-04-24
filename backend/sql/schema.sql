@@ -72,9 +72,12 @@ CREATE TABLE IF NOT EXISTS tbl_items (
     item_id               INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_type_id    INTEGER NOT NULL,
     top_level_category_id INTEGER NOT NULL,
-    ownership_status_id   INTEGER NOT NULL,
+    ownership_status_id   INTEGER,
     reading_status_id     INTEGER,
     notes                 TEXT,
+    date_read             TEXT,
+    catalog_item_id       TEXT,
+    catalog_version       INTEGER,
     created_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -83,6 +86,9 @@ CREATE TABLE IF NOT EXISTS tbl_items (
     FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id),
     FOREIGN KEY (reading_status_id) REFERENCES lkup_consumption_statuses(read_status_id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tbl_items_catalog_item_id
+    ON tbl_items(catalog_item_id) WHERE catalog_item_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS tbl_attachments (
     attachment_id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,6 +161,19 @@ CREATE TABLE IF NOT EXISTS xref_photocard_members (
     FOREIGN KEY (item_id) REFERENCES tbl_items(item_id),
     FOREIGN KEY (member_id) REFERENCES lkup_photocard_members(member_id),
     UNIQUE (item_id, member_id)
+);
+
+-- Per-copy ownership for photocards (1:many with tbl_items).
+-- Added by migrate_photocard_copies.py; codified here so fresh installs match.
+CREATE TABLE IF NOT EXISTS tbl_photocard_copies (
+    copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id             INTEGER NOT NULL,
+    ownership_status_id INTEGER NOT NULL,
+    notes               TEXT,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (item_id) REFERENCES tbl_photocard_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
 );
 
 
@@ -474,6 +493,8 @@ INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_or
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending_outgoing', 'Pending - Outgoing', 5);
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('borrowed',          'Borrowed',          6);
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending_incoming',  'Pending - Incoming', 7);
+-- Catalog status is scoped to photocards only (seeded below via targeted xref insert, not the cross-join).
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('catalog',          'Catalog',          8);
 
 
 -- ============================================================
@@ -1702,11 +1723,18 @@ INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES (
 -- Consumption statuses are seeded per-module matching their actual usage.
 -- ============================================================
 
--- Ownership: all active statuses × all active modules
+-- Ownership: all active statuses × all active modules (except Catalog, which is photocards-only)
 INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
 SELECT s.ownership_status_id, c.collection_type_id
 FROM lkup_ownership_statuses s, lkup_collection_types c
-WHERE s.is_active = 1 AND c.is_active = 1;
+WHERE s.is_active = 1 AND c.is_active = 1
+  AND s.status_code != 'catalog';
+
+-- Catalog: photocards only (guest-tier marker; hidden from admin UI via VITE_IS_ADMIN)
+INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
+SELECT s.ownership_status_id, c.collection_type_id
+FROM lkup_ownership_statuses s, lkup_collection_types c
+WHERE s.status_code = 'catalog' AND c.collection_type_code = 'photocards';
 
 -- Consumption: Books
 INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)

@@ -6,6 +6,48 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-24 — Phase 0b complete: Catalog + R2 image hosting (admin + guest)
+
+**Scope clarification mid-session:** Initially built as photocard-Catalog-only (R2 hosts the guest-facing photocard subset). User clarified Path B intent: ALL admin images across all 8 modules must live in R2 so admin mobile can render them. Guest tier remains photocard-only. One bucket, two prefixes: `catalog/` (public, photocards) and `admin/` (unguessable URLs, all modules).
+
+**Completed:**
+- **Schema migration** ([backend/migrate_catalog_fields.py](backend/migrate_catalog_fields.py), idempotent; creates timestamped DB backup):
+  - Added `tbl_items.catalog_item_id TEXT` + `catalog_version INTEGER`, partial UNIQUE index on catalog_item_id
+  - Added `Catalog` ownership status, scoped to photocards only via `xref_ownership_status_modules`
+  - Backfilled all 10,015 photocards with `catalog_item_id` derived from the existing attachment filename convention (preserves existing filenames; 866 legacy cards had filename-IDs drifted from `item_id` due to earlier consolidation migration — filename-driven derivation captures them correctly)
+  - Fixed 3 pre-existing `schema.sql` drifts uncovered during seed build: added missing `date_read` column and `tbl_photocard_copies` table definition; relaxed `tbl_items.ownership_status_id` to nullable (all 10,015 photocards have NULL here since ownership moved to `tbl_photocard_copies` in the earlier copies migration)
+- **New tools** (all idempotent, `--dry-run` supported, DB backup before writes):
+  - [tools/publish_catalog.py](tools/publish_catalog.py): resizes photocard images to 600×924 JPEG 80%, uploads to R2 `catalog/images/{catalog_item_id}_{f|b}.jpg`, rewrites `tbl_attachments` to `storage_type='hosted'` with full R2 URL, bumps `catalog_version` globally. Skip rule: attachments already `storage_type='hosted'` are no-ops.
+  - [tools/sync_admin_images.py](tools/sync_admin_images.py): migrates all non-photocard cover images (local paths AND remote 3rd-party URLs — Discogs, TMDB, RAWG, Amazon) to R2 `admin/images/{module}/{module}_{id:06d}.jpg`, resized to long-edge 1200px JPEG 85%. Covers books/gn/music/video/videogames/boardgames/ttrpg. Skip rule: `cover_image_url` already pointing at `R2_PUBLIC_BASE_URL` is a no-op.
+  - [tools/prepare_mobile_seed.py](tools/prepare_mobile_seed.py): builds guest seed DB containing only photocards + exactly one `Catalog`-status copy each; no admin ownership state leaked. `--upload` flag pushes `seed.db` + `version.json` to R2.
+- **Backend endpoints** ([backend/routers/catalog.py](backend/routers/catalog.py), publicly accessible, no auth):
+  - `GET /catalog/version` → `{max_version, card_count}`
+  - `GET /catalog/delta?since=N` → photocards with `catalog_version > N` (full metadata + R2 image URLs + member list)
+  - `GET /catalog/seed.db` → 302 redirect to R2 if `R2_PUBLIC_BASE_URL` set, else `FileResponse` from `data/mobile_seed.db`
+  - Registered in [backend/main.py](backend/main.py) and added to `PROXY_PATHS` in [frontend/vite.config.js](frontend/vite.config.js)
+- **Admin UI gating** ([frontend/src/utils/env.js](frontend/src/utils/env.js), [frontend/.env.local](frontend/.env.local)): `VITE_IS_ADMIN=true` hides `Catalog` ownership status from all admin pickers via `api.js fetchOwnershipStatuses()` filter. Side effect: added `status_code` to `/ownership-statuses` response — fixed silent breakage in Boardgames/TTRPG/Music/VideoGames ingest pages that referenced `s.status_code === "owned"` (was always `undefined` before).
+- **Photocard image rendering fix** — late-session bug found by user: [PhotocardGrid.jsx](frontend/src/components/photocard/PhotocardGrid.jsx#L238) and [PhotocardDetailModal.jsx](frontend/src/components/photocard/PhotocardDetailModal.jsx#L15) hardcoded `${API_BASE}/images/library/${filename}` with a regex that stripped R2 URLs down to just the filename. Replaced with a `resolveCardSrc()` helper that passes `https://` URLs through unchanged (hosted) and falls back to the original local-path + cache-buster behavior (for newly-ingested cards awaiting next publish). Non-photocard modules already used `getImageUrl()` correctly — they rendered R2 URLs fine with no change.
+- **R2 initial upload (one-time):**
+  - 10,710 photocard images → `catalog/images/`
+  - 254 non-photocard covers → `admin/images/` (246 GN + 3 music + 2 VG + 1 video + 1 boardgame + 1 book copy; TTRPG has no covers yet)
+  - 3.95 MB seed DB + `version.json` → `catalog/*`
+  - Total R2 footprint: ~172 MB
+  - Bucket: `collectcore` on account `5dd3976ce9d8e40c2862db2704dbb539.r2.cloudflarestorage.com`; public URL `https://pub-8156609abf504c058e10ac0f5b7f6e95.r2.dev`
+- **End-to-end verification:** `/catalog/version` returns `{max_version: 3, card_count: 10015}`; `/catalog/delta?since=0` returns 10,015 cards with R2 URLs; `/catalog/delta?since=3` empty; all 10,710 photocard attachments now `storage_type='hosted'`; every populated non-photocard `cover_image_url` now points at R2.
+- **Dependencies:** Added `boto3==1.35.0` to `backend/requirements.txt`.
+
+**Known current state of disk:**
+- Admin SQLite DB still local at `data/collectcore.db` (moves to Railway next phase)
+- `images/library/` (~4 GB of originals) still on disk — nothing in the DB references them anymore; safe to delete once a week or two of stable running has passed. Pre-migration DB backups remain under `data/collectcore_pre_*.db`.
+- Ingest flows still write local files + `storage_type='local'` rows. Sweep-to-R2 is manual via the two CLI tools until ingest is rewritten to upload directly during Railway deployment.
+
+**Next:**
+1. **Admin UI visual confirmation** (5 min): confirm `Catalog` is absent from photocard ownership dropdowns + filter sidebar. Code complete, not visually verified.
+2. **Railway deployment** (biggest remaining piece): move `backend/` FastAPI + `data/collectcore.db` to Railway; set `VITE_API_BASE_URL` on the Electron desktop build to the Railway URL; once stable, ingest flows should be updated to write images directly to R2 (eliminates the "local fallback" window for newly-ingested cards).
+3. **Phase 1 — Capacitor mobile shell** (can run in parallel with Railway): `npx cap init` in `frontend/`, add Android + iOS platforms, `.env.mobile` with `VITE_ENABLED_MODULES=photocards` and `VITE_API_BASE_URL=<railway-url>`. First build = guest thin-client against R2 Catalog. Admin mobile = same shell with `VITE_IS_ADMIN=true` + auth against Railway.
+4. **Deferred (post-deployment):** PD1 (admin Catalog publish UI — currently CLI-only), PD2 (trading export/import), PWA offline cache.
+5. **Cleanup candidate (low priority):** delete `images/library/` contents once R2 stability is confirmed.
+
 ### 2026-04-23 — Lookup admin/management UI (deferred #1)
 
 **Completed:**

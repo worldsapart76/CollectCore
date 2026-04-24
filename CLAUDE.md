@@ -200,12 +200,16 @@ is closed. See `fancy-stirring-hollerith.md` Phase 0c for the settled detail.
 (`.html` with embedded JSON). **DEFERRED to post-deployment** — see
 fancy-stirring-hollerith.md "Post-deployment roadmap" item PD2.
 
-**Admin catalog publish UI**: **DEFERRED to post-deployment**. v1 ships with
-CLI-only catalog refresh via `tools/prepare_mobile_seed.py`. In-app publish
-flow is item PD1 in the post-deployment roadmap. Consider adding an
-`in_public_catalog BOOLEAN DEFAULT 0` column to `tbl_items` during Phase 0b
-as a cheap schema hook so the CLI and future UI agree on what "published"
-means without a later migration.
+**Catalog architecture** (decided 2026-04-23): Shared card set modeled as
+snapshot-plus-delta. Admin's `tbl_items` with `catalog_item_id IS NOT NULL`
+IS the Catalog. Guests download full snapshot on first launch, pull deltas
+thereafter. `catalog_item_id` uses the existing `{group_code}_{id:06d}` image
+filename convention — no UUIDs needed. New `Catalog` ownership status added to
+photocards only, hidden from admin UI via `VITE_IS_ADMIN` flag. Full detail in
+`fancy-stirring-hollerith.md` "Catalog Architecture" section and Phase 0b.
+
+**Admin catalog publish UI**: CLI-only for v1 (`tools/publish_catalog.py`).
+In-app publish flow is item PD1 in the post-deployment roadmap.
 
 **Mobile:** Full plan (Capacitor, thin-client for admin / embedded SQLite for
 guest, Android APK, iOS TestFlight or PWA via browser) is documented in

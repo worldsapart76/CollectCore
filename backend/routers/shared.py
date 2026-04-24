@@ -19,7 +19,7 @@ def health():
 def get_ownership_statuses(collection_type_id: Optional[int] = None, db=Depends(get_db)):
     if collection_type_id is not None:
         result = db.execute(text("""
-            SELECT s.ownership_status_id, s.status_name, s.sort_order
+            SELECT s.ownership_status_id, s.status_code, s.status_name, s.sort_order
             FROM lkup_ownership_statuses s
             JOIN xref_ownership_status_modules x ON s.ownership_status_id = x.ownership_status_id
             WHERE s.is_active = 1 AND x.collection_type_id = :ctid
@@ -27,7 +27,7 @@ def get_ownership_statuses(collection_type_id: Optional[int] = None, db=Depends(
         """), {"ctid": collection_type_id}).fetchall()
     else:
         result = db.execute(text("""
-            SELECT ownership_status_id, status_name, sort_order
+            SELECT ownership_status_id, status_code, status_name, sort_order
             FROM lkup_ownership_statuses
             WHERE is_active = 1
             ORDER BY sort_order
@@ -35,8 +35,9 @@ def get_ownership_statuses(collection_type_id: Optional[int] = None, db=Depends(
     return [
         {
             "ownership_status_id": row[0],
-            "status_name": row[1],
-            "sort_order": row[2],
+            "status_code": row[1],
+            "status_name": row[2],
+            "sort_order": row[3],
         }
         for row in result
     ]
