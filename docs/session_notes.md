@@ -6,7 +6,50 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-04-24 — Phase 0b complete: Catalog + R2 image hosting (admin + guest)
+### 2026-04-24 (continued) — Railway live + GN merge + R2 custom domain
+
+**Backend on Railway, end-to-end.** Hobby plan + 5 GB volume mounted at `/data`. Service `collectcore-production.up.railway.app` builds via Railpack (Nixpacks now legacy), Root Directory=`backend`, Procfile boots uvicorn on `$PORT`. Local DB seeded onto the volume via a temporary `/admin/_bootstrap_db` endpoint (added, used, removed in three commits).
+
+**Boot bugs surfaced and fixed during first deploy:**
+- `db.py` resolved `SCHEMA_PATH` via `APP_ROOT / "backend" / ...` which assumed local layout — broke on Railway where `Root Directory=backend` puts `db.py` at `/app/db.py`. Anchored to `__file__.parent / "sql" / "schema.sql"` so it works in both layouts.
+- `_run_migrations()` ran *before* `executescript(schema_sql)`, so on a fresh DB the Copper Age `UPDATE` crashed against a not-yet-created `lkup_graphicnovel_eras`. Added the same table-existence guard the rename migration uses.
+
+**GN merge from husband's backup** (`docs/collectcore_backup_20260424_192840.zip`):
+- 271 GN items in his vs 246 in mine → 25 new, 246 matched (mostly by ISBN; rest by title+series), 1 mine-only deletion ("Hack/Slash VS Chaos #1").
+- Divergence report uncovered a real data-quality bug: **every matched item in mine had `top_level_category_id` pointing at "non-album"** (a music category) instead of Marvel/DC/Other. Leftover damage from the canonicalize migration. Merge replaced these with his correct values as a side effect.
+- Policy: his = source of truth. Wrote [tools/merge_gn_from_backup.py](tools/merge_gn_from_backup.py) — pre-merge DB backup, name-keyed lookup remapping, full UPDATE of matched details + xrefs (writers/artists/tags), full INSERT of new items, image copy from his backup into `images/library/gn/` with new IDs. Single exception: `cover_image_url` on matched items kept (mine's R2 URLs) — overwriting with his local paths would have broken R2 routing.
+- Final GN count: 246 + 25 − 1 = **270 items**. 25 new cover images uploaded to R2 via existing `tools/sync_admin_images.py`. All 270 GN items now serve from R2.
+- Pre-merge backup at `data/collectcore_pre_gn_merge_20260424_195322.db`.
+
+**Status visibility seed bug** (latent for weeks, exposed by Railway's frequent restarts):
+- `schema.sql` lines 1727-1764 bulk-seeded `xref_ownership_status_modules` and `xref_consumption_status_modules` on every startup via `INSERT OR IGNORE ... CROSS JOIN`. `INSERT OR IGNORE` left existing rows alone, but every time a user *deleted* a row via Admin → Status Visibility (the way "uncheck this status from this module" is implemented), the next backend restart silently re-inserted it. Locally invisible since restarts are rare; on Railway every deploy reset toggles.
+- Moved both seeds to [backend/db.py](backend/db.py) `_seed_status_visibility_xref()`, gated on the table being empty so the seed only fires on a truly fresh DB. Same function also cleans up 7 orphan `collection_type_id` rows (61, 62, 94, 155, 202, 258, 274) left in the Railway xref tables by the canonicalize migration. Guest mobile DBs are built by `tools/prepare_mobile_seed.py` and never run `init_db()`, so unaffected.
+
+**Desktop client cutover:**
+- `frontend/.env.production` → `VITE_API_BASE_URL=https://collectcore-production.up.railway.app` + `VITE_IS_ADMIN=true`. Loaded by Vite during `npm run build`/`preview` only; dev keeps using the Vite proxy to localhost.
+- Deleted 5 dead library files (`CardGridItem`, `CardPairItem`, `CardDetailModal`, `LibraryGrid`, `libraryTransforms`) — leftover pre-rebuild library shells, the only remaining `127.0.0.1` hardcodes in `frontend/src/`.
+- Validated end-to-end via `npm run build && npm run preview`: photocard library, all 8 modules, edit-and-persist round-trip all working against Railway+R2.
+
+**Image performance — custom R2 domain:**
+- Added `loading="lazy"` + `decoding="async"` to photocard grid + detail-modal `<img>` tags ([PhotocardGrid.jsx](frontend/src/components/photocard/PhotocardGrid.jsx#L254), [PhotocardDetailModal.jsx](frontend/src/components/photocard/PhotocardDetailModal.jsx#L532)). Helped initial paint but `PER PAGE = All` (10K+ cards) still surfaced broken images mid-page — Cloudflare's `pub-*.r2.dev` URL is throttled (development-only).
+- Bought `collectcoreapp.com` via Cloudflare Registrar (~$10/yr, no markup). Connected `images.collectcoreapp.com` to the R2 bucket via Cloudflare dashboard → R2 → Custom Domains. Now serves the same content through the full Cloudflare CDN with edge caching.
+- Added an idempotent host-rewrite migration to `db.py` that swaps `https://pub-8156609abf504c058e10ac0f5b7f6e95.r2.dev` → `https://images.collectcoreapp.com` across 7 tables / 10,988 rows on next startup. Rewrites both Railway and local DBs automatically; no-op on subsequent runs (LIKE filter).
+- `R2_PUBLIC_BASE_URL` updated on Railway + `backend/.env` so future ingests write the new host.
+
+**Known current state of disk:**
+- `tmp_merge/` (his.db extract + cover cache + divergence_report.py) is local-only test scaffolding — safe to delete.
+- `tools/merge_gn_from_backup.py` is uncommitted — worth keeping as a record of how the GN merge was performed.
+- `docs/collectcore_backup_20260424_192840.zip` (his backup, 5 MB) untracked — keep or delete as preferred.
+- `data/collectcore_pre_gn_merge_*.db` and `data/collectcore_pre_admin_sync_*.db` — pre-write backups from today's tools, safe to delete after a stable week.
+- Cloud DB and local DB are again byte-similar (same schema and rows; only difference is the catalog_version is the same and any minor `updated_at` drift).
+
+**Next:**
+1. **Ship cutover installer to husband.** Rebuild via `C:\Dev\CollectCore-Build\build-release.bat`, hand him the new `.exe`. His old install keeps running locally as fallback until he installs the new one — at which point his data becomes the cloud data we just merged.
+2. **Other modules' library pages** have inline `<img>` without lazy loading (Books, GN, Music, Video, Video Games, TTRPG, Board Games). Quick sweep — same `loading="lazy" decoding="async"` treatment.
+3. **Phase 1 — Capacitor mobile shell.** `npx cap init` in `frontend/`, add Android+iOS, wire `.env.mobile` for guest thin-client. Already unblocked.
+4. **Optional cleanups (low priority):** `api.collectcoreapp.com` to replace Railway's generated URL; `images/library/` (~4 GB local originals) safe to delete since nothing in DB references them anymore; latent `APP_ROOT / image_path` bugs in `routers/export.py` and `routers/ingest.py` should be remapped to `DATA_ROOT` before any export/re-ingest is attempted on Railway.
+
+### 2026-04-24 (morning) — Phase 0b complete: Catalog + R2 image hosting (admin + guest)
 
 **Scope clarification mid-session:** Initially built as photocard-Catalog-only (R2 hosts the guest-facing photocard subset). User clarified Path B intent: ALL admin images across all 8 modules must live in R2 so admin mobile can render them. Guest tier remains photocard-only. One bucket, two prefixes: `catalog/` (public, photocards) and `admin/` (unguessable URLs, all modules).
 
@@ -63,36 +106,6 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 **Next:**
 - Continue deferred items triage.
 
-### 2026-04-21 — GN ingest fix, deferred list cleanup, collection type canonicalization
-
-**Completed:**
-- **Deferred item #2 (GN ingest white screen crash):** Root cause was a missing `getImageUrl` import in `frontend/src/pages/GraphicNovelsIngestPage.jsx`. The `ManualForm` cover preview called `getImageUrl(form.coverImageUrl)` but the helper was never imported, throwing a `ReferenceError` that React surfaced as a white screen whenever a cover URL was set. Triggered reliably by Comic Vine keyword results (which always include a cover); masked for manual entry and Google Books lookups without covers. Fixed with a one-line import from `../utils/imageUrl`.
-- **Deferred item #3 (Google Books rate limiting):** Already resolved — `GOOGLE_BOOKS_API_KEY` is now applied to both Books and Graphic Novels routers via the shared `external_apis.py` helpers (previously only GN had keyed access). Removed from deferred list.
-- **Deferred items #1 (ownership status dropdown) and #2 (consumption status rename + cross-contamination):** Already resolved by the 2026-04-22 Wave 4 Unified Status Visibility System — `lkup_consumption_statuses` rename is in `schema.sql`, both `xref_ownership_status_modules` and `xref_consumption_status_modules` junctions exist, all 8 modules filter by `collection_type_id`, and `hiddenStatuses.js` was deleted. Removed both from deferred list.
-- **Deferred item #1 (collection type ID resolution):** Fully canonicalized `lkup_collection_types` so the live DB matches what `schema.sql` seeds on a fresh install.
-    - `migrate_collection_types_canonicalize.py`: deleted the zero-reference orphan duplicates (IDs 61/62 for `photocards`/`books`) plus four orphan `lkup_top_level_categories` rows (IDs 8–11); renamed the surviving legacy singular codes `photocard`→`photocards` and `book`→`books` (with matching `collection_type_name` updates).
-    - `migrate_collection_types_resequence.py`: remapped the non-sequential IDs 94/155/202/258/274 to 4/5/6/7/8 for videogames/music/video/boardgames/ttrpg; updated all FK references in `tbl_items` and `lkup_top_level_categories`, then the PK in `lkup_collection_types`; reset `sqlite_sequence` so new rows continue from 9.
-    - Updated `backend/constants.py` to look up by the new plural codes.
-    - Updated `frontend/src/constants/collectionTypes.js` to IDs 1–8, matching both the live DB and any fresh install going forward.
-    - Pre-migration backup: `F:/Dropbox/Apps/CollectCore/data/backups/collectcore_pre_collection_types_canonicalize_20260422_200932.db`.
-- **CLAUDE.md:** Five resolved items removed in total; deferred list renumbered (now 1–4).
-
-**Next:**
-- Continue deferred items triage.
-
-### 2026-04-21 — Code quality overhaul Wave 4 complete
-
-**Completed (Wave 4 — Query Optimization & Consistency):**
-- **4A — TTRPG detail query consolidation:** `_get_ttrpg_detail()` reduced from 8 queries to 3 — folded 4 conditional single-row lookups (system_edition, line, book_type, publisher) into LEFT JOINs on the main query. Column indices updated in the return dict.
-- **4A — BoardGames detail query consolidation:** `_get_boardgame_detail()` reduced from 4 queries to 3 — folded conditional publisher lookup into a LEFT JOIN on the main query.
-- **4B — Photocards POST/PUT full object return:** Added `_get_photocard()` helper; `create_photocard` and `update_photocard` now return `{"item_id": ..., "status": ..., "photocard": <full object>}`, matching all other modules. Frontend only reads `item_id` so this is backwards-compatible.
-- **4C — Videogames error handling:** Wrapped multi-step writes in `create_videogame` and `update_videogame` with `try/except + db.rollback()`, preventing partial writes on error.
-- **4C — Boardgames error handling:** Same pattern applied to `create_boardgame` and `update_boardgame`.
-- **4D — React.memo on library item components:** `BookGridItem`, `BookRow` (BooksLibraryPage), and `GnGridItem` (GraphicNovelsLibraryPage) wrapped with `memo()` to skip re-renders when props are unchanged. Added `memo` to named React imports in both files.
-
-**Next:**
-- CLAUDE.md Deferred Items #1 (image field schema finalization) and #3 (photocard copy/edition sub-table refactor) are the blocking prerequisites for Railway deployment
-
 ### 2026-04-22 — Unified Status Visibility System + deferred items triage
 
 **Completed:**
@@ -114,37 +127,6 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 - Bug fix candidates: #14 (GN ingest crash), #13 (BGG search verification)
 - Test the new Status Visibility admin grid end-to-end
 
-### 2026-04-22 — Code quality overhaul Waves 1-3 complete
-
-**Completed (Wave 3 — Frontend Structural Refactor):**
-- **3A — Shared style constants:** Created `frontend/src/styles/commonStyles.js` with 14 shared style objects (labelStyle, inputStyle, selectStyle, btnPrimary, btnSecondary, btnSm, btnDanger, alertError, alertSuccess, alertWarn, row2, sectionStyle, sectionLabel, GRID_SIZES). Removed duplicate definitions from 14 pages (7 library + 7 ingest).
-- **3B — Shared NameList component:** Created `frontend/src/components/shared/NameList.jsx` with unified `addLabel` + `placeholder` props (defaults to "+ Add"). Replaced 12 local definitions (NameList, AuthorList, ArtistList) across library and ingest pages.
-- **3C — Shared SegmentedButtons/ToggleButton:** Created `frontend/src/components/shared/SegmentedButtons.jsx` using CSS variables (adopted the GN variant over Books' hard-coded colors). Removed duplicates from BooksLibraryPage and GraphicNovelsLibraryPage.
-- **3D — Collection type constants:** Created `frontend/src/constants/collectionTypes.js` with `COLLECTION_TYPE_IDS` map. Updated PhotocardLibraryPage, InboxPage, ExportPage, InboxManager, and BooksIngestPage to use centralized constants.
-- **3E — Hidden status sets:** Created `frontend/src/constants/hiddenStatuses.js` with `HIDDEN_OWNERSHIP_NAMES`, `HIDDEN_READ_STATUS_NAMES`, `HIDDEN_ERA_NAMES`. Removed 14 duplicate definitions across library and ingest pages.
-- InboxPage retains its own style block (uses hard-coded colors, not CSS variables — intentional photocard-specific variant).
-
-**Next:**
-- Wave 4: Query optimization & consistency (N+1 queries, standardize API responses, error handling)
-
-### 2026-04-22 — Code quality overhaul Wave 1 complete
-
-**Completed (Wave 1 — Safety & Cleanup):**
-- **Code audit:** Full backend + frontend + infrastructure audit identifying 20+ issues across security, duplication, dead code, hard-coded values, and missing infrastructure. 4-wave remediation plan created (`C:\Users\world\.claude\plans\streamed-greeting-plum.md`).
-- **CORS hardened (1A):** Replaced `allow_origins=["*"]` with `["http://localhost:5181"]`, configurable via `CORS_ORIGINS` env var. Removed `allow_credentials=True`.
-- **File upload sanitized (1B):** Ingest upload now uses `Path(file.filename).name` to strip directory traversal. `_replace_image` validates old file paths stay within `IMAGES_DIR` before deletion.
-- **Dead code removed (1C):** Deleted `frontend/src/services/` (unused API layer with hard-coded localhost), `frontend/src/pages/LibraryPage.jsx` (unrouted legacy page), `backend/models.py` (unused ORM models). Removed empty `allMembers` useMemo from PhotocardLibraryPage.
-- **Error handling fixed (1D):** GN library `Promise.all` silent `.catch(() => {})` replaced with `console.error` logging.
-- **`.env.example` added (1E):** Documents all required/optional env vars.
-- **Logging added (1F):** Replaced `print()` calls in `main.py` and `db.py` with Python `logging` module.
-- **Vite proxy bypass (bugfix):** Direct URL navigation to `/{module}/library` or `/{module}/add` was broken (Vite proxied to backend, which returned 422). Added `bypass` function to vite proxy config to serve `index.html` for frontend sub-paths.
-- **Grid cache busting (bugfix):** PhotocardGrid image URLs now include `?v=${Date.now()}` cache buster (modal already had this; grid was showing stale images after front replacement).
-
-**Next:**
-- Wave 2: Backend structural refactor (dependency injection, generic helpers, split main.py into routers)
-- Wave 3: Frontend structural refactor (shared styles, shared components, centralized constants)
-- Wave 4: Query optimization & consistency
-
 ### 2026-04-21 — Photocard copies migration complete
 
 **Completed:**
@@ -163,20 +145,7 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 - Update plan file status to reflect completion
 - End-to-end testing of remaining flows (ingest, export, bulk operations)
 
-### 2026-04-13 — Mobile Phase 0: desktop code prep
-
-**Completed:**
-- **API base URL externalized** — `api.js` and all pages now derive the base URL from `VITE_API_BASE_URL` env var (defaults to `''` → Vite proxy unchanged for desktop). No `http://127.0.0.1:8001` hardcodes remain in active code.
-- **`imageUrl.js` helper created** — `frontend/src/utils/imageUrl.js` exports `API_BASE` and `getImageUrl(filePath, storageType)`. Handles local (default) and hosted (R2) image types transparently.
-- **All hardcoded URLs replaced** — `InboxPage.jsx`, `PhotocardDetailModal.jsx`, `PhotocardGrid.jsx`, `GraphicNovelsLibraryPage.jsx`, `GraphicNovelsIngestPage.jsx`, `VideoLibraryPage.jsx`, `MusicLibraryPage.jsx`, `VideoGamesLibraryPage.jsx`, `TTRPGLibraryPage.jsx`, `BoardgamesLibraryPage.jsx` all now use `API_BASE` / `getImageUrl`. `TopNav.jsx` shutdown call fixed (was using wrong port 8000); `/shutdown` added to Vite proxy paths.
-- **`VITE_ENABLED_MODULES` config** — `modules.js` exports `activeModules`, filtered by env var. Desktop default (unset) = all modules shown, alphabetically sorted. Mobile: set `VITE_ENABLED_MODULES=photocards` to show only photocards.
-- **Single-module redirect** — `App.jsx` redirects `/` to the module's `primaryPath` when only one module is active. Multi-module builds unchanged.
-
-**Next:**
-- Design Phase — resolve 16 design questions (see plan) before Phase 1 (Capacitor setup)
-- Phase 0b — R2 setup + seed DB prep can start in parallel once design questions are answered
-
-### Completed to date (2026-04-08 through 2026-04-13)
+### Completed to date (2026-04-08 through 2026-04-22)
 - Photocard module: full rebuild (library, ingest, export, filters, bulk edit, modal nav/auto-save, filter state persistence, copies sub-table migration)
 - Books module: v1 complete (schema, CRUD, ingest with ISBN/external search, library with filters/grid/bulk, Goodreads migration of 4,724 records)
 - Graphic Novels module: v1 complete (multi-source series, ISBN lookup with multi-result picker, grid view, thumbnails, cover management)
@@ -190,5 +159,7 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 - Admin: Backup & Restore (SQLite hot-copy + images ZIP)
 - Build & release pipeline (Inno Setup installer, PowerShell launcher)
 - Seed data for fresh installs
-- Mobile Phase 0: API base URL externalization, imageUrl.js helper, VITE_ENABLED_MODULES config
+- Mobile Phase 0 (2026-04-13): API base URL externalization, imageUrl.js helper, VITE_ENABLED_MODULES config — no `127.0.0.1` hardcodes remain in active code
 - Future module schemas fully designed (plan file: pure-inventing-whisper.md)
+- Code quality overhaul Waves 1-4 (2026-04-22): CORS hardened, file upload sanitization, dead-code purge, shared style constants/components, collection-type + hidden-status constants, query consolidation (TTRPG/Boardgames detail joins), POST/PUT response standardization, transactional error handling on multi-step writes, `React.memo` on library item components
+- GN ingest white-screen fix + collection-types canonicalize/resequence migrations (2026-04-21): `lkup_collection_types` cleaned to canonical IDs 1-8 matching schema.sql seed and `frontend/src/constants/collectionTypes.js`
