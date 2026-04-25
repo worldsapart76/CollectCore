@@ -48,6 +48,7 @@ export default function TopNav({ theme, toggleTheme }) {
     };
   }, [navDrawerOpen]);
 
+  const loadSettingsRef = useRef(() => {});
   useEffect(() => {
     function loadSettings() {
       fetchSettings()
@@ -60,6 +61,7 @@ export default function TopNav({ theme, toggleTheme }) {
         })
         .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS).sort()));
     }
+    loadSettingsRef.current = loadSettings;
     loadSettings();
     function handleChange(e) {
       if (Array.isArray(e.detail)) {
@@ -68,9 +70,23 @@ export default function TopNav({ theme, toggleTheme }) {
         loadSettings();
       }
     }
+    function handleVisibility() {
+      if (document.visibilityState === "visible") loadSettings();
+    }
     window.addEventListener("collectcore:modules-changed", handleChange);
-    return () => window.removeEventListener("collectcore:modules-changed", handleChange);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("collectcore:modules-changed", handleChange);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
+
+  // Refetch enabled-modules whenever the drawer opens, so the list is fresh
+  // even if the user toggled modules in a different browser or before this
+  // session loaded the cached bundle.
+  useEffect(() => {
+    if (navDrawerOpen) loadSettingsRef.current();
+  }, [navDrawerOpen]);
 
   useEffect(() => {
     if (!dropdownOpen) return;
