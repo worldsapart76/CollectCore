@@ -14,8 +14,9 @@ if _env_file.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import init_db
@@ -39,6 +40,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------- Host-based SPA fallback ----------
+# The same FastAPI service is reached via multiple custom domains:
+#   - api.collectcoreapp.com → API only (legacy + machine-to-machine)
+#   - collectcoreapp.com     → SPA (the React bundle in backend/frontend_dist/)
+# When a SPA path like /photocards/library is requested on the apex host,
+# the browser would normally hit the photocards API router first and get
+# JSON instead of the SPA. This middleware short-circuits that: on apex
+# (and any non-API host), GETs that don't match a static asset prefix get
+# index.html, letting React Router handle routing client-side.
+_API_HOST_PREFIXES = ("api.",)
+_SPA_PASSTHROUGH_PREFIXES = ("/assets/", "/images/", "/vite.svg")
+
+@app.middleware("http")
+async def spa_host_routing(request: Request, call_next):
+    host = request.headers.get("host", "").split(":")[0].lower()
+    is_api_host = (
+        any(host.startswith(p) for p in _API_HOST_PREFIXES)
+        or host in ("localhost", "127.0.0.1")
+    )
+    if is_api_host:
+        return await call_next(request)
+    if request.method != "GET":
+        return await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _SPA_PASSTHROUGH_PREFIXES):
+        return await call_next(request)
+    from routers.admin import FRONTEND_DIST
+    index_html = FRONTEND_DIST / "index.html"
+    if index_html.exists():
+        return FileResponse(str(index_html))
+    return await call_next(request)
 
 # ---------- DB init ----------
 init_db()

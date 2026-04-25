@@ -16,9 +16,14 @@ from sqlalchemy import text
 
 from db import DB_PATH
 from dependencies import get_db
-from file_helpers import APP_ROOT, DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
+from file_helpers import DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
 
-FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
+# Built React bundle, written by `vite build` in default (web) mode.
+# Co-located with the backend so it ships in the Railway deploy without
+# depending on the project root layout. Anchored to this file's location
+# (works whether the repo is laid out as project-root/backend/ locally or
+# as /app/ on Railway with Root Directory=backend).
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend_dist"
 
 router = APIRouter(tags=["admin"])
 

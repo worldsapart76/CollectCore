@@ -46,10 +46,22 @@ const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, {
   },
 }]))
 
-export default defineConfig({
+// Build modes:
+//   default ("npm run build")          → web bundle for Railway. Outputs to
+//     backend/frontend_dist/ which is committed to git so Railway picks it up
+//     on deploy and FastAPI serves it from the apex domain.
+//   "npm run build:mobile" (mode=mobile) → Capacitor APK bundle. Outputs to
+//     dist/ where `cap sync android` expects it; uses relative asset paths
+//     because the WebView loads the bundle from the device filesystem.
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  base: mode === 'mobile' ? './' : '/',
+  build: {
+    outDir: mode === 'mobile' ? 'dist' : '../backend/frontend_dist',
+    emptyOutDir: true,
+  },
   server: {
     port: 5181,
     proxy,
   },
-})
+}))
