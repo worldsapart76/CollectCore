@@ -1,4 +1,5 @@
 import io
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -7,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse as _FileResponse
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +22,44 @@ from file_helpers import APP_ROOT, DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
 FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
 
 router = APIRouter(tags=["admin"])
+
+
+# ---------- One-shot DB upload (Railway bootstrap; remove after use) ----------
+
+@router.post("/admin/_bootstrap_db")
+async def bootstrap_db(
+    file: UploadFile = File(...),
+    x_upload_token: str = Header(None),
+):
+    """One-shot upload to seed the SQLite DB on a fresh Railway volume.
+
+    Gated by ADMIN_UPLOAD_TOKEN env var. Remove this endpoint after the
+    one-time upload is done."""
+    expected = os.environ.get("ADMIN_UPLOAD_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    if x_upload_token != expected:
+        raise HTTPException(status_code=401, detail="Bad token")
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = DB_PATH.with_suffix(".upload.tmp")
+    with tmp_path.open("wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    try:
+        conn = sqlite3.connect(str(tmp_path))
+        conn.execute("PRAGMA integrity_check").fetchone()
+        conn.close()
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Bad SQLite file: {e}")
+
+    if DB_PATH.exists():
+        backup = DB_PATH.with_suffix(f".pre_bootstrap_{datetime.now():%Y%m%d_%H%M%S}.db")
+        DB_PATH.rename(backup)
+    tmp_path.rename(DB_PATH)
+    return {"status": "ok", "size": DB_PATH.stat().st_size}
 
 
 # ---------- Admin: Backup & Restore ----------
