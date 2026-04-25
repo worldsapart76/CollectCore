@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import TopNav from "./TopNav";
+import { PageActionsProvider } from "../../contexts/PageActionsContext";
 
 export default function AppShell({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem("cc-theme") || "light");
@@ -14,9 +15,11 @@ export default function AppShell({ children }) {
   }
 
   return (
-    <div className="app-shell">
-      <TopNav theme={theme} toggleTheme={toggleTheme} />
-      <main className="app-main">{children}</main>
-    </div>
+    <PageActionsProvider>
+      <div className="app-shell">
+        <TopNav theme={theme} toggleTheme={toggleTheme} />
+        <main className="app-main">{children}</main>
+      </div>
+    </PageActionsProvider>
   );
 }

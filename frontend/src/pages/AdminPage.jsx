@@ -99,6 +99,7 @@ export default function AdminPage() {
     try {
       await updateSetting("modules_enabled", JSON.stringify(next));
       setEnabledIds(next);
+      window.dispatchEvent(new CustomEvent("collectcore:modules-changed", { detail: next }));
     } catch { setError("Failed to save settings."); }
     finally { setSaving(false); }
   }

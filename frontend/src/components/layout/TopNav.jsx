@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { MODULE_DEFS, getActiveModuleId } from "../../modules";
 import { fetchSettings } from "../../api";
 import { API_BASE } from "../../utils/imageUrl";
+import { usePageActionsList } from "../../contexts/PageActionsContext";
 
 function navClass({ isActive }) {
   return isActive ? "topnav-link active" : "topnav-link";
@@ -14,9 +15,12 @@ export default function TopNav({ theme, toggleTheme }) {
   const [enabledModuleIds, setEnabledModuleIds] = useState([]);
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const [filtersAvailable, setFiltersAvailable] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState(null);
   const dropdownRef = useRef(null);
+  const menuRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const pageActions = usePageActionsList();
 
   const activeModuleId = getActiveModuleId(location.pathname);
   const activeModule = activeModuleId ? MODULE_DEFS[activeModuleId] : null;
@@ -45,15 +49,27 @@ export default function TopNav({ theme, toggleTheme }) {
   }, [navDrawerOpen]);
 
   useEffect(() => {
-    fetchSettings()
-      .then(settings => {
-        try {
-          setEnabledModuleIds(JSON.parse(settings.modules_enabled || "[]"));
-        } catch {
-          setEnabledModuleIds([]);
-        }
-      })
-      .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS).sort()));
+    function loadSettings() {
+      fetchSettings()
+        .then(settings => {
+          try {
+            setEnabledModuleIds(JSON.parse(settings.modules_enabled || "[]"));
+          } catch {
+            setEnabledModuleIds([]);
+          }
+        })
+        .catch(() => setEnabledModuleIds(Object.keys(MODULE_DEFS).sort()));
+    }
+    loadSettings();
+    function handleChange(e) {
+      if (Array.isArray(e.detail)) {
+        setEnabledModuleIds(e.detail);
+      } else {
+        loadSettings();
+      }
+    }
+    window.addEventListener("collectcore:modules-changed", handleChange);
+    return () => window.removeEventListener("collectcore:modules-changed", handleChange);
   }, []);
 
   useEffect(() => {
@@ -66,6 +82,19 @@ export default function TopNav({ theme, toggleTheme }) {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [dropdownOpen]);
+
+  // Close any open page-action menu on outside click / route change.
+  useEffect(() => { setOpenMenuId(null); }, [location.pathname]);
+  useEffect(() => {
+    if (!openMenuId) return;
+    function handleOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [openMenuId]);
 
   async function handleExit() {
     setIsShuttingDown(true);
@@ -120,6 +149,84 @@ export default function TopNav({ theme, toggleTheme }) {
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );
+
+  const SortIcon = () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="3" y1="6" x2="13" y2="6" />
+      <line x1="3" y1="12" x2="11" y2="12" />
+      <line x1="3" y1="18" x2="9" y2="18" />
+      <polyline points="17 8 17 18 21 14" />
+      <line x1="17" y1="18" x2="17" y2="18" />
+    </svg>
+  );
+
+  const SelectIcon = ({ active }) => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      {active && <polyline points="7 12 11 16 17 9" />}
+    </svg>
+  );
+
+  const ICONS = { sort: SortIcon, select: SelectIcon };
+
+  function renderPageAction(action) {
+    const Icon = ICONS[action.iconName];
+    if (!Icon) return null;
+
+    if (action.kind === "menu") {
+      const isOpen = openMenuId === action.id;
+      return (
+        <div
+          key={action.id}
+          ref={isOpen ? menuRef : undefined}
+          style={{ position: "relative" }}
+        >
+          <button
+            type="button"
+            className="topnav-icon-btn"
+            onClick={() => setOpenMenuId(isOpen ? null : action.id)}
+            aria-label={action.label}
+            aria-haspopup="menu"
+            aria-expanded={isOpen}
+          >
+            <Icon />
+          </button>
+          {isOpen && (
+            <div className="topnav-action-menu" role="menu">
+              {action.options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`topnav-action-menu__item${opt.value === action.value ? " active" : ""}`}
+                  onClick={() => {
+                    action.onChange(opt.value);
+                    setOpenMenuId(null);
+                  }}
+                  role="menuitem"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // kind === "toggle" or default
+    return (
+      <button
+        key={action.id}
+        type="button"
+        className={`topnav-icon-btn${action.active ? " active" : ""}`}
+        onClick={action.onClick}
+        aria-label={action.label}
+        aria-pressed={action.active ? "true" : "false"}
+      >
+        <Icon active={action.active} />
+      </button>
+    );
+  }
 
   return (
     <header className="topnav">
@@ -204,8 +311,9 @@ export default function TopNav({ theme, toggleTheme }) {
         </button>
       </div>
 
-      {/* Mobile-only: filter on the right edge (only when current page has filters) */}
+      {/* Mobile-only: page actions + filter on the right edge */}
       <div className="topnav-mobile-controls topnav-mobile-controls--right">
+        {pageActions.map(renderPageAction)}
         {filtersAvailable && (
           <button
             type="button"

@@ -7,6 +7,7 @@ import {
   bulkDeletePhotocards,
 } from "../../api";
 import { COLLECTION_TYPE_IDS } from "../../constants/collectionTypes";
+import { Modal } from "../primitives";
 
 /**
  * PhotocardBulkEdit — bulk edit panel for selected photocards.
@@ -199,13 +200,41 @@ export default function PhotocardBulkEdit({
     }
   }
 
-  return (
-    <div style={styles.panel}>
-      <div style={styles.header}>
-        <span style={styles.title}>Bulk Edit — {selectedCards.length} cards</span>
-        <button style={styles.closeBtn} onClick={onClose}>✕</button>
+  const footer = (
+    <div style={styles.footer}>
+      <div style={styles.footerLeft}>
+        {!confirmDelete ? (
+          <button style={styles.deleteBtn} onClick={handleBulkDelete} disabled={deleting || saving}>
+            Delete {selectedCards.length} cards
+          </button>
+        ) : (
+          <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-base)", flexWrap: "wrap" }}>
+            <span style={{ color: "var(--danger-text)", fontWeight: "bold" }}>Delete {selectedCards.length} cards?</span>
+            <button style={styles.deleteBtn} onClick={handleBulkDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Yes"}
+            </button>
+            <button style={styles.cancelBtn} onClick={() => setConfirmDelete(false)}>No</button>
+          </span>
+        )}
       </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={styles.cancelBtn} onClick={onClose}>Cancel</button>
+        <button style={styles.saveBtn} onClick={handleSave} disabled={saving || deleting}>
+          {saving ? "Saving..." : `Apply to ${selectedCards.length} cards`}
+        </button>
+      </div>
+    </div>
+  );
 
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={`Bulk Edit — ${selectedCards.length} cards`}
+      footer={footer}
+      footerJustify="between"
+    >
       {error && <div style={styles.errorBox}>{error}</div>}
 
       <div style={styles.body}>
@@ -352,31 +381,7 @@ export default function PhotocardBulkEdit({
           </div>
         </BulkRow>
       </div>
-
-      <div style={styles.footer}>
-        <div style={styles.footerLeft}>
-          {!confirmDelete ? (
-            <button style={styles.deleteBtn} onClick={handleBulkDelete} disabled={deleting || saving}>
-              Delete {selectedCards.length} cards
-            </button>
-          ) : (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-base)" }}>
-              <span style={{ color: "var(--danger-text)", fontWeight: "bold" }}>Delete {selectedCards.length} cards?</span>
-              <button style={styles.deleteBtn} onClick={handleBulkDelete} disabled={deleting}>
-                {deleting ? "Deleting..." : "Yes"}
-              </button>
-              <button style={styles.cancelBtn} onClick={() => setConfirmDelete(false)}>No</button>
-            </span>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button style={styles.cancelBtn} onClick={onClose}>Cancel</button>
-          <button style={styles.saveBtn} onClick={handleSave} disabled={saving || deleting}>
-            {saving ? "Saving..." : `Apply to ${selectedCards.length} cards`}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -404,37 +409,8 @@ function BulkRow({ label, enabled, onToggle, disabled, disabledReason, children 
 }
 
 const styles = {
-  panel: {
-    background: "var(--bg-base)",
-    border: "1px solid var(--border-input)",
-    borderRadius: "var(--radius-lg)",
-    width: 420,
-    maxHeight: "85vh",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: "var(--shadow-modal)",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "10px 14px",
-    borderBottom: "1px solid var(--border)",
-  },
-  title: {
-    fontWeight: "bold",
-    fontSize: "var(--text-md)",
-  },
-  closeBtn: {
-    background: "none",
-    border: "none",
-    fontSize: 15,
-    cursor: "pointer",
-    color: "var(--text-muted)",
-    padding: "0 4px",
-  },
   errorBox: {
-    margin: "8px 14px 0",
+    marginBottom: 10,
     padding: "7px 10px",
     background: "var(--error-bg)",
     border: "1px solid var(--danger-text)",
@@ -443,9 +419,8 @@ const styles = {
     color: "var(--danger-text)",
   },
   body: {
-    padding: "12px 14px",
-    overflowY: "auto",
-    flex: 1,
+    display: "flex",
+    flexDirection: "column",
   },
   row: {
     marginBottom: 14,
@@ -510,8 +485,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: 8,
-    padding: "10px 14px",
-    borderTop: "1px solid var(--border)",
+    width: "100%",
+    flexWrap: "wrap",
   },
   footerLeft: {
     display: "flex",

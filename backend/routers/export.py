@@ -137,7 +137,7 @@ def _generate_pdf(entries: list, include_captions: bool) -> bytes:
 
 @router.post("/export/photocards")
 def export_photocards(payload: ExportPayload, db=Depends(get_db)):
-    from main import _PHOTOCARD_SELECT, _PHOTOCARD_GROUP_BY, _photocard_row_to_dict, _attach_copies
+    from routers.photocards import _PHOTOCARD_SELECT, _PHOTOCARD_GROUP_BY, _photocard_row_to_dict, _attach_copies
 
     if not payload.item_ids:
         raise HTTPException(status_code=400, detail="item_ids cannot be empty.")

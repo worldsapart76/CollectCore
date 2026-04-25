@@ -831,6 +831,45 @@ select {
     outline: var(--focus-ring);
     outline-offset: var(--focus-ring-offset);
   }
+  .topnav-icon-btn.active {
+    background: var(--green-light);
+    color: var(--green);
+  }
+
+  /* --- Page-action menu popover (Sort dropdown on mobile, etc.) --- */
+  .topnav-action-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 160px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
+    padding: 4px;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+  }
+  .topnav-action-menu__item {
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+  }
+  .topnav-action-menu__item:hover {
+    background: var(--green-light);
+    color: var(--green);
+  }
+  .topnav-action-menu__item.active {
+    background: var(--green-light);
+    color: var(--green);
+    font-weight: 600;
+  }
 
   /* --- Mobile nav drawer (slides in from left) --- */
   .topnav-nav-backdrop {

@@ -18,6 +18,7 @@ import {
 import PageContainer from "../components/layout/PageContainer";
 import { API_BASE } from "../utils/imageUrl";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import { useMediaQuery, MOBILE_BREAKPOINT } from "../components/library/mobileGrid";
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
@@ -27,6 +28,7 @@ function inboxImageUrl(filename, mtime) {
 
 function libraryImageUrl(path) {
   if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
   return `${API_BASE}/${path}?v=${Date.now()}`;
 }
 
@@ -40,6 +42,114 @@ const btnSecondary = { fontSize: "var(--text-base)", padding: "5px 12px", backgr
 const btnSm = { fontSize: "var(--text-xs)", padding: "2px 7px", background: "var(--bg-surface)", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", cursor: "pointer" };
 const alertError = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--danger-text)", background: "var(--error-bg)", fontSize: "var(--text-base)", borderRadius: "var(--radius-sm)" };
 const alertSuccess = { marginBottom: 10, padding: "8px 10px", border: "1px solid var(--success-border)", background: "var(--success-bg)", fontSize: "var(--text-base)", borderRadius: "var(--radius-sm)" };
+
+// ─── Mobile-only styles ──────────────────────────────────────────────────────
+
+const mobileStyles = {
+  page: {
+    padding: "12px 12px 24px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  stripWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  stripLabel: {
+    fontSize: "var(--text-xs)",
+    fontWeight: "bold",
+    color: "var(--text-muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
+  stripScroller: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    overflowX: "auto",
+    overflowY: "hidden",
+    padding: "4px 2px",
+    WebkitOverflowScrolling: "touch",
+  },
+  stripThumb: {
+    position: "relative",
+    flexShrink: 0,
+    width: 64,
+    height: 64,
+    borderRadius: "var(--radius-md)",
+    border: "1px solid var(--border-input)",
+    background: "var(--bg-surface)",
+    overflow: "hidden",
+    cursor: "pointer",
+  },
+  stripThumbImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  stripThumbBadge: {
+    position: "absolute",
+    top: 3,
+    right: 3,
+    width: 22,
+    height: 22,
+    fontSize: 11,
+    fontWeight: "bold",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stripThumbRemove: {
+    position: "absolute",
+    top: 3,
+    left: 3,
+    width: 22,
+    height: 22,
+    fontSize: 11,
+    lineHeight: 1,
+    padding: 0,
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    cursor: "pointer",
+    background: "rgba(0,0,0,0.55)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 24,
+  },
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    padding: 12,
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-lg)",
+    background: "var(--bg-base)",
+  },
+  actionBar: {
+    position: "sticky",
+    bottom: 0,
+    padding: "10px 0",
+    background: "var(--bg-base)",
+    borderTop: "1px solid var(--border)",
+    marginTop: 4,
+    zIndex: 5,
+  },
+};
 
 // ─── Upload zone ─────────────────────────────────────────────────────────────
 
@@ -340,6 +450,9 @@ export default function InboxPage() {
   // Preview thumbnail size
   const [previewLarge, setPreviewLarge] = useState(true);
 
+  // Mobile-only state
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+
   // ── Initial load ──
   useEffect(() => {
     Promise.all([
@@ -616,6 +729,271 @@ export default function InboxPage() {
   }
   if (lookupError) {
     return <PageContainer><div style={{ padding: 20, color: "var(--error-text)" }}>{lookupError}</div></PageContainer>;
+  }
+
+  if (isMobile) {
+    return (
+      <PageContainer>
+        <div style={mobileStyles.page}>
+          <UploadZone onUploaded={handleUploaded} />
+
+          {/* Horizontal scrollable thumbnail strip — image-only, F/B badge, remove.
+              Selected thumbs grow to 2× in place so the user gets a bigger view
+              without spending a separate row of vertical space. */}
+          <div style={mobileStyles.stripWrap}>
+            <div style={mobileStyles.stripLabel}>
+              Inbox ({inboxFiles.length})
+            </div>
+            {inboxFiles.length === 0 ? (
+              <div style={{ ...mobileStyles.stripScroller, color: "var(--text-muted)", fontSize: "var(--text-base)", padding: "8px 4px" }}>
+                Inbox is empty.
+              </div>
+            ) : (
+              <div style={mobileStyles.stripScroller}>
+                {inboxFiles.map((f) => {
+                  const side = fileSides[f.filename] ?? "front";
+                  const isSelected = selectedFilenames.includes(f.filename);
+                  return (
+                    <div
+                      key={f.filename}
+                      onClick={() => toggleFileSelection(f.filename)}
+                      style={{
+                        ...mobileStyles.stripThumb,
+                        width: isSelected ? 100 : 64,
+                        height: isSelected ? 154 : 64,
+                        borderColor: isSelected ? "var(--green-vivid)" : "var(--border-input)",
+                        boxShadow: isSelected ? "0 0 0 2px var(--green-light)" : "none",
+                      }}
+                    >
+                      <img
+                        src={inboxImageUrl(f.filename, f.mtime)}
+                        alt=""
+                        style={mobileStyles.stripThumbImg}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); toggleFileSide(f.filename); }}
+                        style={{
+                          ...mobileStyles.stripThumbBadge,
+                          background: side === "back" ? "var(--warn-bg)" : "var(--success-bg)",
+                          color: side === "back" ? "var(--warn-text)" : "var(--success-text)",
+                        }}
+                        aria-label={`Side: ${side}. Tap to toggle.`}
+                      >
+                        {side === "back" ? "B" : "F"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleRemoveFromInbox(f.filename); }}
+                        style={mobileStyles.stripThumbRemove}
+                        aria-label="Remove from inbox"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Thin status row beneath the strip */}
+          {panelMode === "none" && inboxFiles.length > 0 && (
+            <div style={mobileStyles.statusRow}>
+              <span style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+                Tap a thumbnail to select.
+              </span>
+            </div>
+          )}
+          {(panelMode === "front" || panelMode === "back") && (
+            <div style={mobileStyles.statusRow}>
+              <span style={{
+                display: "inline-block", padding: "2px 10px",
+                borderRadius: "var(--radius-sm)", fontSize: "var(--text-sm)", fontWeight: "bold",
+                background: panelMode === "back" ? "var(--warn-bg)" : "var(--success-bg)",
+                color: panelMode === "back" ? "var(--warn-text)" : "var(--success-text)",
+                border: `1px solid ${panelMode === "back" ? "var(--warn-border)" : "var(--success-border)"}`,
+              }}>
+                {panelMode === "back" ? "Back" : "Front"}
+              </span>
+            </div>
+          )}
+          {panelMode === "pair" && (
+            <div style={mobileStyles.statusRow}>
+              <span style={{
+                display: "inline-block", padding: "2px 10px",
+                borderRadius: "var(--radius-sm)", fontSize: "var(--text-sm)", fontWeight: "bold",
+                background: "var(--green-light)", color: "var(--green)", border: "1px solid var(--green-vivid)",
+              }}>
+                Pair
+              </span>
+            </div>
+          )}
+          {panelMode === "invalid-pair" && (
+            <div style={{ ...alertError, marginBottom: 0 }}>
+              Both selected files are marked as the same side. Toggle one to F and one to B.
+            </div>
+          )}
+
+          {actionError && <div style={alertError}>{actionError}</div>}
+          {actionSuccess && <div style={alertSuccess}>{actionSuccess}</div>}
+
+          {/* Form fields, stacked single-column */}
+          <div style={mobileStyles.form}>
+            <div>
+              <label style={labelStyle}>Card Type</label>
+              <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
+                <button
+                  type="button"
+                  onClick={() => setIsSpecial(false)}
+                  style={{
+                    padding: "5px 14px", fontSize: "var(--text-base)", cursor: "pointer",
+                    border: "none", borderRight: "1px solid var(--border-input)",
+                    background: !isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                    color: !isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
+                  }}
+                >
+                  Regular
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSpecial(true)}
+                  style={{
+                    padding: "5px 14px", fontSize: "var(--text-base)", cursor: "pointer",
+                    border: "none",
+                    background: isSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                    color: isSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
+                  }}
+                >
+                  ★ Special
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Ownership</label>
+              <select value={ownershipStatusId} onChange={(e) => setOwnershipStatusId(e.target.value)} style={{ ...selectStyle, width: "100%" }}>
+                {ownershipStatuses.map((s) => (
+                  <option key={s.ownership_status_id} value={s.ownership_status_id}>{s.status_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Group</label>
+              <select value={groupId} onChange={(e) => setGroupId(e.target.value)} style={{ ...selectStyle, width: "100%" }}>
+                {groups.map((g) => (
+                  <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Category</label>
+              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={{ ...selectStyle, width: "100%" }}>
+                {categories.map((c) => (
+                  <option key={c.top_level_category_id} value={c.top_level_category_id}>{c.category_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Source Origin</label>
+              <SourceOriginSelector
+                sourceOrigins={sourceOrigins}
+                sourceOriginId={sourceOriginId}
+                onChange={setSourceOriginId}
+                groupId={groupId}
+                categoryId={categoryId}
+                onCreated={(created) => {
+                  setSourceOrigins((prev) => [...prev, created]);
+                  setSourceOriginId(String(created.source_origin_id));
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Version</label>
+              <input value={version} onChange={(e) => setVersion(e.target.value)}
+                style={inputStyle} placeholder="e.g. Soundwave POB" />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Notes</label>
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Members</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+                {members.map((m) => (
+                  <label
+                    key={m.member_id}
+                    style={{
+                      display: "flex", alignItems: "center", padding: "4px 8px",
+                      border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", cursor: "pointer", fontSize: "var(--text-sm)",
+                      background: selectedMemberIds.includes(String(m.member_id)) ? "var(--green-light)" : "var(--bg-surface)",
+                    }}
+                  >
+                    <input type="checkbox"
+                      checked={selectedMemberIds.includes(String(m.member_id))}
+                      onChange={() => toggleMember(m.member_id)}
+                      style={{ marginRight: 4 }}
+                    />
+                    {m.member_name}
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" style={btnSm}
+                  onClick={() => setSelectedMemberIds(members.map((m) => String(m.member_id)))}>All</button>
+                <button type="button" style={btnSm}
+                  onClick={() => setSelectedMemberIds([])}>None</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Action area (back-mode candidate grid + buttons) */}
+          {panelMode === "back" && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: "bold", color: "var(--text-secondary)", marginBottom: 8 }}>
+                Attach back to:
+                {loadingCandidates && <span style={{ color: "var(--text-muted)", fontWeight: "normal", marginLeft: 6 }}>Loading...</span>}
+                {!loadingCandidates && candidates.length > 0 && (
+                  <span style={{ color: "var(--text-muted)", fontWeight: "normal", marginLeft: 6 }}>
+                    {candidates.length} candidate{candidates.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              {candidateError && <div style={{ color: "var(--error-text)", fontSize: "var(--text-base)", marginBottom: 8 }}>{candidateError}</div>}
+              <CandidateGrid candidates={candidates} selectedId={selectedCandidateId} onSelect={setSelectedCandidateId} />
+            </div>
+          )}
+
+          <div style={mobileStyles.actionBar}>
+            {panelMode === "front" && (
+              <button type="button" onClick={handleIngestFront} disabled={saving}
+                style={{ ...btnPrimary, width: "100%", padding: "10px 14px" }}>
+                {saving ? "Ingesting..." : "Ingest as Front"}
+              </button>
+            )}
+            {panelMode === "back" && candidates.length > 0 && (
+              <button type="button" onClick={handleAttachBack}
+                disabled={saving || !selectedCandidateId}
+                style={{ ...btnPrimary, width: "100%", padding: "10px 14px", opacity: !selectedCandidateId ? 0.6 : 1 }}>
+                {saving ? "Attaching..." : `Attach Back${selectedCandidateId ? ` → #${selectedCandidateId}` : ""}`}
+              </button>
+            )}
+            {panelMode === "pair" && (
+              <button type="button" onClick={handleIngestPair} disabled={saving}
+                style={{ ...btnPrimary, width: "100%", padding: "10px 14px" }}>
+                {saving ? "Ingesting..." : "Ingest as Front + Back"}
+              </button>
+            )}
+          </div>
+        </div>
+      </PageContainer>
+    );
   }
 
   return (

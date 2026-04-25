@@ -16,6 +16,7 @@ import {
 } from "../components/library/FilterSidebar";
 import { libraryState, persistMobileCardsPerRow } from "../photocardPageState";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
+import { usePageActions } from "../contexts/PageActionsContext";
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
@@ -330,6 +331,36 @@ export default function PhotocardLibraryPage() {
     [cards, selectedIds]
   );
 
+  // Register Sort + Select as TopNav icon buttons on mobile (page-actions context).
+  usePageActions(
+    [
+      {
+        id: "sort",
+        iconName: "sort",
+        kind: "menu",
+        label: "Sort",
+        value: sortMode,
+        options: SORT_OPTIONS,
+        onChange: (v) => { setSortMode(v); setPage(1); },
+      },
+      {
+        id: "select",
+        iconName: "select",
+        kind: "toggle",
+        label: selectMode ? "Done" : "Select",
+        active: selectMode,
+        onClick: () => {
+          if (selectMode) {
+            exitSelectMode();
+          } else {
+            setSelectMode(true);
+          }
+        },
+      },
+    ],
+    [sortMode, selectMode]
+  );
+
   if (loading) {
     return <div style={{ padding: 24 }}>Loading library...</div>;
   }
@@ -398,8 +429,8 @@ export default function PhotocardLibraryPage() {
             </div>
           </div>
 
-          {/* Sort */}
-          <div style={styles.controlGroup}>
+          {/* Sort (desktop only — mobile uses TopNav icon) */}
+          <div className="desktop-only" style={styles.controlGroup}>
             <span style={styles.controlLabel}>Sort</span>
             <select
               value={sortMode}
@@ -444,30 +475,34 @@ export default function PhotocardLibraryPage() {
             {sortedCards.length} cards
             {selectMode && selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
           </span>
-          {!selectMode ? (
+          {!selectMode && (
             <button
+              className="desktop-only"
               style={styles.controlBtn}
               onClick={() => setSelectMode(true)}
             >
               Select
             </button>
-          ) : (
-            <>
-              <button style={styles.controlBtn} onClick={handleSelectAll}>All ({sortedCards.length})</button>
-              <button style={styles.controlBtn} onClick={handleClearSelection}>Clear</button>
-              {selectedIds.size > 0 && (
-                <button
-                  style={{ ...styles.controlBtn, ...styles.primaryBtn }}
-                  onClick={() => setShowBulkEdit(true)}
-                >
-                  Bulk Edit
-                </button>
-              )}
-              <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
-            </>
           )}
         </div>
       </div>
+
+      {/* Select-mode toolbar — own row so card count stays on the main controls bar */}
+      {selectMode && (
+        <div style={styles.selectBar}>
+          <button style={styles.controlBtn} onClick={handleSelectAll}>All ({sortedCards.length})</button>
+          <button style={styles.controlBtn} onClick={handleClearSelection}>Clear</button>
+          {selectedIds.size > 0 && (
+            <button
+              style={{ ...styles.controlBtn, ...styles.primaryBtn }}
+              onClick={() => setShowBulkEdit(true)}
+            >
+              Bulk Edit
+            </button>
+          )}
+          <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
+        </div>
+      )}
 
       {/* Main content */}
       <div style={styles.body}>
@@ -500,29 +535,27 @@ export default function PhotocardLibraryPage() {
             mobileCardsPerRow={mobileCardsPerRow}
           />
         </div>
-
-        {/* Bulk edit panel (alongside grid) */}
-        {showBulkEdit && selectedCards.length > 0 && (
-          <div style={styles.bulkEditArea}>
-            <PhotocardBulkEdit
-              selectedCards={selectedCards}
-              categories={categories}
-              onClose={() => setShowBulkEdit(false)}
-              onSaved={async () => {
-                setShowBulkEdit(false);
-                exitSelectMode();
-                await reloadCards();
-              }}
-              onDeleted={async () => {
-                const deletedIds = new Set(selectedCards.map((c) => String(c.item_id)));
-                setCards((prev) => prev.filter((c) => !deletedIds.has(String(c.item_id))));
-                setShowBulkEdit(false);
-                exitSelectMode();
-              }}
-            />
-          </div>
-        )}
       </div>
+
+      {/* Bulk edit modal */}
+      {showBulkEdit && selectedCards.length > 0 && (
+        <PhotocardBulkEdit
+          selectedCards={selectedCards}
+          categories={categories}
+          onClose={() => setShowBulkEdit(false)}
+          onSaved={async () => {
+            setShowBulkEdit(false);
+            exitSelectMode();
+            await reloadCards();
+          }}
+          onDeleted={async () => {
+            const deletedIds = new Set(selectedCards.map((c) => String(c.item_id)));
+            setCards((prev) => prev.filter((c) => !deletedIds.has(String(c.item_id))));
+            setShowBulkEdit(false);
+            exitSelectMode();
+          }}
+        />
+      )}
 
       {/* Detail modal */}
       {detailCard && (
@@ -595,6 +628,16 @@ const styles = {
     alignItems: "center",
     gap: 6,
   },
+  selectBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 12px",
+    borderBottom: "1px solid var(--border)",
+    background: "var(--bg-surface)",
+    flexShrink: 0,
+    flexWrap: "wrap",
+  },
   controlGroup: {
     display: "flex",
     alignItems: "center",
@@ -664,11 +707,6 @@ const styles = {
   },
   gridArea: {
     flex: 1,
-    overflowY: "auto",
-    padding: 12,
-  },
-  bulkEditArea: {
-    flexShrink: 0,
     overflowY: "auto",
     padding: 12,
   },

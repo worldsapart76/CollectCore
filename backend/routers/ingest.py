@@ -226,7 +226,7 @@ def get_ingest_candidates(
     member_ids: Optional[List[int]] = Query(default=None),
     db=Depends(get_db),
 ):
-    from main import _PHOTOCARD_SELECT, _PHOTOCARD_GROUP_BY, _photocard_row_to_dict, _attach_copies
+    from routers.photocards import _PHOTOCARD_SELECT, _PHOTOCARD_GROUP_BY, _photocard_row_to_dict, _attach_copies
 
     having_clause = ""
     if missing_back_only:
