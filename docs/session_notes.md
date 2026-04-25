@@ -6,7 +6,15 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-04-26 — Cloudflare Access live (Phase 4/5 complete + credentials fix)
+### 2026-04-26 — Cloudflare Access live + responsive web Phase 1 (photocards mobile pass)
+
+Two big landings today: the auth gate is fully live (Phases 4+5 of last
+session's Cloudflare Access setup), AND the first major chunk of the responsive
+admin web pass is shipped. Photocards library now works on phones.
+
+---
+
+#### Thread 1 — Cloudflare Access Phase 4 + 5 (auth gate fully live)
 
 Finished the auth gate. The apex SPA + API are now gated by Google login at
 Cloudflare's edge, with `/catalog/*` bypassed for the future guest webview.
@@ -40,20 +48,173 @@ the Cloudflare Access cookie. Two changes:
    without touching each one. Also added explicit credentials to the one
    stray fetch in [TopNav.jsx:48](frontend/src/components/layout/TopNav.jsx#L48).
 
-Built + pushed; Railway deployed; verified the SPA loads data after refresh.
+---
 
-**Status:** apex auth fully live. Mobile-friendly responsive web pass is
-the next priority (Thread 9 from previous session).
+#### Thread 2 — Responsive web Phase 1: mobile chrome (filter drawer + nav drawer + full-screen modals)
+
+First commit at this layer (`81e7108`) tried a bottom-right "Filters" FAB,
+which the user immediately rejected: the FAB misused the hamburger glyph
+(which conventionally means "main menu" not "filters") and stole content
+real estate. Revised approach (`9095739`):
+
+- Two icon-only buttons in the TopNav on mobile: hamburger (☰) at left edge,
+  funnel filter icon at right edge. Brand centered between them
+  (better one-handed phone use). Funnel only renders when the current page
+  has a filter sidebar.
+- TopNav ↔ FilterSidebar communicate via custom events: FilterSidebarShell
+  dispatches `collectcore:filters-available` on mount/unmount; TopNav listens
+  to know whether to show the icon. TopNav button click dispatches
+  `collectcore:filters-toggle`; FilterSidebarShell listens to open/close.
+  Decoupled — no shared store.
+- Hamburger drawer slides from LEFT, contains module switcher + module nav
+  links + Admin + theme toggle + Exit. Nav drawer header was originally a
+  Menu label + close ×; the × was removed (`ee0b5c9`) because backdrop tap
+  + ESC are sufficient.
+- Filter drawer slides from RIGHT (deliberately opposite the nav drawer to
+  avoid visual confusion when closed). Originally had its own close × in the
+  header; removed in commit `2459f1a` because it was confusing alongside the
+  filter-clear × button (also a × glyph). Both drawers now rely on backdrop
+  tap / ESC for dismiss.
+- All existing TopNav clusters (module switcher, nav links, Admin/theme/Exit)
+  marked `.topnav-desktop-only` and hidden on `(max-width: 768px)`.
+- Drawer width tightened from 280px → 170px (`5ce72af`) — user feedback that
+  the original drawers wasted real estate; ~40% trim was the request.
+- Modal primitive ([primitives.css](frontend/src/styles/primitives.css)):
+  on `(max-width: 640px)` the `.cc-modal` overrides max-width and
+  border-radius to fill the entire viewport. Auto-applies to every detail
+  modal across all 8 modules.
+
+---
+
+#### Thread 3 — Photocard library: mobile controls + cards-per-row + infinite scroll
+
+Major rework of the photocard library page on mobile only — desktop layout
+unchanged (commit `319e86a`).
+
+**Hidden on `(max-width: 768px)`:**
+- VIEW Fronts/Fronts+Backs toggle (use detail modal for backs instead)
+- SIZE S/M/L picker (replaced with Cards-per-row stepper)
+- PER PAGE dropdown (replaced with infinite scroll)
+- Pagination buttons at the bottom of the grid
+
+**New on mobile:**
+- "Per row" stepper (− N +), range 2–8. Persisted to localStorage in
+  [photocardPageState.js](frontend/src/photocardPageState.js#L1) (commit
+  `ee0b5c9` — module-level libraryState alone only survives in-tab navigation,
+  not full page refresh).
+- Grid layout switches from flex-wrap to CSS grid with
+  `repeat(var(--mobile-cards-per-row), 1fr)`. Cells get
+  `aspect-ratio: 100/138` so heights derive from container width — no fixed
+  pixel sizing on mobile, which means card sizes always fill the screen
+  edge-to-edge regardless of viewport, with no wasted whitespace at the
+  user's chosen density.
+- Forced fronts-only viewMode on mobile (`effectiveViewMode = "fronts"` in
+  [PhotocardGrid.jsx](frontend/src/components/photocard/PhotocardGrid.jsx#L188)),
+  so column widths stay consistent.
+- Infinite scroll via IntersectionObserver. 30 cards initially, +30 when a
+  sentinel near the bottom enters viewport (400px rootMargin). Resets on
+  filter/sort change (cards prop reference changes via parent useMemo).
+- Badge scaling via CSS container queries (commit `5ce72af`) — `.photocard-cell`
+  gets `container-type: inline-size`; ownership/back/special/select badges
+  use `cqw` units (≈10–22% of cell width) so they shrink with the cards.
+  At 8 cards/row on a phone the previous fixed 20px badges were hilariously
+  oversized.
+- Added `.desktop-only` and `.mobile-only` utility classes for show/hide
+  across viewports. Used in the photocard controls bar; other modules can
+  adopt the same pattern.
+
+**Bugs surfaced and fixed during testing:**
+- GN + Music library pages each wrap their FilterSidebarShell in an outer
+  `<div style={{ width: 220, flexShrink: 0 }}>` (lines
+  [GN:1076](frontend/src/pages/GraphicNovelsLibraryPage.jsx#L1076) and
+  [Music:927](frontend/src/pages/MusicLibraryPage.jsx#L927)). The inner shell
+  becomes `position: fixed` on mobile but the outer wrapper stayed in flex
+  flow → 220px blank gap where the sidebar used to be. **Fix:** added
+  `library-sidebar-wrap` class with `display: contents !important` on mobile
+  (commit `2459f1a`). Wrapper vanishes from layout while children layout
+  normally.
+- IntersectionObserver was firing once on initial mount and never again —
+  the `root` defaulted to viewport, but scrolling actually happens inside
+  an inner `gridArea` div with `overflowY: auto`. Walk up the DOM to find
+  the closest scrollable ancestor and pass it as `root` (`findScrollParent`
+  helper). Also added `mobileVisible` to the effect deps so the observer
+  is re-created after each batch — guarantees a fresh intersection check
+  fires if the sentinel is still visible after the +30 (commit `2459f1a`).
+
+**Memory captured:** Created
+[`project_guest_ui_simplifications.md`](C:/Users/world/.claude/projects/c--Dev-CollectCore/memory/project_guest_ui_simplifications.md)
+to track admin-only controls that should be hidden in the guest webview build.
+First entry: photocard SORT dropdown — with a 10K+ catalog and no pagination on
+mobile, sort is rarely the right primitive; guests will reach subsets via
+filtering. Pin sortMode = "default" and don't render the dropdown when
+`VITE_IS_ADMIN` is not set.
+
+---
+
+**Commits today (in order):**
+- `3d264a6` auth: send credentials on SPA→API fetches for Cloudflare Access
+- `ba3bd72` docs: capture Cloudflare Access live + credentials fix
+- `81e7108` responsive: mobile filter drawer + full-screen modals (≤768/640px)
+- `9095739` responsive: relocate mobile toggles into TopNav, add nav drawer
+- `319e86a` responsive: photocard library — cards-per-row + infinite scroll on mobile
+- `2459f1a` fix(responsive): GN/Music sidebar gap, infinite-scroll stuck, redundant close X
+- `ee0b5c9` responsive: persist cards-per-row, center brand on mobile, drop nav drawer X
+- `5ce72af` responsive: scale photocard badges with cell width, narrow drawers 40%
+
+**Known issues to pick up next session:**
+
+1. **Bulk edit modal cuts off on mobile.** When entering select mode + bulk
+   edit on the photocard library, the bulk-edit panel overflows the viewport.
+   Likely related to the page layout where `bulkEditArea` renders alongside
+   the grid via `display: flex` — on mobile we need a different presentation
+   (probably a bottom sheet / full-screen drawer rather than a side panel).
+   Touch
+   [PhotocardLibraryPage.jsx:489-508](frontend/src/pages/PhotocardLibraryPage.jsx#L489).
+
+2. **Per-module mobile testing pass.** User stated they need to go into each
+   of the 8 modules (Photocards / Books / Graphic Novels / Music / Video /
+   Video Games / TTRPG / Board Games) and manually test on mobile, surfacing
+   per-module tweaks. Photocards is the only one fully redone today.
+   Books / GN / Music / Video / VG / TTRPG / Boardgames libraries all still
+   use their desktop-only S/M/L+pagination patterns at all viewports — no
+   responsive overhaul yet on those pages, just the shared filter drawer
+   from Thread 2 and the shared modal primitive from Thread 2.
+
+3. **Sort + Select icons in TopNav (was commit 2 of original plan, deferred).**
+   Original Phase 1 plan had moving photocard sort + select toggle into the
+   TopNav as additional icon buttons (next to the funnel) — the page-actions
+   pattern via context. Decided to ship Phase 1 first (cards-per-row +
+   infinite scroll) and revisit after testing. This is still on the table.
+
+4. **Per-row stepper UX.** Currently a − / N / + stepper. Could be a slider
+   or dropdown if the stepper feels clumsy on phones. Wait for user feedback.
+
+5. **Tables on mobile.** Books / Music / Video / etc. tables (the ones using
+   `<table>` for library views) likely overflow horizontally on phones. Not
+   yet addressed. Options: horizontal scroll wrapper (cheap MVP), card-style
+   restacking (best UX, more work), or column-hide via media queries.
+
+**Status:** apex auth fully live. Photocard library mobile-responsive.
+Other modules' libraries inherit the shared filter drawer + modal full-screen
+behavior but their controls bars and grids/tables haven't been adapted yet.
 
 **Next session:**
-1. Begin responsive admin web work. Mobile-friendly layout pass on library +
-   ingest pages. CSS variable system already in place; needs media queries +
-   touch-target sizing + collapse-to-drawer for the filter sidebar.
-2. After responsive admin lands: plan the guest webview. WASM SQLite library
-   selection (sqlite-wasm vs sql.js vs libsql/client-wasm), guest build mode
-   (probably `VITE_GUEST=true` toggling api.js to use local SQLite instead of
-   fetch), `guest.collectcoreapp.com` Railway custom domain, Cloudflare Access
-   bypass rule.
+1. **Per-module mobile testing pass.** User runs through each module on
+   their phone, lists tweaks needed.
+2. **Bulk edit modal mobile fix** — likely a structural change to the
+   library page layout when in select mode on mobile.
+3. **Books / GN / Music / Video / Video Games / TTRPG / Board Games library
+   pages** — port the same responsive treatment as photocards: hide
+   desktop-only controls on mobile, add a cards-per-row equivalent (or
+   appropriate density control), infinite scroll where applicable, mobile
+   table strategy where applicable.
+4. **Ingest pages** — forms within `PageContainer`. Inputs probably need
+   width tightening + grid layouts collapsing to single-column on mobile.
+5. **Touch-target sizing pass** — ensure buttons / checkboxes hit 44px
+   minimum on mobile via primitives.css.
+6. **Sort + Select TopNav icons** (deferred Phase 1 commit 2).
+7. **Guest webview** — kicks off after responsive admin lands and the user
+   feels good about phone usability.
 
 ---
 
