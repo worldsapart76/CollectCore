@@ -47,6 +47,29 @@ def _run_migrations(conn) -> None:
             "UPDATE lkup_graphicnovel_eras SET is_active = 0 WHERE era_name = 'Copper Age'"
         )
 
+    # Migration: rewrite R2 dev URLs (pub-*.r2.dev) to the custom domain.
+    # The dev URL is throttled by Cloudflare; the custom domain routes through
+    # the full CDN. Idempotent — REPLACE matches no rows after first run.
+    _OLD_HOST = "https://pub-8156609abf504c058e10ac0f5b7f6e95.r2.dev"
+    _NEW_HOST = "https://images.collectcoreapp.com"
+    _REWRITE_TARGETS = [
+        ("tbl_attachments", "file_path"),
+        ("tbl_book_copies", "cover_image_url"),
+        ("tbl_graphicnovel_details", "cover_image_url"),
+        ("tbl_game_details", "cover_image_url"),
+        ("tbl_music_release_details", "cover_image_url"),
+        ("tbl_video_details", "cover_image_url"),
+        ("tbl_boardgame_details", "cover_image_url"),
+    ]
+    for tbl, col in _REWRITE_TARGETS:
+        if tbl in tables:
+            cur = raw.execute(
+                f"UPDATE {tbl} SET {col} = REPLACE({col}, ?, ?) WHERE {col} LIKE ?",
+                (_OLD_HOST, _NEW_HOST, f"{_OLD_HOST}%"),
+            )
+            if cur.rowcount > 0:
+                logger.info("R2 host rewrite: %s.%s -> %d rows", tbl, col, cur.rowcount)
+
 
 def _seed_status_visibility_xref(conn) -> None:
     """Idempotent maintenance for status-visibility xref tables.
