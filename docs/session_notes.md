@@ -271,19 +271,76 @@ HTTP basic auth, Auth0/Clerk/Firebase, or roll-your-own). Reasoning:
   - Clients tab: pending (Web application, name "CollectCore Cloudflare
     Access", redirect URI `https://collectcore.cloudflareaccess.com/cdn-cgi/access/callback`)
 
-**Phases remaining (next session):**
-- Phase 2: finish Branding/Data Access/Clients tabs in Google Cloud Console
-- Phase 3: paste Google client ID + secret into Cloudflare Zero Trust →
-  Settings → Authentication
-- Phase 4: create Cloudflare Access Application covering both
-  `collectcoreapp.com` AND `api.collectcoreapp.com` (single application,
-  multiple domains so cookies are shared across subdomains). Policies:
-  - Allow rule: emails == [yours, husband's]
-  - **Bypass rule for path `/catalog/*`** so the future guest webview can
-    pull the read-only catalog snapshot + deltas without authentication
-  - Enable CORS preflight allowance
-- Phase 5: incognito test of `https://collectcoreapp.com` → Google login
-  → admin UI
+**Phases status at session-end:**
+- Phase 1 ✓ Cloudflare Zero Trust account created. Team: `collectcore`,
+  team domain `collectcore.cloudflareaccess.com`.
+- Phase 2 ✓ Google OAuth client created. Project "CollectCore Auth" under
+  worldsapart76@gmail.com. Audience=External, Testing publishing status.
+  Test users: worldsapart76@gmail.com + husband. Scopes: openid,
+  userinfo.email, userinfo.profile. Web application client with redirect
+  URI `https://collectcore.cloudflareaccess.com/cdn-cgi/access/callback`.
+  Client ID + Secret in user's possession.
+- Phase 3 ✓ Google IdP added to Cloudflare Zero Trust (under **Integrations
+  → Identity providers**, NOT Settings → Authentication — Cloudflare moved
+  the menu). Test connection succeeded — JSON returned name + email correctly.
+- Phase 4 IN PROGRESS at session-end. Steps to complete:
+  - Cloudflare Zero Trust → Access controls → Applications → +Add an
+    application → **Self-hosted**
+  - Application name: `CollectCore`
+  - **Session duration: 1 month** (default 24h is too aggressive for a bookmark-and-go household app)
+  - Application domains (TWO entries on a single app, so they share cookies):
+    - `collectcoreapp.com` (apex, blank subdomain, blank path)
+    - `api.collectcoreapp.com` (subdomain `api`, blank path)
+  - Identity providers: **Google** only. Enable "Instant auth" if available
+    to skip the IdP picker screen (only one IdP).
+  - **CORS settings (CRITICAL — expand the section, it's collapsed by default):**
+    - Allow credentials: ON
+    - Allowed origins: `https://collectcoreapp.com`
+    - Allowed methods: GET, POST, PUT, DELETE, OPTIONS
+    - Allowed headers: all (or Content-Type, Authorization)
+  - Two policies, IN ORDER (Bypass must come before Allow):
+    1. **Bypass policy** — Action=Bypass, name=`Catalog public bypass`,
+       Include=Everyone, Path=starts with `/catalog/`, Hostname=`api.collectcoreapp.com`.
+       (If the policy editor doesn't have a Path field, may need a separate
+       Application entry for `api.collectcoreapp.com/catalog/` with its own
+       Bypass policy. Cloudflare's UI varies.)
+    2. **Allow policy** — Action=Allow, name=`Household admins`,
+       Include=Emails=[worldsapart76@gmail.com, husband's email],
+       session duration=inherit (1 month).
+- Phase 5 (verify, after Phase 4 saves):
+  - Open incognito window
+  - Visit `https://collectcoreapp.com` → expect Google sign-in flow → SPA
+  - Visit `https://api.collectcoreapp.com/catalog/version` → expect JSON,
+    no login (proves bypass works)
+  - Visit `https://api.collectcoreapp.com/photocards` → expect login
+    redirect (proves API is gated)
+  - Keep main browser logged in; don't log out until incognito test passes
+
+**KNOWN POST-AUTH CAVEATS — fix immediately after Phase 4 goes live:**
+
+Once Cloudflare Access is gating `api.collectcoreapp.com`, the SPA at apex
+will need to send cookies on its cross-origin fetches to api. Two changes
+required (NOT YET MADE):
+
+1. **Frontend:** the SPA's `api.js` fetch calls need `credentials: 'include'`.
+   Without it, browsers don't send cross-origin cookies, so every API call
+   from the SPA will hit Cloudflare Access and bounce back to login (infinite
+   loop). Search for `fetch(` in `frontend/src/api.js` and add
+   `credentials: 'include'` to the options. Build + deploy.
+2. **Backend:** FastAPI's `CORSMiddleware` in `main.py` line 36-41 needs
+   `allow_credentials=True` added. Without it, the browser refuses to
+   trust the response from a credentialed request. After this change,
+   `allow_origins=["*"]` is no longer permitted (CORS spec); the explicit
+   list in `_cors_origins` already satisfies this.
+
+If the apex SPA can't reach the API after Phase 4 lands, the credentials
+caveats above are the first thing to check.
+
+**Reversibility note:** Cloudflare Access is trivially reversible. Delete
+the Access Application + the Google IdP + the Google OAuth client = gate
+disappears, no code to revert, ~5 min to unwind. The credentials changes
+in api.js + main.py are also harmless to leave in place even if Access is
+removed (just unused capability).
 
 ---
 
