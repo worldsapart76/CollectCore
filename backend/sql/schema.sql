@@ -1718,48 +1718,10 @@ INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES (
 
 
 -- ============================================================
--- STATUS VISIBILITY SEED DATA (xref tables)
--- All modules get all ownership statuses by default (editable via Admin > Status Visibility).
--- Consumption statuses are seeded per-module matching their actual usage.
+-- STATUS VISIBILITY xref tables
+-- Seeding moved to backend/db.py _seed_status_visibility_xref().
+-- Reason: re-running the seed on every startup overwrote user toggles
+-- made via Admin > Status Visibility (INSERT OR IGNORE re-added rows
+-- the user had explicitly deleted). The Python seed only runs on a
+-- truly fresh DB and also cleans up orphan collection_type_id rows.
 -- ============================================================
-
--- Ownership: all active statuses × all active modules (except Catalog, which is photocards-only)
-INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
-SELECT s.ownership_status_id, c.collection_type_id
-FROM lkup_ownership_statuses s, lkup_collection_types c
-WHERE s.is_active = 1 AND c.is_active = 1
-  AND s.status_code != 'catalog';
-
--- Catalog: photocards only (guest-tier marker; hidden from admin UI via VITE_IS_ADMIN)
-INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
-SELECT s.ownership_status_id, c.collection_type_id
-FROM lkup_ownership_statuses s, lkup_collection_types c
-WHERE s.status_code = 'catalog' AND c.collection_type_code = 'photocards';
-
--- Consumption: Books
-INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
-SELECT cs.read_status_id, ct.collection_type_id
-FROM lkup_consumption_statuses cs, lkup_collection_types ct
-WHERE ct.collection_type_code = 'books'
-  AND cs.status_name IN ('Read', 'Currently Reading', 'Want to Read', 'DNF');
-
--- Consumption: Graphic Novels (excludes Currently Reading and DNF per historical hidden set)
-INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
-SELECT cs.read_status_id, ct.collection_type_id
-FROM lkup_consumption_statuses cs, lkup_collection_types ct
-WHERE ct.collection_type_code = 'graphicnovels'
-  AND cs.status_name IN ('Read', 'Want to Read');
-
--- Consumption: Video Games
-INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
-SELECT cs.read_status_id, ct.collection_type_id
-FROM lkup_consumption_statuses cs, lkup_collection_types ct
-WHERE ct.collection_type_code = 'videogames'
-  AND cs.status_name IN ('Played', 'Playing', 'Want to Play', 'Abandoned');
-
--- Consumption: Video
-INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
-SELECT cs.read_status_id, ct.collection_type_id
-FROM lkup_consumption_statuses cs, lkup_collection_types ct
-WHERE ct.collection_type_code = 'video'
-  AND cs.status_name IN ('Watched', 'Currently Watching', 'Want to Watch', 'Abandoned');

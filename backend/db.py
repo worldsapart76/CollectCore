@@ -48,6 +48,65 @@ def _run_migrations(conn) -> None:
         )
 
 
+def _seed_status_visibility_xref(conn) -> None:
+    """Idempotent maintenance for status-visibility xref tables.
+
+    1. Cleans up orphan collection_type_ids left behind by the canonicalize
+       migration (FK references to ids that no longer exist in
+       lkup_collection_types).
+    2. Seeds the xref tables ONCE on a fresh DB. If either xref table is
+       non-empty, the seed is skipped — preserving any user toggles made
+       via Admin > Status Visibility across restarts.
+    """
+    raw = conn.connection
+
+    raw.execute("""
+        DELETE FROM xref_ownership_status_modules
+        WHERE collection_type_id NOT IN (SELECT collection_type_id FROM lkup_collection_types)
+    """)
+    raw.execute("""
+        DELETE FROM xref_consumption_status_modules
+        WHERE collection_type_id NOT IN (SELECT collection_type_id FROM lkup_collection_types)
+    """)
+
+    own_count = raw.execute("SELECT COUNT(*) FROM xref_ownership_status_modules").fetchone()[0]
+    if own_count == 0:
+        raw.execute("""
+            INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
+            SELECT s.ownership_status_id, c.collection_type_id
+            FROM lkup_ownership_statuses s, lkup_collection_types c
+            WHERE s.is_active = 1 AND c.is_active = 1 AND s.status_code != 'catalog'
+        """)
+        raw.execute("""
+            INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
+            SELECT s.ownership_status_id, c.collection_type_id
+            FROM lkup_ownership_statuses s, lkup_collection_types c
+            WHERE s.status_code = 'catalog' AND c.collection_type_code = 'photocards'
+        """)
+        logger.info("Seeded xref_ownership_status_modules (fresh DB)")
+
+    cons_count = raw.execute("SELECT COUNT(*) FROM xref_consumption_status_modules").fetchone()[0]
+    if cons_count == 0:
+        for ct_code, names in [
+            ("books", ("Read", "Currently Reading", "Want to Read", "DNF")),
+            ("graphicnovels", ("Read", "Want to Read")),
+            ("videogames", ("Played", "Playing", "Want to Play", "Abandoned")),
+            ("video", ("Watched", "Currently Watching", "Want to Watch", "Abandoned")),
+        ]:
+            placeholders = ",".join("?" * len(names))
+            raw.execute(
+                f"""
+                INSERT OR IGNORE INTO xref_consumption_status_modules (read_status_id, collection_type_id)
+                SELECT cs.read_status_id, ct.collection_type_id
+                FROM lkup_consumption_statuses cs, lkup_collection_types ct
+                WHERE ct.collection_type_code = ?
+                  AND cs.status_name IN ({placeholders})
+                """,
+                (ct_code, *names),
+            )
+        logger.info("Seeded xref_consumption_status_modules (fresh DB)")
+
+
 def init_db() -> None:
     if not SCHEMA_PATH.exists():
         raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
@@ -59,3 +118,4 @@ def init_db() -> None:
         _run_migrations(conn)
         raw_conn = conn.connection
         raw_conn.executescript(schema_sql)
+        _seed_status_visibility_xref(conn)
