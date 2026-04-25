@@ -19,6 +19,7 @@ import PageContainer from "../components/layout/PageContainer";
 import { API_BASE } from "../utils/imageUrl";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import { useMediaQuery, MOBILE_BREAKPOINT } from "../components/library/mobileGrid";
+import { usePageActions } from "../contexts/PageActionsContext";
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
@@ -452,6 +453,9 @@ export default function InboxPage() {
 
   // Mobile-only state
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const mobileUploadRef = useRef(null);
+  const [mobileUploading, setMobileUploading] = useState(false);
+  const [mobileUploadError, setMobileUploadError] = useState("");
 
   // ── Initial load ──
   useEffect(() => {
@@ -724,6 +728,41 @@ export default function InboxPage() {
     });
   }
 
+  // ── Mobile-only upload handler (triggered from TopNav upload icon) ──
+  async function handleMobileFiles(files) {
+    if (!files || !files.length) return;
+    setMobileUploading(true);
+    setMobileUploadError("");
+    const results = [];
+    for (const file of files) {
+      try {
+        results.push(await uploadToInbox(file));
+      } catch (err) {
+        setMobileUploadError(`Failed to upload ${file.name}: ${err.message}`);
+      }
+    }
+    setMobileUploading(false);
+    if (results.length) handleUploaded(results);
+  }
+
+  // Register Upload icon in TopNav on mobile.
+  usePageActions(
+    isMobile
+      ? [{
+          id: "upload",
+          iconName: "upload",
+          kind: "toggle",
+          label: mobileUploading ? "Uploading…" : "Upload",
+          active: mobileUploading,
+          onClick: () => {
+            if (mobileUploading) return;
+            mobileUploadRef.current?.click();
+          },
+        }]
+      : [],
+    [isMobile, mobileUploading]
+  );
+
   if (loadingLookups) {
     return <PageContainer><div style={{ padding: 20 }}>Loading...</div></PageContainer>;
   }
@@ -735,7 +774,22 @@ export default function InboxPage() {
     return (
       <PageContainer>
         <div style={mobileStyles.page}>
-          <UploadZone onUploaded={handleUploaded} />
+          {/* Hidden file input — driven by the TopNav upload icon. */}
+          <input
+            ref={mobileUploadRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = "";
+              handleMobileFiles(files);
+            }}
+          />
+          {mobileUploadError && (
+            <div style={alertError}>{mobileUploadError}</div>
+          )}
 
           {/* Horizontal scrollable thumbnail strip — image-only, F/B badge, remove.
               Selected thumbs grow to 2× in place so the user gets a bigger view
