@@ -785,37 +785,131 @@ select {
   background: var(--bg-surface);
 }
 
-/* ── Responsive: filter sidebar drawer (≤768px) ──────────────────────────────── */
+/* ── Responsive: TopNav mobile controls + filter drawer (≤768px) ─────────────── */
 
-/* Default (desktop): sidebar renders inline; FAB and backdrop hidden. */
-.filter-sidebar-fab,
+/* Default (desktop): mobile-only chrome hidden; backdrops hidden. */
+.topnav-mobile-controls,
+.topnav-nav-backdrop,
+.topnav-nav-drawer,
 .filter-sidebar-backdrop {
   display: none;
 }
 
 @media (max-width: 768px) {
-  /* Floating "Filters" toggle, bottom-right. Only visible on small viewports. */
-  .filter-sidebar-fab {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    bottom: 16px;
-    right: 16px;
-    z-index: 990;
-    height: 48px;
-    padding: 0 18px;
-    border: none;
-    border-radius: 999px;
-    background: var(--btn-primary-bg);
-    color: var(--btn-primary-text);
-    font-weight: 600;
-    font-size: var(--text-md);
-    box-shadow: var(--shadow-card-hover);
-    cursor: pointer;
-    gap: 6px;
+  /* --- Hide desktop topnav items, show mobile controls --- */
+  .topnav-desktop-only {
+    display: none !important;
   }
 
+  .topnav-mobile-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+  }
+
+  .topnav-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .topnav-icon-btn:hover {
+    background: var(--green-light);
+    color: var(--green);
+  }
+  .topnav-icon-btn:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  /* --- Mobile nav drawer (slides in from left) --- */
+  .topnav-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 999;
+  }
+
+  .topnav-nav-drawer {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-modal);
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
+  }
+  .topnav-nav-drawer.open {
+    transform: translateX(0);
+  }
+
+  .topnav-nav-drawer__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .topnav-nav-drawer__section {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 8px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .topnav-nav-drawer__section:last-child {
+    border-bottom: none;
+  }
+
+  .topnav-nav-drawer__label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 6px 8px;
+  }
+
+  .topnav-nav-drawer__item {
+    display: block;
+    text-align: left;
+    padding: 12px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    text-decoration: none;
+    font: inherit;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .topnav-nav-drawer__item:hover {
+    background: var(--green-light);
+  }
+  .topnav-nav-drawer__item.active {
+    background: var(--green-light);
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* --- Filter sidebar slides in from the right as a drawer --- */
   .filter-sidebar-backdrop {
     display: block;
     position: fixed;
@@ -824,21 +918,20 @@ select {
     z-index: 999;
   }
 
-  /* Sidebar slides in from the left as a drawer. The !important overrides the
-     inline width:180 set by FilterSidebarShell for desktop. */
   .filter-sidebar-drawer {
     position: fixed !important;
     top: 0;
-    left: 0;
+    right: 0;
     bottom: 0;
     width: 280px !important;
     max-width: 85vw;
     z-index: 1000;
-    transform: translateX(-100%);
+    transform: translateX(100%);
     transition: transform 0.25s ease;
     box-shadow: var(--shadow-modal);
+    border-right: none !important;
+    border-left: 1px solid var(--border);
   }
-
   .filter-sidebar-drawer.open {
     transform: translateX(0);
   }
@@ -848,7 +941,7 @@ select {
     display: inline-block !important;
   }
 
-  /* Lock background scroll while drawer is open. */
+  /* Lock background scroll while either drawer is open. */
   body.filter-drawer-open {
     overflow: hidden;
   }

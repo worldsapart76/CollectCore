@@ -644,6 +644,18 @@ export function FilterSidebarShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Tell the TopNav this page has a filter sidebar so it can show the filter
+  // icon button. Listen for that button's toggle event to open/close the drawer.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("collectcore:filters-available", { detail: true }));
+    const toggle = () => setMobileOpen(v => !v);
+    window.addEventListener("collectcore:filters-toggle", toggle);
+    return () => {
+      window.dispatchEvent(new CustomEvent("collectcore:filters-available", { detail: false }));
+      window.removeEventListener("collectcore:filters-toggle", toggle);
+    };
+  }, []);
+
   useEffect(() => {
     if (!mobileOpen) return;
     document.body.classList.add("filter-drawer-open");
@@ -657,23 +669,6 @@ export function FilterSidebarShell({
 
   return (
     <>
-      <button
-        type="button"
-        className="filter-sidebar-fab"
-        onClick={() => setMobileOpen(true)}
-        aria-label="Open filters"
-      >
-        ☰ Filters
-        {hasFilters && (
-          <span style={{
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "var(--green-vivid)",
-          }} />
-        )}
-      </button>
       {mobileOpen && (
         <div
           className="filter-sidebar-backdrop"

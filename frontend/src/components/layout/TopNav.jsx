@@ -12,12 +12,37 @@ export default function TopNav({ theme, toggleTheme }) {
   const [isShuttingDown, setIsShuttingDown] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [enabledModuleIds, setEnabledModuleIds] = useState([]);
+  const [navDrawerOpen, setNavDrawerOpen] = useState(false);
+  const [filtersAvailable, setFiltersAvailable] = useState(false);
   const dropdownRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
 
   const activeModuleId = getActiveModuleId(location.pathname);
   const activeModule = activeModuleId ? MODULE_DEFS[activeModuleId] : null;
+
+  // Listen for FilterSidebarShell mount/unmount so we know whether to show the
+  // filter icon button on mobile.
+  useEffect(() => {
+    const handler = (e) => setFiltersAvailable(!!e.detail);
+    window.addEventListener("collectcore:filters-available", handler);
+    return () => window.removeEventListener("collectcore:filters-available", handler);
+  }, []);
+
+  // Close nav drawer on route change.
+  useEffect(() => { setNavDrawerOpen(false); }, [location.pathname]);
+
+  // ESC closes nav drawer + body scroll lock while it's open.
+  useEffect(() => {
+    if (!navDrawerOpen) return;
+    document.body.classList.add("filter-drawer-open");
+    const onKey = (e) => { if (e.key === "Escape") setNavDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("filter-drawer-open");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [navDrawerOpen]);
 
   useEffect(() => {
     fetchSettings()
@@ -82,8 +107,44 @@ export default function TopNav({ theme, toggleTheme }) {
     .filter(Boolean)
     .sort((a, b) => a.label.localeCompare(b.label));
 
+  const HamburgerIcon = () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+
+  const FilterIcon = () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  );
+
   return (
     <header className="topnav">
+      {/* Mobile-only controls (hamburger + filter), hidden on desktop */}
+      <div className="topnav-mobile-controls">
+        <button
+          type="button"
+          className="topnav-icon-btn"
+          onClick={() => setNavDrawerOpen(true)}
+          aria-label="Open menu"
+        >
+          <HamburgerIcon />
+        </button>
+        {filtersAvailable && (
+          <button
+            type="button"
+            className="topnav-icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent("collectcore:filters-toggle"))}
+            aria-label="Open filters"
+          >
+            <FilterIcon />
+          </button>
+        )}
+      </div>
+
       <div className="topnav-left">
         {/* Logo */}
         <NavLink to="/" className="topnav-brand" style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -93,7 +154,7 @@ export default function TopNav({ theme, toggleTheme }) {
 
         {/* Module switcher dropdown */}
         {activeModule && (
-          <div className="module-switcher" ref={dropdownRef} style={{ position: "relative" }}>
+          <div className="module-switcher topnav-desktop-only" ref={dropdownRef} style={{ position: "relative" }}>
             <button
               className="module-switcher-btn"
               onClick={() => setDropdownOpen(o => !o)}
@@ -121,7 +182,7 @@ export default function TopNav({ theme, toggleTheme }) {
 
         {/* Module-specific nav links */}
         {activeModule && (
-          <nav className="topnav-links">
+          <nav className="topnav-links topnav-desktop-only">
             {activeModule.links.map(link => (
               <NavLink key={link.to} to={link.to} className={navClass}>
                 {link.label}
@@ -131,7 +192,7 @@ export default function TopNav({ theme, toggleTheme }) {
         )}
       </div>
 
-      <div className="topnav-right">
+      <div className="topnav-right topnav-desktop-only">
         <NavLink to="/admin" className={navClass}>
           Admin
         </NavLink>
@@ -152,6 +213,81 @@ export default function TopNav({ theme, toggleTheme }) {
           Exit
         </button>
       </div>
+
+      {/* Mobile nav drawer — consolidates everything from topnav-right + module switcher */}
+      {navDrawerOpen && (
+        <div
+          className="topnav-nav-backdrop"
+          onClick={() => setNavDrawerOpen(false)}
+        />
+      )}
+      <aside className={`topnav-nav-drawer${navDrawerOpen ? " open" : ""}`} aria-hidden={!navDrawerOpen}>
+        <div className="topnav-nav-drawer__header">
+          <span style={{ fontWeight: 700, fontSize: 14 }}>Menu</span>
+          <button
+            type="button"
+            className="topnav-icon-btn"
+            onClick={() => setNavDrawerOpen(false)}
+            aria-label="Close menu"
+          >
+            ×
+          </button>
+        </div>
+
+        {activeModule && (
+          <div className="topnav-nav-drawer__section">
+            <div className="topnav-nav-drawer__label">Module</div>
+            {enabledModules.map(mod => (
+              <button
+                key={mod.id}
+                type="button"
+                className={`topnav-nav-drawer__item${mod.id === activeModuleId ? " active" : ""}`}
+                onClick={() => navigate(mod.primaryPath)}
+              >
+                {mod.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeModule && (
+          <div className="topnav-nav-drawer__section">
+            <div className="topnav-nav-drawer__label">{activeModule.label}</div>
+            {activeModule.links.map(link => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
+              >
+                {link.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+
+        <div className="topnav-nav-drawer__section">
+          <NavLink
+            to="/admin"
+            className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
+          >
+            Admin
+          </NavLink>
+          <button
+            type="button"
+            className="topnav-nav-drawer__item"
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}
+          </button>
+          <button
+            type="button"
+            className="topnav-nav-drawer__item"
+            onClick={handleExit}
+          >
+            Exit
+          </button>
+        </div>
+      </aside>
     </header>
   );
 }
