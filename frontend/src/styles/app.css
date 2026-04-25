@@ -937,11 +937,6 @@ select {
     transform: translateX(0);
   }
 
-  /* Drawer header gets a close X button only on mobile. */
-  .filter-sidebar-close {
-    display: inline-block !important;
-  }
-
   /* Lock background scroll while either drawer is open. */
   body.filter-drawer-open {
     overflow: hidden;
@@ -953,6 +948,13 @@ select {
   }
   .mobile-only {
     display: flex;
+  }
+
+  /* Library pages that wrap FilterSidebarShell in an outer fixed-width div
+     (Music, GN) need the wrapper to vanish on mobile so the inner drawer
+     (position: fixed) doesn't leave a 220px blank gap in the layout. */
+  .library-sidebar-wrap {
+    display: contents !important;
   }
 
   /* --- Photocard grid: switch from flex-wrap to a fixed N-cards-per-row grid. --- */

@@ -705,37 +705,16 @@ export function FilterSidebarShell({
           >
             Filters
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {hasFilters && (
-              <button
-                type="button"
-                onClick={onClearAll}
-                title="Clear all filters"
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  lineHeight: 1,
-                  color: "var(--text-muted)",
-                  padding: "0 2px",
-                }}
-              >
-                ×
-              </button>
-            )}
+          {hasFilters && (
             <button
               type="button"
-              onClick={() => setMobileOpen(false)}
-              title="Close filters"
-              aria-label="Close filters"
-              className="filter-sidebar-close"
+              onClick={onClearAll}
+              title="Clear all filters"
               style={{
-                display: "none",
                 border: "none",
                 background: "none",
                 cursor: "pointer",
-                fontSize: 22,
+                fontSize: 14,
                 lineHeight: 1,
                 color: "var(--text-muted)",
                 padding: "0 2px",
@@ -743,7 +722,7 @@ export function FilterSidebarShell({
             >
               ×
             </button>
-          </div>
+          )}
         </div>
 
         {onSearch !== undefined && (

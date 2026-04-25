@@ -924,7 +924,7 @@ export default function MusicLibraryPage() {
 
       {/* Main layout */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--border)", overflowY: "auto" }}>
+        <div className="library-sidebar-wrap" style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--border)", overflowY: "auto" }}>
           <MusicFilters
             items={releases}
             ownershipStatuses={ownershipStatuses}

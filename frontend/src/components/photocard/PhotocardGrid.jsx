@@ -34,6 +34,19 @@ function useMediaQuery(query) {
   return matches;
 }
 
+// IntersectionObserver defaults to the viewport, but in CollectCore the grid
+// lives inside a scrollable inner div (gridArea), so window-level scroll never
+// happens. Walk up to find the actual scroll container.
+function findScrollParent(el) {
+  let parent = el?.parentElement;
+  while (parent) {
+    const style = getComputedStyle(parent);
+    if (style.overflowY === "auto" || style.overflowY === "scroll") return parent;
+    parent = parent.parentElement;
+  }
+  return null;
+}
+
 // Status → letter mapping
 const STATUS_LETTERS = {
   Owned: "O",
@@ -148,11 +161,11 @@ export default function PhotocardGrid({
           setMobileVisible((c) => Math.min(c + MOBILE_PAGE_INCREMENT, cards.length));
         }
       },
-      { rootMargin: "400px" }
+      { root: findScrollParent(el), rootMargin: "400px" }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isMobile, cards.length]);
+  }, [isMobile, cards.length, mobileVisible]);
 
   if (cards.length === 0) {
     return (

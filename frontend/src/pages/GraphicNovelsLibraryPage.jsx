@@ -1073,7 +1073,7 @@ export default function GraphicNovelsLibraryPage() {
       {/* Main area */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Sidebar */}
-        <div style={{ width: 220, flexShrink: 0, overflowY: "auto", borderRight: "1px solid var(--border)", padding: "var(--space-5)" }}>
+        <div className="library-sidebar-wrap" style={{ width: 220, flexShrink: 0, overflowY: "auto", borderRight: "1px solid var(--border)", padding: "var(--space-5)" }}>
           <GnFilters
             items={items}
             publishers={publishers}
