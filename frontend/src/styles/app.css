@@ -976,7 +976,7 @@ select {
     aspect-ratio: var(--cell-aspect-ratio, 2 / 3);
   }
   .cc-mobile-grid .cc-mobile-grid-cell__cover img,
-  .cc-mobile-grid .cc-mobile-grid-cell__cover > div {
+  .cc-mobile-grid .cc-mobile-grid-cell__cover > div:not([style*="absolute"]) {
     width: 100% !important;
     height: 100% !important;
   }
