@@ -6,6 +6,57 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-26 — Cloudflare Access live (Phase 4/5 complete + credentials fix)
+
+Finished the auth gate. The apex SPA + API are now gated by Google login at
+Cloudflare's edge, with `/catalog/*` bypassed for the future guest webview.
+
+**Cloudflare dashboard work:**
+- Phase 4 — created the `collectcoreapp.com` Self-hosted Application: two
+  destinations (apex + `api.` subdomain, both no path), Google IdP only
+  with Instant Auth, 1-month session, CORS Allow Credentials ON, allowed
+  origin `https://collectcoreapp.com`, "Allow all methods" (the per-method
+  list lacked OPTIONS — required for CORS preflight). Attached two policies
+  in order: `Catalog public bypass` (Bypass / Everyone) then `Household admins`
+  (Allow / specific emails).
+- Phase 5 verification surfaced a misconfiguration: Cloudflare's new Reusable
+  Policies model has no path/hostname filter on the policy itself — those
+  fields are destination-scoped now. So `Catalog public bypass` with
+  `Include: Everyone` was bypassing the entire app (apex + api), and incognito
+  could load the admin SPA without login. **Fix: split into two Applications.**
+  Created a second app (`api.collectcoreapp.com/catalog`) with the bypass
+  policy attached; detached the bypass from the main app. Cloudflare evaluates
+  the more-specific destination first, so /catalog/* hits the bypass app and
+  everything else falls through to the gated main app.
+- Verification in fresh incognito: apex → Google login → SPA loads ✓,
+  /catalog/version → JSON without login ✓, /photocards while authenticated → JSON ✓.
+
+**Code changes (commit `3d264a6`):** SPA could load but every API fetch
+returned "failed to fetch" because cross-origin requests weren't sending
+the Cloudflare Access cookie. Two changes:
+1. [backend/main.py:38-43](backend/main.py#L38) — `allow_credentials=True` on CORSMiddleware
+2. [frontend/src/api.js:5-7](frontend/src/api.js#L5) — shadowed `fetch` with a wrapper
+   that defaults `credentials: 'include'`. Covers all 140 fetch calls in api.js
+   without touching each one. Also added explicit credentials to the one
+   stray fetch in [TopNav.jsx:48](frontend/src/components/layout/TopNav.jsx#L48).
+
+Built + pushed; Railway deployed; verified the SPA loads data after refresh.
+
+**Status:** apex auth fully live. Mobile-friendly responsive web pass is
+the next priority (Thread 9 from previous session).
+
+**Next session:**
+1. Begin responsive admin web work. Mobile-friendly layout pass on library +
+   ingest pages. CSS variable system already in place; needs media queries +
+   touch-target sizing + collapse-to-drawer for the filter sidebar.
+2. After responsive admin lands: plan the guest webview. WASM SQLite library
+   selection (sqlite-wasm vs sql.js vs libsql/client-wasm), guest build mode
+   (probably `VITE_GUEST=true` toggling api.js to use local SQLite instead of
+   fetch), `guest.collectcoreapp.com` Railway custom domain, Cloudflare Access
+   bypass rule.
+
+---
+
 ### 2026-04-25 — Apex SPA cutover + auth + mobile-vs-web architectural pivot
 
 Massive session. Three independent threads landed (lazy-load sweep, Capacitor
