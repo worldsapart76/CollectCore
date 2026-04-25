@@ -75,6 +75,11 @@ export default function PhotocardDetailModal({
 
   // Dirty state — true when any form field has been changed since last save/navigation
   const [isDirty, setIsDirty] = useState(false);
+  // Copies-changed flag — true when any copy was added/edited/deleted. The
+  // copy edits are persisted immediately by the API, but we defer signalling
+  // the parent to reload until the user leaves the card so a change that
+  // moves the card out of the active filter doesn't yank it from view.
+  const [copiesChanged, setCopiesChanged] = useState(false);
 
   // Image state
   const [frontImagePath, setFrontImagePath] = useState(currentCard.front_image_path || null);
@@ -102,6 +107,7 @@ export default function PhotocardDetailModal({
     setFrontImagePath(currentCard.front_image_path || null);
     setBackImagePath(currentCard.back_image_path || null);
     setIsDirty(false);
+    setCopiesChanged(false);
     setError("");
     setImageError("");
     setConfirmDelete(false);
@@ -240,28 +246,40 @@ export default function PhotocardDetailModal({
     if (isDirty) {
       const ok = await doSave();
       if (!ok) return; // save failed — keep modal open with error shown
+    } else if (copiesChanged) {
+      onSaved();
     }
     onClose();
   }
 
   // Explicit Save button: save and close
   async function handleSaveAndClose() {
-    const ok = await doSave();
-    if (ok) onClose();
-  }
-
-  // Cancel button: discard unsaved changes and close
-  function handleCancel() {
+    if (isDirty) {
+      const ok = await doSave();
+      if (!ok) return;
+    } else if (copiesChanged) {
+      onSaved();
+    }
     onClose();
   }
 
-  // Navigate to prev/next card — auto-saves if dirty
+  // Cancel button: discard unsaved changes and close. Copy edits were
+  // already persisted as the user made them, so we still notify the parent
+  // to reload — otherwise the library view would show stale ownership.
+  function handleCancel() {
+    if (copiesChanged) onSaved();
+    onClose();
+  }
+
+  // Navigate to prev/next card — auto-saves if dirty, flushes copy changes
   async function handleNavigate(delta) {
     const target = currentIndex + delta;
     if (target < 0 || target >= effectiveAllCards.length) return;
     if (isDirty) {
       const ok = await doSave();
       if (!ok) return; // save failed — stay on current card
+    } else if (copiesChanged) {
+      onSaved();
     }
     setCurrentIndex(target);
   }
@@ -477,7 +495,7 @@ export default function PhotocardDetailModal({
                 copies={currentCard.copies || []}
                 ownershipStatuses={ownershipStatuses}
                 itemId={currentCard.item_id}
-                onChanged={onSaved}
+                onChanged={() => setCopiesChanged(true)}
               />
             </FormRow>
           </div>
@@ -571,20 +589,40 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
   );
 }
 
-function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
+function CopiesTable({ copies: initialCopies, ownershipStatuses, itemId, onChanged }) {
+  // Local optimistic state — parent reload is deferred until the user leaves
+  // the card (so a filter-narrowing edit doesn't yank the modal away). Re-seed
+  // when the card changes.
+  const [copies, setCopies] = useState(initialCopies);
+  useEffect(() => { setCopies(initialCopies); }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [adding, setAdding] = useState(false);
   const [newOwnership, setNewOwnership] = useState("");
   const [newNotes, setNewNotes] = useState("");
   const [error, setError] = useState("");
 
+  function statusName(id) {
+    return ownershipStatuses.find((s) => s.ownership_status_id === Number(id))?.status_name || "";
+  }
+
   async function handleAdd() {
     if (!newOwnership) return;
     setError("");
     try {
-      await createPhotocardCopy(itemId, {
+      const created = await createPhotocardCopy(itemId, {
         ownershipStatusId: Number(newOwnership),
         notes: newNotes.trim() || null,
       });
+      setCopies((prev) => [
+        ...prev,
+        {
+          copy_id: created.copy_id,
+          ownership_status_id: Number(newOwnership),
+          ownership_status: statusName(newOwnership),
+          notes: newNotes.trim() || null,
+          ...created,
+        },
+      ]);
       setAdding(false);
       setNewOwnership("");
       setNewNotes("");
@@ -596,6 +634,18 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
 
   async function handleUpdate(copy, field, value) {
     setError("");
+    const prev = copies;
+    const next = copies.map((c) =>
+      c.copy_id === copy.copy_id
+        ? {
+            ...c,
+            ownership_status_id: field === "ownership" ? Number(value) : c.ownership_status_id,
+            ownership_status: field === "ownership" ? statusName(value) : c.ownership_status,
+            notes: field === "notes" ? (value.trim() || null) : c.notes,
+          }
+        : c
+    );
+    setCopies(next);
     try {
       await updatePhotocardCopy(itemId, copy.copy_id, {
         ownershipStatusId: field === "ownership" ? Number(value) : copy.ownership_status_id,
@@ -603,6 +653,7 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
       });
       onChanged();
     } catch (err) {
+      setCopies(prev); // rollback on failure
       setError(err.message || "Failed to update copy");
     }
   }
@@ -610,10 +661,13 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
   async function handleDelete(copyId) {
     if (!window.confirm("Delete this copy?")) return;
     setError("");
+    const prev = copies;
+    setCopies(copies.filter((c) => c.copy_id !== copyId));
     try {
       await deletePhotocardCopy(itemId, copyId);
       onChanged();
     } catch (err) {
+      setCopies(prev); // rollback on failure
       setError(err.message || "Failed to delete copy");
     }
   }
