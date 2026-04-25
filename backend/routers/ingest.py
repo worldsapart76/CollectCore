@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from dependencies import get_db
-from file_helpers import APP_ROOT, IMAGES_DIR, INBOX_DIR, LIBRARY_DIR, COVER_DIRS
+from file_helpers import DATA_ROOT, IMAGES_DIR, INBOX_DIR, LIBRARY_DIR, COVER_DIRS
 
 _ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
@@ -404,7 +404,7 @@ def attach_back(payload: AttachBackPayload, db=Depends(get_db)):
     shutil.move(str(inbox_path), str(library_path))
 
     if existing_back:
-        old_path = APP_ROOT / existing_back[1]
+        old_path = DATA_ROOT / existing_back[1]
         if old_path.exists():
             old_path.unlink()
         db.execute(
@@ -454,7 +454,7 @@ def _replace_image(item_id: int, side: str, file: UploadFile, db):
         shutil.copyfileobj(file.file, out)
 
     if existing:
-        old_path = (APP_ROOT / existing[0]).resolve()
+        old_path = (DATA_ROOT / existing[0]).resolve()
         if old_path.is_relative_to(IMAGES_DIR.resolve()) and old_path.exists() and old_path != library_path:
             old_path.unlink()
         db.execute(

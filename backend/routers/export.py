@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from dependencies import get_db
-from file_helpers import APP_ROOT
+from file_helpers import DATA_ROOT
 
 router = APIRouter(tags=["export"])
 
@@ -164,14 +164,14 @@ def export_photocards(payload: ExportPayload, db=Depends(get_db)):
         caption = _build_caption(card) if payload.include_captions else []
         # Always include a front entry — use placeholder if no image so the card is never silently dropped
         if card["front_image_path"]:
-            front_path = APP_ROOT / card["front_image_path"]
+            front_path = DATA_ROOT / card["front_image_path"]
             entries.append({"path": front_path, "caption": caption, "exists": front_path.exists()})
         else:
             entries.append({"path": None, "caption": caption, "exists": False})
         if payload.include_backs:
             back_caption = (caption[:-1] + [caption[-1] + " [back]"]) if (payload.include_captions and caption) else []
             if card["back_image_path"]:
-                back_path = APP_ROOT / card["back_image_path"]
+                back_path = DATA_ROOT / card["back_image_path"]
                 entries.append({"path": back_path, "caption": back_caption, "exists": back_path.exists()})
             else:
                 # Placeholder keeps grid alignment when a card has no back image

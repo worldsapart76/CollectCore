@@ -14,5 +14,5 @@ export default function CoverThumb({
       </span>
     );
   }
-  return <img src={src} alt={alt} className={cls} {...rest} />;
+  return <img src={src} alt={alt} className={cls} loading="lazy" decoding="async" {...rest} />;
 }
