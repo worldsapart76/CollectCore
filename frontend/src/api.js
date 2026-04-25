@@ -2,6 +2,10 @@ import { isAdmin } from './utils/env';
 
 const API = import.meta.env.VITE_API_BASE_URL ?? '';
 
+// Send Cloudflare Access cookies on every cross-origin API call from the SPA.
+const _nativeFetch = window.fetch.bind(window);
+const fetch = (url, opts = {}) => _nativeFetch(url, { credentials: 'include', ...opts });
+
 async function handleJsonResponse(res, fallbackMessage) {
   if (!res.ok) {
     const errorText = await res.text();

@@ -45,7 +45,7 @@ export default function TopNav({ theme, toggleTheme }) {
   async function handleExit() {
     setIsShuttingDown(true);
     try {
-      await fetch(`${API_BASE}/shutdown`, { method: "POST" });
+      await fetch(`${API_BASE}/shutdown`, { method: "POST", credentials: "include" });
     } catch (error) {
       console.error("Shutdown request failed:", error);
     }
