@@ -670,11 +670,11 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
       </table>
 
       {adding ? (
-        <div style={{ marginTop: 4, display: "flex", gap: 4, alignItems: "center" }}>
+        <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
           <select
             value={newOwnership}
             onChange={(e) => setNewOwnership(e.target.value)}
-            style={{ fontSize: "var(--text-sm)", padding: "1px 2px" }}
+            style={{ fontSize: "var(--text-sm)", padding: "1px 2px", maxWidth: "100%" }}
           >
             <option value="">— Select —</option>
             {ownershipStatuses.map((s) => (
@@ -687,7 +687,7 @@ function CopiesTable({ copies, ownershipStatuses, itemId, onChanged }) {
             value={newNotes}
             onChange={(e) => setNewNotes(e.target.value)}
             placeholder="Notes"
-            style={{ fontSize: "var(--text-sm)", flex: 1, border: "1px solid var(--border-input)", borderRadius: 2, padding: "1px 3px" }}
+            style={{ fontSize: "var(--text-sm)", flex: "1 1 120px", minWidth: 0, border: "1px solid var(--border-input)", borderRadius: 2, padding: "1px 3px" }}
           />
           <button onClick={handleAdd} style={{ fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer" }}>Add</button>
           <button onClick={() => setAdding(false)} style={{ fontSize: "var(--text-xs)", padding: "2px 8px", cursor: "pointer" }}>Cancel</button>
