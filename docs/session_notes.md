@@ -6,7 +6,372 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-04-24 (continued) — Railway live + GN merge + R2 custom domain
+### 2026-04-25 — Apex SPA cutover + auth + mobile-vs-web architectural pivot
+
+Massive session. Three independent threads landed (lazy-load sweep, Capacitor
+mobile shell, custom API domain + APP_ROOT bug fixes), then a full architectural
+re-think mid-session: the desktop installer is being retired entirely in favor
+of a SPA served from Railway at the apex domain, gated by Cloudflare Access
+with Google as the identity provider. As a side effect, the Capacitor mobile
+build was indefinitely deferred in favor of responsive web for both admin and
+guest tiers.
+
+**Branch state when session opened:** `main`, with uncommitted lazy-load sweep
+on photocard pages from yesterday. Working tree had assorted leftover scratch
+from yesterday's GN merge that we left untracked.
+
+---
+
+#### Thread 1 — Lazy-load sweep across all 8 modules (10 min)
+
+Yesterday's session added `loading="lazy" decoding="async"` to photocard `<img>`
+tags only. Library pages for the other 7 modules still rendered covers eagerly.
+
+All 7 non-photocard library pages route covers through the shared
+[CoverThumb.jsx](frontend/src/components/primitives/CoverThumb.jsx#L17)
+primitive (verified via grep for raw `<img>` in pages/), so a single edit
+landed lazy-loading on every library + ingest cover instantly. The `{...rest}`
+spread comes after the new attrs, so any caller can override `loading`/`decoding`
+if they ever want eager-loading for above-the-fold imagery.
+
+---
+
+#### Thread 2 — Capacitor mobile shell (Phase 1) — created then DEFERRED
+
+Set up Capacitor for Android on a new `mobile-shell` branch:
+- Created branch off main carrying the lazy-load WIP edit
+- `npm install @capacitor/core @capacitor/cli @capacitor/android` (81 packages, ~300MB node_modules growth)
+- `npx cap init "CollectCore" "com.collectcoreapp.mobile" --web-dir dist`
+  - App ID `com.collectcoreapp.mobile` matches the owned domain. Permanent identifier in Google Play once published; not changeable without filing a new app.
+- `npx cap add android` — created full Gradle project under `frontend/android/`
+- iOS skipped (Windows machine; user has Mac available for later)
+- [vite.config.js](frontend/vite.config.js) made mode-aware: `npm run build:mobile`
+  uses `base: './'` (relative paths required because the WebView loads index.html
+  from device filesystem with no server) while default `npm run build` keeps
+  `base: '/'` + dev-server proxies for desktop.
+- Added `build:mobile`, `cap:sync`, `cap:open:android` scripts to [package.json](frontend/package.json)
+- [frontend/.env.mobile](frontend/.env.mobile) points the mobile build at the
+  Railway API + R2 with `VITE_ENABLED_MODULES=photocards`
+- [frontend/.gitignore](frontend/.gitignore) excludes Gradle build outputs
+  (`android/app/build/`, `android/.gradle/`), machine-local SDK paths
+  (`android/local.properties`), and the cap-sync'd web bundle
+  (`android/app/src/main/assets/public/`). Project source is tracked so
+  Android Studio can open the project.
+- Verified: `npm run build:mobile` produces relative asset paths, `cap sync android`
+  copies dist into Android assets correctly. Desktop `npm run build` still
+  produces absolute paths (no regression).
+- Two commits on mobile-shell:
+  - `4dd83d2` desktop-relevant changes (cherry-picked to main as `89add2d`)
+  - `38b5051` Capacitor scaffold (mobile-shell only)
+
+**Status: indefinitely deferred mid-session.** See Thread 6 below for why.
+The branch sits parked. Reactivation would mean: open on Mac, run `npx cap add ios`,
+build Android Studio APK, sideload to device, test against Railway. All work to
+date is preserved, none of it is wasted as an architectural reference.
+
+---
+
+#### Thread 3 — `api.collectcoreapp.com` custom domain + Capacitor CORS prep
+
+**CORS for the (then-planned) Capacitor WebView.** Capacitor's Android WebView
+sends `Origin: https://localhost` on every fetch by default. Added that origin
+to Railway's `CORS_ORIGINS` env var via the dashboard. First attempt missed
+because Railway requires manual redeploy when env vars change (auto-redeploy
+flaky); manual redeploy from the Deployments tab + the curl confirmed
+`access-control-allow-origin: https://localhost` came back correctly. Diagnostic
+that pinpointed the issue: testing a known-good origin (`http://localhost:5181`,
+already in the list) returned ACAO; the new origin didn't. Confirmed middleware
+worked, just needed the deploy to actually pick up the var.
+
+**Custom API domain.** Bought nothing new — `collectcoreapp.com` was already
+registered via Cloudflare Registrar yesterday. Added `api.collectcoreapp.com`
+as a custom domain on Railway:
+- Used Railway's "auto-configure Cloudflare DNS" button. It bounced through a
+  confusing "domain marketplace" page after authorization (Railway tried to
+  upsell a fresh domain) — ignore that page entirely; the auth flow had
+  succeeded silently. Navigate back to Service → Settings → Networking.
+- Result: CNAME `api` → `2jqmp6tm.up.railway.app` (Proxied — orange cloud),
+  TXT `_railway-verify.api` for ownership verification.
+- TLS cert issued by Railway in ~60 seconds. `curl https://api.collectcoreapp.com/health`
+  returned the expected `{"status":"ok",...}`.
+- Added `https://api.collectcoreapp.com` to `CORS_ORIGINS` on Railway.
+- Updated three local env files to point at the new domain:
+  - [frontend/.env.production](frontend/.env.production) (desktop installer build)
+  - [frontend/.env.mobile](frontend/.env.mobile) (Capacitor — now dormant)
+  - [backend/.env.example](backend/.env.example) (documentation)
+- Greppped for any `collectcore-production.up.railway.app` references —
+  only hits were in session_notes.md (historical, left as-is). No hardcoded
+  URLs anywhere in `frontend/src`.
+
+**Cloudflare proxy mode confirmed working in Proxied mode** — Railway's auto-config
+defaults to orange-cloud now and they've engineered TLS issuance to work behind
+Cloudflare. Earlier worry about needing to flip to DNS-only was unfounded.
+Bonus: Cloudflare DDoS protection + edge caching come along for free. API
+responses correctly bypass cache (`cf-cache-status: DYNAMIC`).
+
+---
+
+#### Thread 4 — `APP_ROOT → DATA_ROOT` bug fixes in routers/
+
+Latent bugs flagged in yesterday's notes. Pattern: four sites in two files
+resolved image file paths via `APP_ROOT / image_path`. Locally `APP_ROOT == DATA_ROOT`
+so it worked by accident; on Railway `APP_ROOT` resolves to `/` (because
+`Root Directory=backend` makes `db.py` live at `/app/db.py` so `parents[1]` = `/`)
+while `DATA_ROOT` is `/data` (the volume mount). So `APP_ROOT / "images/..."`
+on Railway = `/images/...` which doesn't exist; correct path is `/data/images/...`.
+
+Fix: surgical swap of `APP_ROOT` for `DATA_ROOT` at all four sites:
+- [routers/export.py:167,174](backend/routers/export.py#L167) — front_path / back_path resolution for PDF export
+- [routers/ingest.py:407,457](backend/routers/ingest.py#L407) — old image cleanup paths in attach_back and replace_image flows
+
+`admin.py` still uses `APP_ROOT` for `FRONTEND_DIST` — that's not a data path
+so it stayed as-is in this commit, then was rewritten more thoroughly in Thread 5.
+
+---
+
+#### Thread 5 — `api.collectcoreapp.com` + clean main commit + Railway deploy
+
+Branch hygiene: split the working-tree changes into two commits on
+mobile-shell, then cherry-picked just the desktop-relevant commit to main:
+
+- Commit A (desktop-relevant, both branches): cutover env URLs + lazy-load + APP_ROOT fixes
+- Commit B (mobile-shell only): Capacitor scaffold
+
+Cherry-picked A onto main as `89add2d`. main now has all desktop-relevant
+changes; mobile-shell carries A+B. No dist commit yet.
+
+(Originally planned a build-and-ship-installer-to-husband step here. Rerouted
+mid-thread when investigating the build script — see Thread 6.)
+
+---
+
+#### Thread 6 — ARCHITECTURAL PIVOT: kill the desktop installer, serve SPA from Railway
+
+While inspecting `C:\Dev\CollectCore-Build\build-release.bat` to ship the
+installer, discovered the script is dramatically out of date — only copies
+6 backend files, missing `routers/`, `dependencies.py`, `file_helpers.py`,
+`requirements.txt`, all migrations, the schemas/ dir, etc. Husband's existing
+installer must have been running on stale shimmed code that happened to work
+for his read-only use of the cloud API.
+
+Surfaced the question: **does the desktop installer still need a local backend
+at all?** User's answer: no, pure webview. Then escalated: "He doesn't even
+need a desktop icon if it's possible to just wire this up so that he goes to
+a webpage he's got bookmarked."
+
+This triggered the day's biggest design conversation. Result: **the desktop
+installer is being retired entirely in favor of a SPA served from Railway at
+the apex domain.**
+
+**The implementation:**
+
+1. **Apex custom domain on Railway.** Added `collectcoreapp.com` via the same
+   auto-config Cloudflare flow as `api.` earlier. Cloudflare's "CNAME flattening"
+   transparently handles the apex CNAME-at-root DNS-spec restriction.
+   Verified: `curl https://collectcoreapp.com/health` returned API JSON
+   (proving Railway routing works; the SPA serving was added next).
+
+2. **Mode-aware Vite outDir.** [vite.config.js](frontend/vite.config.js) now
+   writes to `../backend/frontend_dist/` for the default web build (which
+   ships to Railway via git) and keeps writing to `dist/` for mobile mode
+   (where Capacitor's `cap sync` expects it). `emptyOutDir: true` set
+   explicitly to silence Vite's "outDir outside root" warning.
+
+3. **`backend/frontend_dist/` committed to git.** ~640KB per release;
+   gzipped JS is 144KB. Not worth a separate CDN. Railway's deploy picks
+   it up automatically. [routers/admin.py](backend/routers/admin.py#L17)
+   `FRONTEND_DIST` anchored to file location instead of `APP_ROOT` so the
+   path resolves correctly on both local Windows and Railway's `/app/`
+   layout.
+
+4. **Host-based SPA routing middleware.** Critical and the trickiest piece.
+   Added [main.py spa_host_routing](backend/main.py) middleware. The
+   problem: API routes like `/photocards`, `/books/{id}` collide with SPA
+   URLs like `/photocards`, `/books/library`. Without intervention,
+   `https://collectcoreapp.com/books/library` would hit the books API
+   router (matching `/books/{book_id}` with `id="library"`) and return
+   JSON instead of the SPA HTML.
+
+   Solution: middleware checks the `Host` header on every request. Requests
+   to `api.*` or `localhost`/`127.0.0.1` pass straight through to the API
+   routers as before. Requests to any other host (= apex SPA) get
+   `index.html` for any GET that isn't a static asset (`/assets/`, `/images/`,
+   `/vite.svg` are passed through). Six end-to-end tests verified — both
+   locally with simulated Host headers and against live Railway after
+   deploy:
+   - api.* /health → JSON ✓
+   - apex / → SPA HTML ✓
+   - apex /photocards (collision) → SPA HTML, NOT JSON ✓
+   - apex /books/library (deep collision) → SPA HTML ✓
+   - apex /assets/* → JS file ✓
+   - api.* /photocards → JSON (machine clients still work) ✓
+
+5. **CORS update for apex.** Added `https://collectcoreapp.com` to Railway's
+   `CORS_ORIGINS` so the SPA at apex can make cross-origin fetches to
+   `api.collectcoreapp.com`. Final value:
+   ```
+   https://collectcore-production.up.railway.app,http://localhost:5181,http://localhost:5185,https://localhost,https://api.collectcoreapp.com,https://collectcoreapp.com
+   ```
+
+6. **Pushed to main, Railway auto-deployed**, all six tests passed against
+   live URLs. Husband can now bookmark `https://collectcoreapp.com` and is
+   done forever — future updates land on his next page refresh. The old
+   desktop installer keeps working in parallel (it just calls
+   `api.collectcoreapp.com` directly) until he uninstalls it.
+
+**What was committed on main:**
+- `89add2d` cutover: switch desktop + Railway backend to api.collectcoreapp.com
+- `6fceae2` spa: serve React app from Railway at apex domain (collectcoreapp.com)
+
+---
+
+#### Thread 7 — SECURITY GAP surfaced + auth pivot
+
+After confirming the SPA worked, user asked: "isn't my admin site and database
+now just exposed to anyone on the internet with URL?"
+
+YES, and it had been since yesterday's Railway cutover — today just made it
+discoverable. Exposed:
+- Reads: full library data via any module endpoint
+- Writes: POST/PUT/DELETE on every endpoint
+- `/admin/backup` could exfiltrate the entire SQLite DB
+- `/admin/restore` could overwrite the entire DB
+- `/admin/lookups/.../merge` could corrupt lookups
+
+**Decision: Cloudflare Access with Google as identity provider** (over
+HTTP basic auth, Auth0/Clerk/Firebase, or roll-your-own). Reasoning:
+- Already in the Cloudflare ecosystem (DNS, R2, registrar, custom domains)
+- Free tier (50 users — way over household needs)
+- Zero code changes in CollectCore — gating happens at Cloudflare's edge
+  before requests reach Railway
+- Login with Google specifically: Cloudflare Access supports Google as a
+  built-in IdP. User clicks login → Google OAuth → back to app.
+- Trivially reversible — delete the Cloudflare Access app + Google OAuth
+  client, gate disappears, no code to revert, no user data migration. ~5 min
+  to unwind if migrating to Auth0/Clerk later.
+- Future-proof: Cloudflare passes identity headers
+  (`Cf-Access-Authenticated-User-Email`) through to FastAPI, so when in-app
+  identity logic eventually lands, the user identity is already available.
+
+**Setup in progress at session pause:**
+- Cloudflare Zero Trust account created. Team name: `collectcore`. Team
+  domain: `collectcore.cloudflareaccess.com`. Free plan.
+- Google OAuth client (project "CollectCore Auth" in Google Cloud Console):
+  - **Audience tab:** External, Testing publishing status, you + husband
+    added as test users. (Testing chosen over In Production because the
+    Cloudflare Access allow-list is the actual gate; Testing adds a redundant
+    second layer at the Google side. In Production would expose the consent
+    screen to all Google accounts — harmless because Cloudflare still rejects
+    them, but pointless friction. Also avoids Google's app verification
+    review which would be required for a polished consent screen in
+    production mode.)
+  - Branding tab: pending (App name CollectCore, support email, authorized
+    domain `cloudflareaccess.com`)
+  - Data Access tab: pending (scopes openid, userinfo.email, userinfo.profile)
+  - Clients tab: pending (Web application, name "CollectCore Cloudflare
+    Access", redirect URI `https://collectcore.cloudflareaccess.com/cdn-cgi/access/callback`)
+
+**Phases remaining (next session):**
+- Phase 2: finish Branding/Data Access/Clients tabs in Google Cloud Console
+- Phase 3: paste Google client ID + secret into Cloudflare Zero Trust →
+  Settings → Authentication
+- Phase 4: create Cloudflare Access Application covering both
+  `collectcoreapp.com` AND `api.collectcoreapp.com` (single application,
+  multiple domains so cookies are shared across subdomains). Policies:
+  - Allow rule: emails == [yours, husband's]
+  - **Bypass rule for path `/catalog/*`** so the future guest webview can
+    pull the read-only catalog snapshot + deltas without authentication
+  - Enable CORS preflight allowance
+- Phase 5: incognito test of `https://collectcoreapp.com` → Google login
+  → admin UI
+
+---
+
+#### Thread 8 — ARCHITECTURAL PIVOT #2: web-only guest tier (mobile permanently deferred)
+
+Mid-Cloudflare-Access conversation, user asked: "is there any possibility for
+skipping mobile apps altogether and just allowing guest users to log into a
+streamlined web view? Obviously not my admin version, and their database would
+still be local."
+
+**Decision: yes, guests get a webview too. Mobile build indefinitely deferred.**
+
+Rationale (the architecture wins):
+- No app store distribution for guest tier (no Apple $99/yr, no Google Play
+  review process, no APK sideloading)
+- Instant guest onboarding — go to URL, no install
+- Updates land instantly via `git push` → Railway redeploy → guest refreshes
+- Same React codebase serves admin + guest, just different build flags
+- WASM SQLite (sqlite-wasm or sql.js) gives guests a real persistent local
+  SQLite database in the browser via OPFS / IndexedDB. Same SQLite as backend,
+  same as Capacitor mobile would have used.
+- ~10MB catalog easily fits in browser quotas (typically 1GB+ desktop, smaller
+  on iOS Safari but well above need)
+- PWA support via vite-plugin-pwa gives "install to home screen" if anyone
+  wants the app-feel. Optional polish, not blocker.
+
+Tradeoffs accepted:
+- Browser storage CAN be cleared by user or evicted under storage pressure;
+  Persistent Storage permission API mitigates. Worst case: guest re-pulls
+  catalog on next visit (re-export from admin if they had local annotations
+  via the future Trading flow).
+- Native camera/file APIs limited via browser, but guests don't ingest
+  (admin-only flow, and admin is web-only too in this model).
+- iOS Safari has stricter storage policies than Chromium — fine at current
+  catalog sizes; revisit if catalog grows past 100MB.
+
+**Two-tier architecture (revised):**
+```
+collectcoreapp.com         → Admin SPA. Cloudflare Access + Google. Talks to Railway API.
+guest.collectcoreapp.com   → Guest SPA (FUTURE). Public, no auth. WASM SQLite locally.
+                             Pulls from R2 (seed.db) + Railway /catalog/* (deltas).
+api.collectcoreapp.com     → API. Cloudflare Access gates everything except /catalog/*
+                             (bypass rule for guests).
+```
+
+**The Capacitor `mobile-shell` branch is preserved as a reference, NOT deleted.**
+If we ever want a true native mobile app (some Apple lockdown forces our hand,
+or PWA capabilities prove insufficient), the work to date is a head-start.
+
+---
+
+#### Thread 9 — Priority order revised
+
+User stated next-session priorities:
+1. **Make admin web responsive for mobile screens.** Today's UI is desktop-density
+   (sidebar + table layout). Phone/tablet usage needs at least responsive
+   collapse, touch-friendly targets, mobile-appropriate filtering UX.
+   This is the new top priority before guest webview.
+2. **Build guest webview leveraging that responsive layout.** WASM SQLite,
+   guest subdomain, bypass rule, PWA support.
+
+---
+
+**Disk state at session end:**
+- main pushed to origin with two new commits: `89add2d` (cutover) + `6fceae2` (apex SPA)
+- mobile-shell branch local only with `4dd83d2` + `38b5051` — NOT pushed, NOT merged. Sits parked.
+- `frontend/android/` empty subdirs lingered after switching from mobile-shell to main; harmless cosmetic
+- Untracked-and-leftover scratch from yesterday still untracked: `tools/merge_gn_from_backup.py`,
+  `docs/collectcore_backup_20260424_192840.zip`, `tmp_merge/` — all safe to delete or keep
+  per yesterday's notes
+- Cloudflare Access Phase 1 done (Zero Trust account); Phase 2 in progress (Google OAuth client)
+
+**Next session:**
+1. **FIRST 30 min**: Finish Cloudflare Access setup (Phases 2-5 above). Without
+   this the apex SPA is open to the internet. Critical.
+2. **Then**: Begin responsive admin web work. Mobile-friendly layout pass on
+   library + ingest pages. CSS variable system already in place; needs
+   media queries + touch-target sizing + collapse-to-drawer for the filter
+   sidebar.
+3. **After responsive admin lands**: Plan the guest webview. WASM SQLite library
+   selection (sqlite-wasm vs sql.js vs libsql/client-wasm — each has tradeoffs),
+   guest build mode (probably `VITE_GUEST=true` toggling api.js to use local
+   SQLite instead of fetch), guest.collectcoreapp.com Railway custom domain,
+   Cloudflare Access bypass rule.
+4. **Deferred:** PD1 (admin Catalog publish UI), PD2 (Trading export/import
+   for guest data sharing), Capacitor mobile (no longer on roadmap).
+
+
 
 **Backend on Railway, end-to-end.** Hobby plan + 5 GB volume mounted at `/data`. Service `collectcore-production.up.railway.app` builds via Railpack (Nixpacks now legacy), Root Directory=`backend`, Procfile boots uvicorn on `$PORT`. Local DB seeded onto the volume via a temporary `/admin/_bootstrap_db` endpoint (added, used, removed in three commits).
 

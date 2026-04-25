@@ -19,9 +19,13 @@ Video Games, TTRPG, Board Games
 
 ## Stack
 
-- **Backend:** Python + FastAPI + SQLite
-- **Frontend:** React + Vite
-- **Environment:** Windows, `C:\Dev\CollectCore` (local-first; Railway + Cloudflare R2 hosting planned — see Hosting section)
+- **Backend:** Python + FastAPI + SQLite — DEPLOYED on Railway
+- **Frontend:** React + Vite — SPA served from Railway at apex domain
+- **Image hosting:** Cloudflare R2 (custom domain `images.collectcoreapp.com`)
+- **Auth:** Cloudflare Access + Google IdP (in-progress as of 2026-04-25; see Auth section)
+- **Production URL (admin):** `https://collectcoreapp.com`
+- **Production URL (API direct, machine-to-machine):** `https://api.collectcoreapp.com`
+- **Dev environment:** Windows, `C:\Dev\CollectCore`. Local backend on port 8001 + Vite dev server on port 5181 with proxy to localhost. Used for development only — production is cloud.
 
 ---
 
@@ -81,11 +85,28 @@ Photocards use a two-phase inbox pipeline: front images create records, back
 images attach to existing records. Implemented in `InboxPage.jsx` +
 `backend/routers/ingest.py`.
 
-- Staging: `images/inbox/` → permanent: `images/library/`
-- Filename convention: `{group_code}_{id:06d}_{f|b}.{ext}`
-- Storage in `tbl_attachments` (photocards); `cover_image_url` field (all other modules)
-- Other modules receive cover images via external API search (TMDB, Discogs, RAWG, etc.) or `POST /upload-cover`
-- Cache busting via `?v=mtime`
+**Production state (post-cutover 2026-04-24):**
+- All photocard images live in R2 under `catalog/images/{catalog_item_id}_{f|b}.jpg`
+  (resized to 600×924 JPEG q80). `tbl_attachments.storage_type = 'hosted'`,
+  `file_path` is the full R2 URL via `images.collectcoreapp.com`.
+- All non-photocard cover images live in R2 under
+  `admin/images/{module}/{module}_{id:06d}.jpg` (long-edge 1200px JPEG q85).
+  `cover_image_url` is the full R2 URL.
+- Local-tier ingest still writes files to `images/library/` and rows with
+  `storage_type='local'` initially, but admin tools (`tools/publish_catalog.py`
+  for photocards, `tools/sync_admin_images.py` for cover images) sweep them
+  to R2 and rewrite the DB rows. Direct-to-R2 ingest is future work.
+- Local-only paths to know:
+  - Staging during ingest: `images/inbox/` → `images/library/` (then swept to R2)
+  - Filename convention: `{group_code}_{id:06d}_{f|b}.{ext}`
+  - Cache busting via `?v=mtime` (relevant for local-mode rows only; R2 URLs
+    use immutable filenames)
+
+**Image rendering helpers:**
+- Photocards: `resolveCardSrc()` in [PhotocardGrid.jsx](frontend/src/components/photocard/PhotocardGrid.jsx)
+  passes `https://` URLs through and falls back to local-path + cache-buster
+  for newly-ingested cards awaiting next publish.
+- Non-photocards: `getImageUrl()` shared helper. Renders R2 URLs unchanged.
 
 ---
 
@@ -94,11 +115,16 @@ images attach to existing records. Implemented in `InboxPage.jsx` +
 The following are intentional simplifications. Do not "fix" these unless explicitly
 instructed:
 
-- Local file storage (no asset management system yet)
+- Direct image upload to R2 not implemented; admin tools sweep local-staged
+  images to R2 in batches (`tools/publish_catalog.py`, `tools/sync_admin_images.py`)
 - Option tables derived from card data, not authoritative lookups
-- No virtualization or performance layer
-- Inline styling (no design system)
+- No virtualization or performance layer (lazy-load on `<img>` is the only
+  perf concession; library "All" view of 10K+ cards still renders eagerly otherwise)
+- Inline styling in many places (no full design system; CSS variables + Inter font
+  + green palette is the baseline)
 - Export logic is still photocard-specific
+- UI is desktop-density (sidebar + table). Responsive/mobile-friendly layout
+  is the next priority and a prerequisite for the guest webview.
 
 ---
 
@@ -134,14 +160,14 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 
 | File | Purpose |
 |---|---|
-| `docs/release-guide.md` | Build process, distribution, installer decisions, troubleshooting |
+| `docs/release-guide.md` | **HISTORICAL** — describes the now-retired desktop installer flow. Cloud release flow is documented inline in CLAUDE.md → Build & Release. |
 | `docs/collectcore_summary.md` | Schema changes, active endpoints, current implementation state |
 | `docs/collectcore_books_module_design.md` | Books module design decisions and history |
 | `docs/collectcore_books_module_plan.md` | Books implementation plan — finalized decisions, schema, phases, known gaps |
 | `docs/collectcore_books_v1_schema_proposal.md` | Books module v1 schema reference |
 | `C:\Users\world\.claude\plans\pure-inventing-whisper.md` | **Future modules plan** — full schema decisions for all 5 modules (all now implemented; plan file remains as schema reference) |
-| `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` | **Mobile & hosting strategic plan** — Capacitor mobile app, Unraid self-hosting, Path A/B architecture, phased implementation |
-| `docs/session_notes.md` | Working session history — completed work and next steps |
+| `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` | **PARTIALLY SUPERSEDED 2026-04-25** — Capacitor mobile sections shelved (mobile build deferred indefinitely in favor of responsive web); hosting + Path A/B sections still useful as architectural context. Use only for historical reference; current state is in CLAUDE.md → Hosting / Auth / Multi-User Model sections. |
+| `docs/session_notes.md` | Working session history — completed work and next steps. **2026-04-25 entry** documents the apex-SPA cutover, Cloudflare Access auth, and web-only guest pivot in detail. |
 
 ---
 
@@ -164,76 +190,151 @@ up wholesale.
 
 **Checklist items when building a new module:**
 1. Add the module's route prefix to `PROXY_PATHS` in `frontend/vite.config.js`.
-   Omitting this causes all API calls to return HTML instead of JSON, producing:
+   Used by the local Vite dev server only, but omitting it causes all API
+   calls during `npm run dev` to return HTML instead of JSON, producing:
    `Unexpected token '<', "<!doctype "... is not valid JSON`
 2. Verify that any module-specific file assets stored outside `images/library/`
    are covered by the backup. If a new module stores files in a different
    directory, update `GET /admin/backup` to include that directory in the ZIP.
+3. If the module's API path could collide with a SPA route name
+   (e.g., `/photocards/library` matching both an API and a SPA path), the
+   `spa_host_routing` middleware in `main.py` already handles this correctly
+   for the apex host. No changes needed; just be aware.
+4. After deploying: rebuild dist (`npm run build`) and commit
+   `backend/frontend_dist/` so the SPA picks up the new module.
 
 ---
 
-## Hosting & Mobile Plan
+## Hosting
 
-**Hosting decided 2026-04-21: Cloud (Railway + Cloudflare R2).** Canonical detail
-and fallback option in `C:\Dev\ARCHITECTURE.md` Decision A.
+**LIVE on Railway + Cloudflare R2 as of 2026-04-24.** Originally decided
+2026-04-21 (canonical history in `C:\Dev\ARCHITECTURE.md` Decision A).
 
-- **Backend:** FastAPI on Railway (user already runs a Discord app there)
-- **Images:** Cloudflare R2; `tbl_attachments.storage_type = 'hosted' | 'local'`
-- **Scope:** CollectCore only. MediaManager, Calibre Content Server, Jellyfin, and
-  other projects still target Unraid.
-- **Fallback:** Unraid self-hosting retained in ARCHITECTURE.md Decision A if the
-  cloud path later proves unworkable.
+- **Backend:** FastAPI on Railway. `Root Directory=backend`, Procfile boots
+  uvicorn on `$PORT`. SQLite DB on a 5GB Railway Volume mounted at `/data`.
+- **Frontend (admin):** React SPA built into `backend/frontend_dist/`,
+  committed to git, served from Railway via `register_frontend_static()`
+  in `routers/admin.py`. SPA renders at the apex domain;
+  `spa_host_routing` middleware in `main.py` routes by `Host` header so
+  apex paths return `index.html` (avoiding API route collisions like
+  `/photocards/library` matching the books detail route).
+- **Images:** Cloudflare R2, served via custom domain
+  `images.collectcoreapp.com`. `tbl_attachments.storage_type = 'hosted' | 'local'`
+  but in practice all production rows are 'hosted'.
+- **Custom domains (all on Cloudflare proxy / orange cloud):**
+  - `collectcoreapp.com` — admin SPA
+  - `api.collectcoreapp.com` — API (also used for machine-to-machine and
+    by the lingering desktop installer until users uninstall)
+  - `images.collectcoreapp.com` — R2 public asset CDN
+  - `guest.collectcoreapp.com` — RESERVED for guest webview, not yet
+    configured
+  - `collectcore-production.up.railway.app` — Railway's auto-generated URL,
+    still active for backwards compatibility, will eventually retire
+- **Scope:** CollectCore only. MediaManager, Calibre Content Server, Jellyfin
+  still target Unraid.
+- **Fallback:** Unraid self-hosting retained in ARCHITECTURE.md Decision A
+  if cloud ever becomes unworkable.
 
-**Prerequisites before Railway deployment** — all complete as of 2026-04-23.
-Phase 0c (photocard copies, image field schema, validation + error handling)
-is closed. See `fancy-stirring-hollerith.md` Phase 0c for the settled detail.
+---
 
-**Multi-user model** (ARCHITECTURE.md Decision B) — DECIDED 2026-04-23: two-tier
-(admin cloud + guest local).
-- **Admin tier** (household only): Railway API auth, full CRUD, images in R2
-- **Guest tier** (friends): no account, local SQLite on device, no cloud writes;
-  starter catalog pulled from R2 as read-only hosted data
-- Keeps R2 + Railway costs bounded to the household; no subscription fees for
-  external users. One codebase, one binary per platform; tier decided at login.
+## Auth
 
-**Collection sharing** (Decision E): replaced by trading export/import
-(`.html` with embedded JSON). **DEFERRED to post-deployment** — see
-fancy-stirring-hollerith.md "Post-deployment roadmap" item PD2.
+**DECIDED 2026-04-25: Cloudflare Access with Google as identity provider.**
 
-**Catalog architecture** (decided 2026-04-23): Shared card set modeled as
-snapshot-plus-delta. Admin's `tbl_items` with `catalog_item_id IS NOT NULL`
-IS the Catalog. Guests download full snapshot on first launch, pull deltas
-thereafter. `catalog_item_id` uses the existing `{group_code}_{id:06d}` image
-filename convention — no UUIDs needed. New `Catalog` ownership status added to
-photocards only, hidden from admin UI via `VITE_IS_ADMIN` flag. Full detail in
-`fancy-stirring-hollerith.md` "Catalog Architecture" section and Phase 0b.
+- Gates `collectcoreapp.com` and `api.collectcoreapp.com` at Cloudflare's edge
+  before requests reach Railway
+- Free tier (50 users) — household scale
+- ZERO code changes in CollectCore. Auth happens at the network layer.
+- Single Cloudflare Access Application covering both apex + api subdomain so
+  cookies are shared cross-subdomain (SPA at apex can fetch from api.* without
+  re-authentication)
+- **Bypass policy for `/catalog/*` paths** so the guest webview (future) and any
+  guest mobile clients (further future) can hit the read-only catalog endpoints
+  without authentication
+- Identity headers (`Cf-Access-Authenticated-User-Email`) passed through to
+  FastAPI so when in-app identity logic eventually lands (per-user
+  attribution, etc.), the user identity is available without rebuilding auth
+- Trivially reversible: delete the Access app + Google OAuth client = gate gone,
+  no code to revert, no user data migration. Migration path to Auth0/Clerk later
+  is open.
+- **Status as of 2026-04-25:** Cloudflare Zero Trust account created (team:
+  `collectcore`). Google OAuth client setup in progress. Full setup steps in
+  `docs/session_notes.md` 2026-04-25 Thread 7.
+
+---
+
+## Multi-User Model
+
+**Two-tier model, both web-only as of 2026-04-25 pivot.** ARCHITECTURE.md
+Decision B was originally for cloud admin + local-mobile guest; the local-mobile
+guest is now a local-web guest instead. See `docs/session_notes.md` 2026-04-25
+Thread 8 for the full reasoning.
+
+- **Admin tier** (household only): Cloudflare Access auth via Google, full CRUD
+  against Railway, all images on R2. Uses `https://collectcoreapp.com`.
+- **Guest tier** (friends, future): no account, no login. Webview at
+  `https://guest.collectcoreapp.com` (NOT YET BUILT). WASM SQLite in browser
+  (sqlite-wasm or sql.js, persisted to OPFS / IndexedDB) holds the guest's
+  local catalog + annotations. Pulls catalog snapshot from R2 on first visit,
+  pulls deltas from Railway `/catalog/*` endpoints (Cloudflare Access bypass)
+  thereafter. No writes against the cloud DB ever.
+
+**Capacitor mobile is INDEFINITELY DEFERRED.** The `mobile-shell` branch holds
+the Phase 1 scaffold (Capacitor + Android Gradle project + mode-aware Vite
+config + `.env.mobile`) as a reference if we ever need it. Mobile users get
+the responsive web app instead — same URL, same data, no app store.
+
+---
+
+## Catalog Architecture (unchanged from 2026-04-23 decision)
+
+Shared card set modeled as snapshot-plus-delta. Admin's `tbl_items` with
+`catalog_item_id IS NOT NULL` IS the Catalog. Guests download full snapshot on
+first visit, pull deltas thereafter. `catalog_item_id` uses the existing
+`{group_code}_{id:06d}` image filename convention — no UUIDs needed. New
+`Catalog` ownership status added to photocards only, hidden from admin UI via
+`VITE_IS_ADMIN` flag.
 
 **Admin catalog publish UI**: CLI-only for v1 (`tools/publish_catalog.py`).
 In-app publish flow is item PD1 in the post-deployment roadmap.
 
-**Mobile:** Full plan (Capacitor, thin-client for admin / embedded SQLite for
-guest, Android APK, iOS TestFlight or PWA via browser) is documented in
-`C:\Users\world\.claude\plans\fancy-stirring-hollerith.md`.
-- **Phase 0** (desktop code prep) — complete 2026-04-13
-- **Phase 0c** (backend schema prerequisites) — complete 2026-04-23
-- **Phase 0b** (R2 bucket setup + seed DB preparation) — not yet started;
-  now the only code blocker before Railway deployment
-- Path A (embedded SQLite) is now permanent as the guest runtime, not
-  transitional
-- PWA is viable since the Railway URL is reachable; TestFlight remains optional.
-
-**Listing tracker impact on cloud:** open question — see `docs/listing_tracker_design_plan_v3.md`
-("Open Question: Cloud Hosting Impact" section) for considerations around Playwright
-on Railway, marketplace IP reputation, scheduler architecture, thumbnail storage,
-and the split-deployment fallback.
+**Backend endpoints** (publicly accessible via Cloudflare Access bypass):
+- `GET /catalog/version` → `{max_version, card_count}`
+- `GET /catalog/delta?since=N` → photocards with `catalog_version > N`
+- `GET /catalog/seed.db` → 302 redirect to R2 `catalog/seed.db`
 
 ---
 
 ## Build & Release
 
-See `docs/release-guide.md` for the full build process, distribution
-instructions, installer decisions, and troubleshooting guide (including
-log file locations for diagnosing launch failures).
+**The desktop installer is RETIRED as of 2026-04-25.** Husband (and any
+admin user) bookmarks `https://collectcoreapp.com` instead. No more `.exe`
+distribution.
+
+**Frontend release flow:**
+1. `cd frontend && npm run build` → outputs to `backend/frontend_dist/`
+2. `git add backend/frontend_dist/ backend/ frontend/`
+3. `git commit && git push`
+4. Railway auto-deploys (~60-90s)
+5. Users refresh — done
+
+Mobile build (`npm run build:mobile`) still works on the `mobile-shell`
+branch but is not part of the production release flow.
+
+The legacy installer build script `C:\Dev\CollectCore-Build\build-release.bat`
+and the supporting `app/`, `python-embed/`, etc. directories under
+`C:\Dev\CollectCore-Build\` are obsolete and can be deleted whenever convenient.
+`docs/release-guide.md` is similarly historical now — accurate for the old
+desktop installer flow that is no longer used.
+
+---
+
+## Listing tracker open question
+
+`docs/listing_tracker_design_plan_v3.md` ("Open Question: Cloud Hosting Impact")
+remains the canonical place for considerations around Playwright on Railway,
+marketplace IP reputation, scheduler architecture, thumbnail storage, and the
+split-deployment fallback. Not yet built.
 
 ---
 
