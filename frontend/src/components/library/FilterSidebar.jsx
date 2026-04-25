@@ -14,7 +14,7 @@
  *   SearchableTriStateSection  searchable list with selected chips
  *   GroupedTriStateSection     items nested under group headings
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // ─── State helpers ────────────────────────────────────────────────────────────
 
@@ -642,68 +642,128 @@ export function FilterSidebarShell({
   searchPlaceholder = "Search...",
   children,
 }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    document.body.classList.add("filter-drawer-open");
+    const onKey = (e) => { if (e.key === "Escape") setMobileOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("filter-drawer-open");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [mobileOpen]);
+
   return (
-    <div
-      style={{
-        width: 180,
-        flexShrink: 0,
-        borderRight: "1px solid var(--border)",
-        overflowY: "auto",
-        padding: "12px 10px",
-        background: "var(--bg-sidebar)",
-      }}
-    >
+    <>
+      <button
+        type="button"
+        className="filter-sidebar-fab"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open filters"
+      >
+        ☰ Filters
+        {hasFilters && (
+          <span style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: "var(--green-vivid)",
+          }} />
+        )}
+      </button>
+      {mobileOpen && (
+        <div
+          className="filter-sidebar-backdrop"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
       <div
+        className={`filter-sidebar-drawer${mobileOpen ? " open" : ""}`}
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 10,
+          width: 180,
+          flexShrink: 0,
+          borderRight: "1px solid var(--border)",
+          overflowY: "auto",
+          padding: "12px 10px",
+          background: "var(--bg-sidebar)",
         }}
       >
         <div
           style={{
-            fontSize: 11,
-            fontWeight: "700",
-            color: "var(--text-label)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
           }}
         >
-          Filters
-        </div>
-        {hasFilters && (
-          <button
-            type="button"
-            onClick={onClearAll}
-            title="Clear all filters"
+          <div
             style={{
-              border: "none",
-              background: "none",
-              cursor: "pointer",
-              fontSize: 14,
-              lineHeight: 1,
-              color: "var(--text-muted)",
-              padding: "0 2px",
+              fontSize: 11,
+              fontWeight: "700",
+              color: "var(--text-label)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
             }}
           >
-            ×
-          </button>
-        )}
-      </div>
-
-      {onSearch !== undefined && (
-        <div style={{ marginBottom: 12 }}>
-          <input
-            value={searchValue || ""}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder={searchPlaceholder}
-            style={inputStyle}
-          />
+            Filters
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={onClearAll}
+                title="Clear all filters"
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  lineHeight: 1,
+                  color: "var(--text-muted)",
+                  padding: "0 2px",
+                }}
+              >
+                ×
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              title="Close filters"
+              aria-label="Close filters"
+              className="filter-sidebar-close"
+              style={{
+                display: "none",
+                border: "none",
+                background: "none",
+                cursor: "pointer",
+                fontSize: 22,
+                lineHeight: 1,
+                color: "var(--text-muted)",
+                padding: "0 2px",
+              }}
+            >
+              ×
+            </button>
+          </div>
         </div>
-      )}
 
-      {children}
-    </div>
+        {onSearch !== undefined && (
+          <div style={{ marginBottom: 12 }}>
+            <input
+              value={searchValue || ""}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder={searchPlaceholder}
+              style={inputStyle}
+            />
+          </div>
+        )}
+
+        {children}
+      </div>
+    </>
   );
 }

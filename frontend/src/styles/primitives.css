@@ -345,6 +345,27 @@
 }
 .cc-modal__footer--between { justify-content: space-between; }
 
+/* Mobile: take over the full viewport regardless of size variant. */
+@media (max-width: 640px) {
+  .cc-modal-overlay {
+    padding: 0;
+  }
+  .cc-modal,
+  .cc-modal--sm,
+  .cc-modal--md,
+  .cc-modal--lg {
+    max-width: 100%;
+    max-height: 100%;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+  }
+  .cc-modal__close {
+    font-size: 22px;
+    padding: 4px 8px;
+  }
+}
+
 
 /* ── ConfirmButton ───────────────────────────────────────────────────────── */
 
