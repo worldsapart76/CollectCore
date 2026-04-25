@@ -267,6 +267,7 @@ function CardCell({
   return (
     <div
       onClick={onClick}
+      className="photocard-cell"
       style={{
         ...styles.cell,
         width: totalWidth,
@@ -314,7 +315,7 @@ function CardCell({
       )}
 
       {selectMode && selected && (
-        <div style={styles.selectOverlay}>✓</div>
+        <div className="pc-badge pc-badge--select" style={styles.selectOverlay}>✓</div>
       )}
     </div>
   );
@@ -345,14 +346,14 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
 
       {/* Primary badge (O or W) — bottom-left */}
       {primaryBadge && side === "front" && (
-        <div style={{ ...styles.ownershipBadge, color: primaryBadge.neonColor }}>
+        <div className="pc-badge pc-badge--ownership" style={{ ...styles.ownershipBadge, color: primaryBadge.neonColor }}>
           {primaryBadge.label}
         </div>
       )}
 
       {/* Other statuses badge — bottom-right */}
       {otherBadges && side === "front" && (
-        <div style={styles.otherBadge}>
+        <div className="pc-badge pc-badge--other" style={styles.otherBadge}>
           {otherBadges.map((part, i) => (
             <span key={i} style={{ color: part.color }}>
               {part.letter}{part.count > 1 ? part.count : ""}
@@ -363,12 +364,12 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
 
       {/* Back-image indicator — top-left */}
       {hasBack && side === "front" && (
-        <div style={styles.backBadge}>B</div>
+        <div className="pc-badge pc-badge--back" style={styles.backBadge}>B</div>
       )}
 
       {/* Special star — top-right */}
       {isSpecial && side === "front" && (
-        <div style={styles.specialBadge}>★</div>
+        <div className="pc-badge pc-badge--special" style={styles.specialBadge}>★</div>
       )}
     </div>
   );

@@ -854,8 +854,8 @@ select {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
-    max-width: 85vw;
+    width: 170px;
+    max-width: 60vw;
     background: var(--bg-surface);
     border-right: 1px solid var(--border);
     box-shadow: var(--shadow-modal);
@@ -931,8 +931,8 @@ select {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 280px !important;
-    max-width: 85vw;
+    width: 170px !important;
+    max-width: 60vw;
     z-index: 1000;
     transform: translateX(100%);
     transition: transform 0.25s ease;
@@ -983,5 +983,45 @@ select {
     width: 100% !important;
     height: auto !important;
     aspect-ratio: 100 / 138;
+  }
+
+  /* --- Badge scaling: badges shrink with cell width via container queries.
+        At 8 cards/row on a phone, the 20px desktop badges look enormous. cqw
+        units mean each badge is a % of the cell's actual rendered width. --- */
+  .photocard-cell {
+    container-type: inline-size;
+  }
+  .photocard-cell .pc-badge {
+    /* Reset desktop pixel sizing so cqw can take over. */
+    min-width: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 1cqw 2cqw !important;
+    font-size: 10cqw !important;
+    line-height: 1 !important;
+  }
+  .photocard-cell .pc-badge--ownership,
+  .photocard-cell .pc-badge--other,
+  .photocard-cell .pc-badge--back {
+    bottom: 2cqw !important;
+    top: auto;
+  }
+  .photocard-cell .pc-badge--ownership { left: 2cqw !important; }
+  .photocard-cell .pc-badge--other     { right: 2cqw !important; }
+  .photocard-cell .pc-badge--back      { top: 2cqw !important; bottom: auto !important; left: 2cqw !important; }
+  .photocard-cell .pc-badge--special {
+    top: 0 !important;
+    right: 1cqw !important;
+    font-size: 22cqw !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+  .photocard-cell .pc-badge--select {
+    top: 2cqw !important;
+    right: 2cqw !important;
+    width: 14cqw !important;
+    height: 14cqw !important;
+    font-size: 9cqw !important;
+    padding: 0 !important;
   }
 }
