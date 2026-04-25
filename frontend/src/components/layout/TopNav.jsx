@@ -123,8 +123,8 @@ export default function TopNav({ theme, toggleTheme }) {
 
   return (
     <header className="topnav">
-      {/* Mobile-only controls (hamburger + filter), hidden on desktop */}
-      <div className="topnav-mobile-controls">
+      {/* Mobile-only: hamburger on the left edge */}
+      <div className="topnav-mobile-controls topnav-mobile-controls--left">
         <button
           type="button"
           className="topnav-icon-btn"
@@ -133,16 +133,6 @@ export default function TopNav({ theme, toggleTheme }) {
         >
           <HamburgerIcon />
         </button>
-        {filtersAvailable && (
-          <button
-            type="button"
-            className="topnav-icon-btn"
-            onClick={() => window.dispatchEvent(new CustomEvent("collectcore:filters-toggle"))}
-            aria-label="Open filters"
-          >
-            <FilterIcon />
-          </button>
-        )}
       </div>
 
       <div className="topnav-left">
@@ -214,6 +204,20 @@ export default function TopNav({ theme, toggleTheme }) {
         </button>
       </div>
 
+      {/* Mobile-only: filter on the right edge (only when current page has filters) */}
+      <div className="topnav-mobile-controls topnav-mobile-controls--right">
+        {filtersAvailable && (
+          <button
+            type="button"
+            className="topnav-icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent("collectcore:filters-toggle"))}
+            aria-label="Open filters"
+          >
+            <FilterIcon />
+          </button>
+        )}
+      </div>
+
       {/* Mobile nav drawer — consolidates everything from topnav-right + module switcher */}
       {navDrawerOpen && (
         <div
@@ -224,14 +228,6 @@ export default function TopNav({ theme, toggleTheme }) {
       <aside className={`topnav-nav-drawer${navDrawerOpen ? " open" : ""}`} aria-hidden={!navDrawerOpen}>
         <div className="topnav-nav-drawer__header">
           <span style={{ fontWeight: 700, fontSize: 14 }}>Menu</span>
-          <button
-            type="button"
-            className="topnav-icon-btn"
-            onClick={() => setNavDrawerOpen(false)}
-            aria-label="Close menu"
-          >
-            ×
-          </button>
         </div>
 
         {activeModule && (

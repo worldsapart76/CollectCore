@@ -12,6 +12,19 @@ export const inboxState = {
   notes: "",
 };
 
+const STORAGE_KEY_MCPR = "photocard.mobileCardsPerRow";
+
+function readMobileCardsPerRow() {
+  try {
+    const v = parseInt(localStorage.getItem(STORAGE_KEY_MCPR), 10);
+    return Number.isFinite(v) && v >= 2 && v <= 8 ? v : 3;
+  } catch { return 3; }
+}
+
+export function persistMobileCardsPerRow(n) {
+  try { localStorage.setItem(STORAGE_KEY_MCPR, String(n)); } catch {}
+}
+
 export const libraryState = {
   filters: null,    // null = use DEFAULT_FILTERS on first mount
   sortMode: "default",
@@ -19,7 +32,7 @@ export const libraryState = {
   sizeMode: "m",
   showCaptions: true,
   pageSize: 30,
-  mobileCardsPerRow: 3,
+  mobileCardsPerRow: readMobileCardsPerRow(),
 };
 
 export const exportState = {

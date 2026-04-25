@@ -806,7 +806,14 @@ select {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-right: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Brand centers in the space between the left + right icon clusters. */
+  .topnav-left {
+    flex: 1;
+    justify-content: center;
+    gap: 6px;
   }
 
   .topnav-icon-btn {

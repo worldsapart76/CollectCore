@@ -14,7 +14,7 @@ import {
   sectionActive,
   applySection,
 } from "../components/library/FilterSidebar";
-import { libraryState } from "../photocardPageState";
+import { libraryState, persistMobileCardsPerRow } from "../photocardPageState";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
@@ -90,6 +90,7 @@ export default function PhotocardLibraryPage() {
     libraryState.showCaptions      = showCaptions;
     libraryState.pageSize          = pageSize;
     libraryState.mobileCardsPerRow = mobileCardsPerRow;
+    persistMobileCardsPerRow(mobileCardsPerRow);
   }, [filters, sortMode, viewMode, sizeMode, showCaptions, pageSize, mobileCardsPerRow]);
 
   // Load all lookup data + cards
