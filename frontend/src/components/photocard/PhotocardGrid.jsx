@@ -254,6 +254,8 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
         <img
           src={resolveCardSrc(path)}
           alt={side}
+          loading="lazy"
+          decoding="async"
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         />
       ) : (

@@ -532,6 +532,8 @@ function ImageSlot({ label, path, replacing, fileRef, onFileChange }) {
           <img
             src={resolveCardSrc(path)}
             alt={label}
+            loading="lazy"
+            decoding="async"
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         ) : (
