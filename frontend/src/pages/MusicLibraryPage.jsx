@@ -22,6 +22,14 @@ import {
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 import { GRID_SIZES } from "../styles/commonStyles";
+import {
+  MOBILE_BREAKPOINT,
+  useMediaQuery,
+  useMobileCardsPerRow,
+  useMobileInfiniteScroll,
+  MobilePerRowStepper,
+  MobileInfiniteSentinel,
+} from "../components/library/mobileGrid";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import {
@@ -366,12 +374,12 @@ function EditionsEditor({ editions, formatTypes, ownershipStatuses, onChange }) 
 const MusicGridItem = memo(function MusicGridItem({ release, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div className="cc-mobile-grid-cell" onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
-      <div style={{ position: "relative", width: w, height: h }}>
+      <div className="cc-mobile-grid-cell__cover" style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
           <input type="checkbox" checked={isSelected}
             onChange={() => onToggleSelect(release.item_id)}
@@ -751,6 +759,9 @@ export default function MusicLibraryPage() {
   const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [gridSize, setGridSize] = useState("m");
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useMobileCardsPerRow("music.mobileCardsPerRow");
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const sentinelRef = useRef(null);
   const [showCaptions, setShowCaptions] = useState(true);
 
   const [sortField, setSortField] = useState("title");
@@ -881,6 +892,13 @@ export default function MusicLibraryPage() {
 
   const allVisibleSelected = sorted.length > 0 && sorted.every(r => selectedIds.has(r.item_id));
 
+  const mobileVisible = useMobileInfiniteScroll({
+    enabled: isMobile && viewMode === "grid",
+    totalCount: sorted.length,
+    sentinelRef,
+    resetKey: sorted,
+  });
+
   const selectedReleases = useMemo(
     () => sorted.filter(r => selectedIds.has(r.item_id)),
     [sorted, selectedIds]
@@ -913,9 +931,12 @@ export default function MusicLibraryPage() {
           )}
           {viewMode === "grid" && (
             <>
-              <SegmentedButtons
-                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
-                value={gridSize} onChange={setGridSize} />
+              <span className="desktop-only" style={{ display: "inline-flex", alignItems: "center" }}>
+                <SegmentedButtons
+                  options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                  value={gridSize} onChange={setGridSize} />
+              </span>
+              <MobilePerRowStepper value={mobileCardsPerRow} onChange={setMobileCardsPerRow} />
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
@@ -941,15 +962,31 @@ export default function MusicLibraryPage() {
           ) : sorted.length === 0 ? (
             <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>No releases found.</p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
-              {sorted.map(r => (
-                <MusicGridItem key={r.item_id} release={r}
-                  isSelected={selectedIds.has(r.item_id)}
-                  onToggleSelect={toggleSelect}
-                  onClick={() => setEditingId(r.item_id)}
-                  gridSize={gridSize} showCaptions={showCaptions} />
-              ))}
-            </div>
+            <>
+              <div
+                className="cc-mobile-grid"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "var(--space-5)",
+                  padding: "var(--space-6)",
+                  alignContent: "flex-start",
+                  "--mobile-cards-per-row": mobileCardsPerRow,
+                  "--cell-aspect-ratio": "1 / 1",
+                }}
+              >
+                {(isMobile ? sorted.slice(0, mobileVisible) : sorted).map(r => (
+                  <MusicGridItem key={r.item_id} release={r}
+                    isSelected={selectedIds.has(r.item_id)}
+                    onToggleSelect={toggleSelect}
+                    onClick={() => setEditingId(r.item_id)}
+                    gridSize={gridSize} showCaptions={showCaptions} />
+                ))}
+              </div>
+              {isMobile && (
+                <MobileInfiniteSentinel visible={mobileVisible} total={sorted.length} sentinelRef={sentinelRef} />
+              )}
+            </>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>

@@ -1021,54 +1021,6 @@ def update_graphicnovel(item_id: int, payload: GraphicNovelUpdate, db=Depends(ge
         raise
 
 
-@router.post("/fix-covers")
-def gn_fix_covers(db=Depends(get_db)):
-    """Re-download any covers stored as external URLs (http/https) to local storage."""
-    try:
-        rows = db.execute(text("""
-            SELECT item_id, cover_image_url, api_source, external_work_id
-            FROM tbl_graphicnovel_details
-            WHERE cover_image_url IS NOT NULL
-              AND cover_image_url NOT LIKE '/images/%'
-        """)).fetchall()
-
-        fixed, failed = 0, []
-        for item_id, cover_url, api_source, external_work_id in rows:
-            local_cover = None
-
-            # For Google Books: re-fetch the thumbnail URL via the volume API
-            if api_source == "google_books" and external_work_id:
-                try:
-                    vol = google_books_get_volume(external_work_id)
-                    info = vol.get("volumeInfo", {})
-                    image_links = info.get("imageLinks", {})
-                    raw = image_links.get("thumbnail") or image_links.get("smallThumbnail")
-                    if raw:
-                        fresh_url = raw.replace("http://", "https://")
-                        local_cover = _download_gn_cover(fresh_url, item_id)
-                except Exception:
-                    pass
-
-            # Fallback: try the stored URL directly (works for Open Library etc.)
-            if not local_cover and cover_url:
-                local_cover = _download_gn_cover(cover_url, item_id)
-
-            if local_cover:
-                db.execute(
-                    text("UPDATE tbl_graphicnovel_details SET cover_image_url = :url WHERE item_id = :id"),
-                    {"url": local_cover, "id": item_id},
-                )
-                fixed += 1
-            else:
-                failed.append(item_id)
-
-        db.commit()
-        return {"fixed": fixed, "failed": failed}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.delete("/{item_id}")
 def delete_graphicnovel(item_id: int, db=Depends(get_db)):
     try:

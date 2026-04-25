@@ -509,11 +509,6 @@ export async function searchGnExternal(q, source = "comicvine") {
   return handleJsonResponse(res, "External search failed");
 }
 
-export async function fixGnCovers() {
-  const res = await fetch(`${API}/graphicnovels/fix-covers`, { method: "POST" });
-  return handleJsonResponse(res, "Fix covers failed");
-}
-
 // --- Graphic Novels CRUD ---
 
 export async function listGraphicNovels() {

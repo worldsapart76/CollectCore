@@ -16,7 +16,6 @@ import {
   fetchGnFormatTypes,
   fetchGnPublishers,
   fetchOwnershipStatuses,
-  fixGnCovers,
   getGraphicNovel,
   listGraphicNovels,
   updateGraphicNovel,
@@ -25,6 +24,14 @@ import {
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 import { GRID_SIZES } from "../styles/commonStyles";
+import {
+  MOBILE_BREAKPOINT,
+  useMediaQuery,
+  useMobileCardsPerRow,
+  useMobileInfiniteScroll,
+  MobilePerRowStepper,
+  MobileInfiniteSentinel,
+} from "../components/library/mobileGrid";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
@@ -713,12 +720,12 @@ function SourceSeriesDisplay({ sourceSeries, issueNotes }) {
 const GnGridItem = memo(function GnGridItem({ gn, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div className="cc-mobile-grid-cell" onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--btn-primary-bg)" : "2px solid transparent",
       borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
-      <div style={{ position: "relative", width: w, height: h }}>
+      <div className="cc-mobile-grid-cell__cover" style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
           <input type="checkbox" checked={isSelected}
             onChange={() => onToggleSelect(gn.item_id)}
@@ -789,6 +796,9 @@ export default function GraphicNovelsLibraryPage() {
   const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [gridSize, setGridSize] = useState("m");
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useMobileCardsPerRow("gn.mobileCardsPerRow");
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const sentinelRef = useRef(null);
   const [showCaptions, setShowCaptions] = useState(true);
   const [sourceSeriesSearch, setSourceSeriesSearch] = useState("");
 
@@ -800,8 +810,6 @@ export default function GraphicNovelsLibraryPage() {
   });
   const [ssSortKey, setSSSort] = useState("series");
   const [ssSortDir, setSSSortDir] = useState("asc");
-  const [fixingCovers, setFixingCovers] = useState(false);
-  const [fixCoversResult, setFixCoversResult] = useState(null);
   const colResizingRef = useRef(false);
 
   const makeResizeHandler = useCallback((col) => (e) => {
@@ -907,6 +915,13 @@ export default function GraphicNovelsLibraryPage() {
     return arr;
   }, [filtered, sortKey, sortDir]);
 
+  const mobileVisible = useMobileInfiniteScroll({
+    enabled: isMobile && viewMode === "grid",
+    totalCount: sorted.length,
+    sentinelRef,
+    resetKey: sorted,
+  });
+
   const sourceSeriesRows = useMemo(() => {
     const rows = [];
     for (const g of filtered) {
@@ -942,20 +957,6 @@ export default function GraphicNovelsLibraryPage() {
   function toggleSSSort(key) {
     if (ssSortKey === key) setSSSortDir((d) => d === "asc" ? "desc" : "asc");
     else { setSSSort(key); setSSSortDir("asc"); }
-  }
-
-  async function handleFixCovers() {
-    setFixingCovers(true);
-    setFixCoversResult(null);
-    try {
-      const r = await fixGnCovers();
-      setFixCoversResult(`Fixed ${r.fixed} cover${r.fixed !== 1 ? "s" : ""}${r.failed?.length ? ` (${r.failed.length} failed)` : ""}.`);
-      load();
-    } catch (e) {
-      setFixCoversResult(`Error: ${e.message}`);
-    } finally {
-      setFixingCovers(false);
-    }
   }
 
   function ssSortArrow(key) {
@@ -1024,7 +1025,7 @@ export default function GraphicNovelsLibraryPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Controls bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)", flexShrink: 0, gap: "var(--space-4)", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-6)", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)", flexShrink: 0, gap: "var(--space-4)" }}>
         <Row gap={5}>
           <SegmentedButtons
             options={[{ value: "library", label: "Library" }, { value: "sourceSeries", label: "Source Series" }]}
@@ -1055,18 +1056,17 @@ export default function GraphicNovelsLibraryPage() {
               )}
               {viewMode === "grid" && (
                 <>
-                  <SegmentedButtons
-                    options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
-                    value={gridSize} onChange={setGridSize} />
+                  <span className="desktop-only" style={{ display: "inline-flex", alignItems: "center" }}>
+                    <SegmentedButtons
+                      options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                      value={gridSize} onChange={setGridSize} />
+                  </span>
+                  <MobilePerRowStepper value={mobileCardsPerRow} onChange={setMobileCardsPerRow} />
                   <ToggleButton active={showCaptions} onClick={() => setShowCaptions((p) => !p)}>Captions</ToggleButton>
                 </>
               )}
             </>
           )}
-          <Button variant="secondary" size="sm" onClick={handleFixCovers} disabled={fixingCovers} title="Re-download all covers stored as external URLs">
-            {fixingCovers ? "Fixing…" : "Fix Covers"}
-          </Button>
-          {fixCoversResult && <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{fixCoversResult}</span>}
         </Row>
       </div>
 
@@ -1100,15 +1100,30 @@ export default function GraphicNovelsLibraryPage() {
             )}
 
             {sorted.length > 0 && viewMode === "grid" && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", alignContent: "flex-start" }}>
-                {sorted.map((g) => (
-                  <GnGridItem key={g.item_id} gn={g}
-                    isSelected={selectedIds.has(g.item_id)}
-                    onToggleSelect={toggleSelect}
-                    onClick={() => setActiveItemId(g.item_id)}
-                    gridSize={gridSize} showCaptions={showCaptions} />
-                ))}
-              </div>
+              <>
+                <div
+                  className="cc-mobile-grid"
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "var(--space-5)",
+                    alignContent: "flex-start",
+                    "--mobile-cards-per-row": mobileCardsPerRow,
+                    "--cell-aspect-ratio": "2 / 3",
+                  }}
+                >
+                  {(isMobile ? sorted.slice(0, mobileVisible) : sorted).map((g) => (
+                    <GnGridItem key={g.item_id} gn={g}
+                      isSelected={selectedIds.has(g.item_id)}
+                      onToggleSelect={toggleSelect}
+                      onClick={() => setActiveItemId(g.item_id)}
+                      gridSize={gridSize} showCaptions={showCaptions} />
+                  ))}
+                </div>
+                {isMobile && (
+                  <MobileInfiniteSentinel visible={mobileVisible} total={sorted.length} sentinelRef={sentinelRef} />
+                )}
+              </>
             )}
 
             {sorted.length > 0 && viewMode === "table" && (

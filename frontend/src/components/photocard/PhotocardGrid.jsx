@@ -128,7 +128,6 @@ export default function PhotocardGrid({
   page,
   onPageChange,
   pageSize = 30,
-  copyCount,
   mobileCardsPerRow = 3,
 }) {
   const { cellWidth, imageHeight } = SIZE_CONFIG[sizeMode] || SIZE_CONFIG.m;
@@ -206,15 +205,10 @@ export default function PhotocardGrid({
         ))}
       </div>
 
-      {/* Mobile infinite-scroll sentinel + status */}
+      {/* Mobile infinite-scroll sentinel */}
       {isMobile && mobileVisible < cards.length && (
         <div ref={sentinelRef} style={styles.sentinelStatus}>
           Loading more cards…
-        </div>
-      )}
-      {isMobile && mobileVisible >= cards.length && cards.length > 0 && (
-        <div style={styles.countLine}>
-          {cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""}
         </div>
       )}
 
@@ -229,7 +223,7 @@ export default function PhotocardGrid({
             ← Prev
           </button>
           <span style={styles.pageInfo}>
-            Page {safePage} of {totalPages} ({cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""})
+            Page {safePage} of {totalPages}
           </span>
           <button
             style={styles.pageBtn}
@@ -238,12 +232,6 @@ export default function PhotocardGrid({
           >
             Next →
           </button>
-        </div>
-      )}
-
-      {!isMobile && cards.length > 0 && totalPages === 1 && (
-        <div style={styles.countLine}>
-          {cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""}
         </div>
       )}
     </div>
@@ -513,11 +501,6 @@ const styles = {
   pageInfo: {
     fontSize: "var(--text-base)",
     color: "var(--text-secondary)",
-  },
-  countLine: {
-    marginTop: 8,
-    fontSize: "var(--text-sm)",
-    color: "var(--text-muted)",
   },
   sentinelStatus: {
     padding: "16px 0",

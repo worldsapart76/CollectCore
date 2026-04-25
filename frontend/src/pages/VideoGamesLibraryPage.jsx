@@ -22,6 +22,14 @@ import {
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 import { GRID_SIZES } from "../styles/commonStyles";
+import {
+  MOBILE_BREAKPOINT,
+  useMediaQuery,
+  useMobileCardsPerRow,
+  useMobileInfiniteScroll,
+  MobilePerRowStepper,
+  MobileInfiniteSentinel,
+} from "../components/library/mobileGrid";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
@@ -68,21 +76,21 @@ function GameFilters({ items, ownershipStatuses, playStatuses, filters, onSectio
   const allDevelopers = useMemo(() => {
     const seen = new Set();
     const result = [];
-    for (const g of items) for (const d of (g.developers || [])) if (!seen.has(d)) { seen.add(d); result.push(d); }
+    for (const g of items) for (const d of (g.developers || [])) if (d && !seen.has(d)) { seen.add(d); result.push(d); }
     return result.sort().map(d => ({ id: d, label: d }));
   }, [items]);
 
   const allPublishers = useMemo(() => {
     const seen = new Set();
     const result = [];
-    for (const g of items) for (const p of (g.publishers || [])) if (!seen.has(p)) { seen.add(p); result.push(p); }
+    for (const g of items) for (const p of (g.publishers || [])) if (p && !seen.has(p)) { seen.add(p); result.push(p); }
     return result.sort().map(p => ({ id: p, label: p }));
   }, [items]);
 
   const allGenreLabels = useMemo(() => {
     const seen = new Set();
     const result = [];
-    for (const g of items) for (const genre of (g.genres || [])) if (!seen.has(genre)) { seen.add(genre); result.push(genre); }
+    for (const g of items) for (const genre of (g.genres || [])) if (genre && !seen.has(genre)) { seen.add(genre); result.push(genre); }
     return result.sort().map(g => ({ id: g, label: g }));
   }, [items]);
 
@@ -108,7 +116,7 @@ function GameFilters({ items, ownershipStatuses, playStatuses, filters, onSectio
       />
       <TriStateFilterSection
         title="Play Status"
-        items={playStatuses.map(s => ({ id: s.play_status_id, label: s.status_name }))}
+        items={playStatuses.map(s => ({ id: s.read_status_id, label: s.status_name }))}
         section={filters.playStatus}
         onChange={s => onSectionChange("playStatus", s)}
       />
@@ -276,12 +284,12 @@ function CopiesEditor({ copies, allPlatforms, ownershipStatuses, onChange }) {
 const VideoGameGridItem = memo(function VideoGameGridItem({ game, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div className="cc-mobile-grid-cell" onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
-      <div style={{ position: "relative", width: w, height: h }}>
+      <div className="cc-mobile-grid-cell__cover" style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
           <input type="checkbox" checked={isSelected}
             onChange={() => onToggleSelect(game.item_id)}
@@ -629,6 +637,9 @@ export default function VideoGamesLibraryPage() {
   const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [gridSize, setGridSize] = useState("m");
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useMobileCardsPerRow("videogames.mobileCardsPerRow");
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const sentinelRef = useRef(null);
   const [showCaptions, setShowCaptions] = useState(true);
 
   const [sortField, setSortField] = useState("title");
@@ -729,6 +740,13 @@ export default function VideoGamesLibraryPage() {
     }
   }, [filteredGames, sortField, sortDir]);
 
+  const mobileVisible = useMobileInfiniteScroll({
+    enabled: isMobile && viewMode === "grid",
+    totalCount: sortedGames.length,
+    sentinelRef,
+    resetKey: sortedGames,
+  });
+
   function toggleSelect(id) {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -776,9 +794,12 @@ export default function VideoGamesLibraryPage() {
           )}
           {viewMode === "grid" && (
             <>
-              <SegmentedButtons
-                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
-                value={gridSize} onChange={setGridSize} />
+              <span className="desktop-only" style={{ display: "inline-flex", alignItems: "center" }}>
+                <SegmentedButtons
+                  options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                  value={gridSize} onChange={setGridSize} />
+              </span>
+              <MobilePerRowStepper value={mobileCardsPerRow} onChange={setMobileCardsPerRow} />
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
@@ -800,15 +821,31 @@ export default function VideoGamesLibraryPage() {
           {sortedGames.length === 0 ? (
             <p style={{ padding: "var(--space-8)", fontSize: "var(--text-base)", color: "var(--text-secondary)" }}>No games match current filters.</p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
-              {sortedGames.map(g => (
-                <VideoGameGridItem key={g.item_id} game={g}
-                  isSelected={selectedIds.has(g.item_id)}
-                  onToggleSelect={toggleSelect}
-                  onClick={() => setEditId(g.item_id)}
-                  gridSize={gridSize} showCaptions={showCaptions} />
-              ))}
-            </div>
+            <>
+              <div
+                className="cc-mobile-grid"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "var(--space-5)",
+                  padding: "var(--space-6)",
+                  alignContent: "flex-start",
+                  "--mobile-cards-per-row": mobileCardsPerRow,
+                  "--cell-aspect-ratio": "3 / 4",
+                }}
+              >
+                {(isMobile ? sortedGames.slice(0, mobileVisible) : sortedGames).map(g => (
+                  <VideoGameGridItem key={g.item_id} game={g}
+                    isSelected={selectedIds.has(g.item_id)}
+                    onToggleSelect={toggleSelect}
+                    onClick={() => setEditId(g.item_id)}
+                    gridSize={gridSize} showCaptions={showCaptions} />
+                ))}
+              </div>
+              {isMobile && (
+                <MobileInfiniteSentinel visible={mobileVisible} total={sortedGames.length} sentinelRef={sentinelRef} />
+              )}
+            </>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>

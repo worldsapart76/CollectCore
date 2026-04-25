@@ -225,7 +225,10 @@ export default function TopNav({ theme, toggleTheme }) {
           onClick={() => setNavDrawerOpen(false)}
         />
       )}
-      <aside className={`topnav-nav-drawer${navDrawerOpen ? " open" : ""}`} aria-hidden={!navDrawerOpen}>
+      <aside
+        className={`topnav-nav-drawer${navDrawerOpen ? " open" : ""}`}
+        {...(navDrawerOpen ? {} : { inert: "" })}
+      >
         <div className="topnav-nav-drawer__header">
           <span style={{ fontWeight: 700, fontSize: 14 }}>Menu</span>
         </div>

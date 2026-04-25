@@ -27,7 +27,6 @@ export default function HomePage() {
           <HomeTile
             key={mod.id}
             title={mod.label}
-            description={mod.description}
             to={mod.primaryPath}
           />
         ))}

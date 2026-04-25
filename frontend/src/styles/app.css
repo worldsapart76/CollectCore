@@ -327,7 +327,7 @@ select {
 
 .home-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 320px));
+  grid-template-columns: repeat(2, minmax(110px, 160px));
   gap: 14px;
   align-content: start;
   justify-content: center;
@@ -356,13 +356,7 @@ select {
 .home-tile-title {
   font-weight: 700;
   font-size: 1rem;
-  margin-bottom: 6px;
   color: var(--green);
-}
-
-.home-tile-description {
-  color: var(--text-secondary);
-  font-size: 0.88rem;
 }
 
 /* ── Misc pages ──────────────────────────────────────────────────────────────── */
@@ -962,6 +956,29 @@ select {
      (position: fixed) doesn't leave a 220px blank gap in the layout. */
   .library-sidebar-wrap {
     display: contents !important;
+  }
+
+  /* --- Shared module library grid: N-cards-per-row treatment for non-photocard
+        modules. Each module sets `--cell-aspect-ratio` (default 2/3 for covers,
+        1/1 for square album/board art) inline on the grid container. --- */
+  .cc-mobile-grid {
+    display: grid !important;
+    grid-template-columns: repeat(var(--mobile-cards-per-row, 3), minmax(0, 1fr)) !important;
+    gap: 4px !important;
+  }
+  .cc-mobile-grid > .cc-mobile-grid-cell {
+    width: auto !important;
+    min-width: 0 !important;
+  }
+  .cc-mobile-grid .cc-mobile-grid-cell__cover {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: var(--cell-aspect-ratio, 2 / 3);
+  }
+  .cc-mobile-grid .cc-mobile-grid-cell__cover img,
+  .cc-mobile-grid .cc-mobile-grid-cell__cover > div {
+    width: 100% !important;
+    height: 100% !important;
   }
 
   /* --- Photocard grid: switch from flex-wrap to a fixed N-cards-per-row grid. --- */

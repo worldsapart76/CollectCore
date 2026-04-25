@@ -216,8 +216,9 @@ function TriStateItem({ label, state, onClick }) {
  */
 export function TriStateFilterSection({ title, items, section, onChange, defaultShown = 5 }) {
   const [expanded, setExpanded] = useState(false);
-  const shown = expanded ? items : items.slice(0, defaultShown);
-  const hasMore = items.length > defaultShown;
+  const safeItems = useMemo(() => items.filter((i) => i && i.id != null), [items]);
+  const shown = expanded ? safeItems : safeItems.slice(0, defaultShown);
+  const hasMore = safeItems.length > defaultShown;
   return (
     <div style={{ marginBottom: 12 }}>
       <SectionHeader title={title} section={section} onChange={onChange} />
@@ -237,7 +238,7 @@ export function TriStateFilterSection({ title, items, section, onChange, default
           onClick={() => setExpanded((p) => !p)}
           style={{ ...btnSm, marginTop: 4 }}
         >
-          {expanded ? "Show less" : `+${items.length - defaultShown} more`}
+          {expanded ? "Show less" : `+${safeItems.length - defaultShown} more`}
         </button>
       )}
     </div>

@@ -248,21 +248,6 @@ export default function PhotocardLibraryPage() {
     return result;
   }, [cards, filters]);
 
-  // Compute copy count: sum of copies matching active ownership filter
-  const copyCount = useMemo(() => {
-    if (!sectionActive(filters.ownership)) {
-      // No ownership filter — count all copies across filtered cards
-      return filteredCards.reduce((sum, c) => sum + (c.copies?.length || 0), 0);
-    }
-    // Count only copies matching the ownership filter
-    return filteredCards.reduce((sum, c) => {
-      const matching = (c.copies || []).filter((cp) =>
-        applySection(filters.ownership, [String(cp.ownership_status_id)])
-      );
-      return sum + matching.length;
-    }, 0);
-  }, [filteredCards, filters]);
-
   // Apply sort
   const sortedCards = useMemo(() => {
     const result = [...filteredCards];
@@ -512,7 +497,6 @@ export default function PhotocardLibraryPage() {
             page={page}
             onPageChange={setPage}
             pageSize={pageSize}
-            copyCount={copyCount}
             mobileCardsPerRow={mobileCardsPerRow}
           />
         </div>

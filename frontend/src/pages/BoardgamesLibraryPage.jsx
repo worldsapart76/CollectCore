@@ -20,6 +20,14 @@ import {
 } from "../api";
 import { getImageUrl } from "../utils/imageUrl";
 import { GRID_SIZES } from "../styles/commonStyles";
+import {
+  MOBILE_BREAKPOINT,
+  useMediaQuery,
+  useMobileCardsPerRow,
+  useMobileInfiniteScroll,
+  MobilePerRowStepper,
+  MobileInfiniteSentinel,
+} from "../components/library/mobileGrid";
 import NameList from "../components/shared/NameList";
 import { ToggleButton, SegmentedButtons } from "../components/shared/SegmentedButtons";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
@@ -172,12 +180,12 @@ function ExpansionsEditor({ expansions, ownershipStatuses, onChange }) {
 const BoardgameGridItem = memo(function BoardgameGridItem({ game, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
   const { w, h } = GRID_SIZES[gridSize];
   return (
-    <div onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
+    <div className="cc-mobile-grid-cell" onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
       outline: isSelected ? "2px solid var(--selection-border)" : "2px solid transparent",
       borderRadius: "var(--radius-sm)", boxSizing: "border-box",
     }}>
-      <div style={{ position: "relative", width: w, height: h }}>
+      <div className="cc-mobile-grid-cell__cover" style={{ position: "relative", width: w, height: h }}>
         <div style={{ position: "absolute", top: 4, left: 4, zIndex: 2 }}>
           <input type="checkbox" checked={isSelected}
             onChange={() => onToggleSelect(game.item_id)}
@@ -546,6 +554,9 @@ export default function BoardgamesLibraryPage() {
   const [viewMode, setViewMode] = useState("table");
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [gridSize, setGridSize] = useState("m");
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useMobileCardsPerRow("boardgames.mobileCardsPerRow");
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const sentinelRef = useRef(null);
   const [showCaptions, setShowCaptions] = useState(true);
 
   const [sortField, setSortField] = useState("title");
@@ -647,6 +658,13 @@ export default function BoardgamesLibraryPage() {
     }
   }, [filteredGames, sortField, sortDir]);
 
+  const mobileVisible = useMobileInfiniteScroll({
+    enabled: isMobile && viewMode === "grid",
+    totalCount: sortedGames.length,
+    sentinelRef,
+    resetKey: sortedGames,
+  });
+
   function toggleSelect(id) {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -695,9 +713,12 @@ export default function BoardgamesLibraryPage() {
           )}
           {viewMode === "grid" && (
             <>
-              <SegmentedButtons
-                options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
-                value={gridSize} onChange={setGridSize} />
+              <span className="desktop-only" style={{ display: "inline-flex", alignItems: "center" }}>
+                <SegmentedButtons
+                  options={[{ value: "s", label: "S" }, { value: "m", label: "M" }, { value: "l", label: "L" }]}
+                  value={gridSize} onChange={setGridSize} />
+              </span>
+              <MobilePerRowStepper value={mobileCardsPerRow} onChange={setMobileCardsPerRow} />
               <ToggleButton active={showCaptions} onClick={() => setShowCaptions(p => !p)}>Captions</ToggleButton>
             </>
           )}
@@ -727,15 +748,31 @@ export default function BoardgamesLibraryPage() {
               No board games found.
             </p>
           ) : viewMode === "grid" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-5)", padding: "var(--space-6)", alignContent: "flex-start" }}>
-              {sortedGames.map(g => (
-                <BoardgameGridItem key={g.item_id} game={g}
-                  isSelected={selectedIds.has(g.item_id)}
-                  onToggleSelect={toggleSelect}
-                  onClick={() => setEditId(g.item_id)}
-                  gridSize={gridSize} showCaptions={showCaptions} />
-              ))}
-            </div>
+            <>
+              <div
+                className="cc-mobile-grid"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "var(--space-5)",
+                  padding: "var(--space-6)",
+                  alignContent: "flex-start",
+                  "--mobile-cards-per-row": mobileCardsPerRow,
+                  "--cell-aspect-ratio": "1 / 1",
+                }}
+              >
+                {(isMobile ? sortedGames.slice(0, mobileVisible) : sortedGames).map(g => (
+                  <BoardgameGridItem key={g.item_id} game={g}
+                    isSelected={selectedIds.has(g.item_id)}
+                    onToggleSelect={toggleSelect}
+                    onClick={() => setEditId(g.item_id)}
+                    gridSize={gridSize} showCaptions={showCaptions} />
+                ))}
+              </div>
+              {isMobile && (
+                <MobileInfiniteSentinel visible={mobileVisible} total={sortedGames.length} sentinelRef={sentinelRef} />
+              )}
+            </>
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-base)", tableLayout: "fixed" }}>
               <colgroup>
