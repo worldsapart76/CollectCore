@@ -68,6 +68,7 @@ export default function PhotocardLibraryPage() {
   const [sizeMode, setSizeMode] = useState(libraryState.sizeMode);
   const [showCaptions, setShowCaptions] = useState(libraryState.showCaptions);
   const [pageSize, setPageSize] = useState(libraryState.pageSize);
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useState(libraryState.mobileCardsPerRow);
 
   // Selection / bulk edit
   const [selectMode, setSelectMode] = useState(false);
@@ -82,13 +83,14 @@ export default function PhotocardLibraryPage() {
 
   // Sync filter/view state back to module store on changes
   useEffect(() => {
-    libraryState.filters      = filters;
-    libraryState.sortMode     = sortMode;
-    libraryState.viewMode     = viewMode;
-    libraryState.sizeMode     = sizeMode;
-    libraryState.showCaptions = showCaptions;
-    libraryState.pageSize     = pageSize;
-  }, [filters, sortMode, viewMode, sizeMode, showCaptions, pageSize]);
+    libraryState.filters           = filters;
+    libraryState.sortMode          = sortMode;
+    libraryState.viewMode          = viewMode;
+    libraryState.sizeMode          = sizeMode;
+    libraryState.showCaptions      = showCaptions;
+    libraryState.pageSize          = pageSize;
+    libraryState.mobileCardsPerRow = mobileCardsPerRow;
+  }, [filters, sortMode, viewMode, sizeMode, showCaptions, pageSize, mobileCardsPerRow]);
 
   // Load all lookup data + cards
   useEffect(() => {
@@ -359,28 +361,56 @@ export default function PhotocardLibraryPage() {
       {/* Controls bar */}
       <div style={styles.controlsBar}>
         <div style={styles.controlsLeft}>
-          {/* View mode */}
-          <ToggleGroup
-            label="View"
-            options={[
-              { value: "fronts", label: "Fronts" },
-              { value: "fronts_backs", label: "Fronts + Backs" },
-            ]}
-            value={viewMode}
-            onChange={setViewMode}
-          />
+          {/* View mode (desktop only — mobile uses detail modal for backs) */}
+          <div className="desktop-only" style={{ display: "contents" }}>
+            <ToggleGroup
+              label="View"
+              options={[
+                { value: "fronts", label: "Fronts" },
+                { value: "fronts_backs", label: "Fronts + Backs" },
+              ]}
+              value={viewMode}
+              onChange={setViewMode}
+            />
+          </div>
 
-          {/* Size */}
-          <ToggleGroup
-            label="Size"
-            options={[
-              { value: "s", label: "S" },
-              { value: "m", label: "M" },
-              { value: "l", label: "L" },
-            ]}
-            value={sizeMode}
-            onChange={setSizeMode}
-          />
+          {/* Size (desktop only) */}
+          <div className="desktop-only" style={{ display: "contents" }}>
+            <ToggleGroup
+              label="Size"
+              options={[
+                { value: "s", label: "S" },
+                { value: "m", label: "M" },
+                { value: "l", label: "L" },
+              ]}
+              value={sizeMode}
+              onChange={setSizeMode}
+            />
+          </div>
+
+          {/* Cards per row (mobile only) */}
+          <div className="mobile-only" style={styles.controlGroup}>
+            <span style={styles.controlLabel}>Per row</span>
+            <div style={styles.toggleGroup}>
+              <button
+                style={styles.toggleBtn}
+                onClick={() => setMobileCardsPerRow((n) => Math.max(2, n - 1))}
+                aria-label="Fewer cards per row"
+              >
+                −
+              </button>
+              <span style={{ ...styles.toggleBtn, minWidth: 28, textAlign: "center", cursor: "default" }}>
+                {mobileCardsPerRow}
+              </span>
+              <button
+                style={styles.toggleBtn}
+                onClick={() => setMobileCardsPerRow((n) => Math.min(8, n + 1))}
+                aria-label="More cards per row"
+              >
+                +
+              </button>
+            </div>
+          </div>
 
           {/* Sort */}
           <div style={styles.controlGroup}>
@@ -407,8 +437,8 @@ export default function PhotocardLibraryPage() {
             Captions
           </label>
 
-          {/* Per-page */}
-          <div style={styles.controlGroup}>
+          {/* Per-page (desktop only — mobile uses infinite scroll) */}
+          <div className="desktop-only" style={styles.controlGroup}>
             <span style={styles.controlLabel}>Per page</span>
             <select
               value={pageSize}
@@ -482,6 +512,7 @@ export default function PhotocardLibraryPage() {
             onPageChange={setPage}
             pageSize={pageSize}
             copyCount={copyCount}
+            mobileCardsPerRow={mobileCardsPerRow}
           />
         </div>
 

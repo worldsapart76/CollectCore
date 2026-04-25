@@ -19,6 +19,7 @@ export const libraryState = {
   sizeMode: "m",
   showCaptions: true,
   pageSize: 30,
+  mobileCardsPerRow: 3,
 };
 
 export const exportState = {

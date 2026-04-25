@@ -791,7 +791,8 @@ select {
 .topnav-mobile-controls,
 .topnav-nav-backdrop,
 .topnav-nav-drawer,
-.filter-sidebar-backdrop {
+.filter-sidebar-backdrop,
+.mobile-only {
   display: none;
 }
 
@@ -944,5 +945,34 @@ select {
   /* Lock background scroll while either drawer is open. */
   body.filter-drawer-open {
     overflow: hidden;
+  }
+
+  /* Show/hide utility classes — flip the desktop default on mobile. */
+  .desktop-only {
+    display: none !important;
+  }
+  .mobile-only {
+    display: flex;
+  }
+
+  /* --- Photocard grid: switch from flex-wrap to a fixed N-cards-per-row grid. --- */
+  .photocard-grid {
+    display: grid !important;
+    grid-template-columns: repeat(var(--mobile-cards-per-row, 3), 1fr) !important;
+    gap: 4px !important;
+  }
+  /* Each cell becomes column-width; image gets aspect ratio so height adapts. */
+  .photocard-grid > * {
+    width: auto !important;
+  }
+  .photocard-grid > * > div:first-child {
+    /* The flex row of front/back image slots */
+    display: block !important;
+  }
+  .photocard-grid > * > div:first-child > div {
+    /* ImageSlot wrapper — let it size by aspect-ratio */
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 100 / 138;
   }
 }

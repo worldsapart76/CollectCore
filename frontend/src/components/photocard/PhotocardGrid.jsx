@@ -1,20 +1,38 @@
+import { useEffect, useRef, useState } from "react";
 import { API_BASE, getImageUrl } from "../../utils/imageUrl";
 
 /**
  * PhotocardGrid — displays cards in a compact grid.
  *
  * Props:
- *   cards          — filtered+sorted array of photocard objects
- *   viewMode       — "fronts" | "fronts_backs"
- *   sizeMode       — "s" | "m" | "l"
- *   showCaptions   — boolean
- *   selectMode     — boolean
- *   selectedIds    — Set of selected item_id strings
- *   onCardClick    — callback(card) — open detail or toggle select
- *   page           — current page number (1-based)
- *   onPageChange   — callback(newPage)
- *   pageSize       — number of cards per page (default 30, 0 = all)
+ *   cards             — filtered+sorted array of photocard objects
+ *   viewMode          — "fronts" | "fronts_backs"
+ *   sizeMode          — "s" | "m" | "l"  (desktop)
+ *   mobileCardsPerRow — integer 2..8 (mobile only)
+ *   showCaptions      — boolean
+ *   selectMode        — boolean
+ *   selectedIds       — Set of selected item_id strings
+ *   onCardClick       — callback(card) — open detail or toggle select
+ *   page              — current page number (1-based, desktop only)
+ *   onPageChange      — callback(newPage)
+ *   pageSize          — number of cards per page (default 30, 0 = all). Desktop only.
  */
+
+const MOBILE_BREAKPOINT = "(max-width: 768px)";
+const MOBILE_PAGE_INCREMENT = 30;
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const handler = (e) => setMatches(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, [query]);
+  return matches;
+}
 
 // Status → letter mapping
 const STATUS_LETTERS = {
@@ -98,13 +116,43 @@ export default function PhotocardGrid({
   onPageChange,
   pageSize = 30,
   copyCount,
+  mobileCardsPerRow = 3,
 }) {
   const { cellWidth, imageHeight } = SIZE_CONFIG[sizeMode] || SIZE_CONFIG.m;
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+
+  // Mobile: incremental visible count for infinite scroll. Resets when the
+  // cards array changes (i.e. filters/sort produced a new sortedCards memo).
+  const [mobileVisible, setMobileVisible] = useState(MOBILE_PAGE_INCREMENT);
+  useEffect(() => { setMobileVisible(MOBILE_PAGE_INCREMENT); }, [cards]);
+
+  // Desktop pagination
   const effectivePageSize = pageSize === 0 ? cards.length : pageSize;
   const totalPages = Math.max(1, Math.ceil(cards.length / effectivePageSize));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * effectivePageSize;
-  const pageCards = cards.slice(start, start + effectivePageSize);
+
+  const pageCards = isMobile
+    ? cards.slice(0, mobileVisible)
+    : cards.slice(start, start + effectivePageSize);
+
+  // Mobile infinite scroll sentinel
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setMobileVisible((c) => Math.min(c + MOBILE_PAGE_INCREMENT, cards.length));
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isMobile, cards.length]);
 
   if (cards.length === 0) {
     return (
@@ -114,14 +162,20 @@ export default function PhotocardGrid({
     );
   }
 
+  // On mobile we force fronts-only view (no fronts+backs) so the grid columns
+  // stay consistent at the user's chosen cards-per-row.
+  const effectiveViewMode = isMobile ? "fronts" : viewMode;
+
   return (
     <div>
       {/* Grid */}
       <div
+        className="photocard-grid"
         style={{
           display: "flex",
           flexWrap: "wrap",
           gap: 8,
+          "--mobile-cards-per-row": mobileCardsPerRow,
         }}
       >
         {pageCards.map((card) => (
@@ -130,7 +184,7 @@ export default function PhotocardGrid({
             card={card}
             cellWidth={cellWidth}
             imageHeight={imageHeight}
-            viewMode={viewMode}
+            viewMode={effectiveViewMode}
             showCaptions={showCaptions}
             selectMode={selectMode}
             selected={selectedIds.has(String(card.item_id))}
@@ -139,8 +193,20 @@ export default function PhotocardGrid({
         ))}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {/* Mobile infinite-scroll sentinel + status */}
+      {isMobile && mobileVisible < cards.length && (
+        <div ref={sentinelRef} style={styles.sentinelStatus}>
+          Loading more cards…
+        </div>
+      )}
+      {isMobile && mobileVisible >= cards.length && cards.length > 0 && (
+        <div style={styles.countLine}>
+          {cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""}
+        </div>
+      )}
+
+      {/* Desktop pagination */}
+      {!isMobile && totalPages > 1 && (
         <div style={styles.pagination}>
           <button
             style={styles.pageBtn}
@@ -162,7 +228,7 @@ export default function PhotocardGrid({
         </div>
       )}
 
-      {cards.length > 0 && totalPages === 1 && (
+      {!isMobile && cards.length > 0 && totalPages === 1 && (
         <div style={styles.countLine}>
           {cards.length} cards{copyCount != null && copyCount !== cards.length ? `, ${copyCount} copies` : ""}
         </div>
@@ -436,6 +502,12 @@ const styles = {
   },
   countLine: {
     marginTop: 8,
+    fontSize: "var(--text-sm)",
+    color: "var(--text-muted)",
+  },
+  sentinelStatus: {
+    padding: "16px 0",
+    textAlign: "center",
     fontSize: "var(--text-sm)",
     color: "var(--text-muted)",
   },
