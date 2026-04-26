@@ -27,3 +27,14 @@ Thumbs.db
 .dropbox
 .dropbox.cache/
 *(conflicted copy *)
+
+# Claude Code harness internals (session lock, scheduled-task state, etc.)
+.claude/
+
+# Capacitor Android scaffold — only present on the indefinitely-deferred
+# `mobile-shell` branch; ignored on main so branch switches don't keep
+# re-flagging it as untracked.
+frontend/android/
+
+# Local DB snapshots dumped into docs/ during ad-hoc backup work
+docs/collectcore_backup_*.zip

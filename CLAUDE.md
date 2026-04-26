@@ -168,6 +168,7 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 | `C:\Users\world\.claude\plans\pure-inventing-whisper.md` | **Future modules plan** — full schema decisions for all 5 modules (all now implemented; plan file remains as schema reference) |
 | `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` | **PARTIALLY SUPERSEDED 2026-04-25** — Capacitor mobile sections shelved (mobile build deferred indefinitely in favor of responsive web); hosting + Path A/B sections still useful as architectural context. Use only for historical reference; current state is in CLAUDE.md → Hosting / Auth / Multi-User Model sections. |
 | `docs/session_notes.md` | Working session history — completed work and next steps. **2026-04-25 entry** documents the apex-SPA cutover, Cloudflare Access auth, and web-only guest pivot in detail. |
+| `docs/guest_deploy_runbook.md` | Step-by-step checklist for taking `guest.collectcoreapp.com` live (build, custom domain, DNS, Cloudflare Access bypass, CORS, smoke test, rollback). Code prep landed 2026-04-26; runbook is the deploy-time clicks. |
 
 ---
 
@@ -218,6 +219,17 @@ up wholesale.
   `spa_host_routing` middleware in `main.py` routes by `Host` header so
   apex paths return `index.html` (avoiding API route collisions like
   `/photocards/library` matching the books detail route).
+- **Frontend (guest):** Separate React build via `npm run build:guest`,
+  outputs to `backend/frontend_dist_guest/` with assets under
+  `guest-assets/` (NOT `assets/`) so the two bundles don't collide on the
+  shared Railway service. Same `spa_host_routing` middleware serves the
+  guest `index.html` when Host starts with `guest.`. Bundle is NOT yet
+  committed to git or deployed — see `docs/guest_deploy_runbook.md` for
+  the deploy sequence when ready. Guest UI lives in `frontend/src/guest/`
+  (GuestBootstrap, WelcomeModal, GuestPhotocardDetailModal,
+  GuestMenuItems, guestData adapter, sqliteService + worker). Reuses
+  admin's `PhotocardLibraryPage` with data-source branching and
+  isAdmin-gated controls (Path A).
 - **Images:** Cloudflare R2, served via custom domain
   `images.collectcoreapp.com`. `tbl_attachments.storage_type = 'hosted' | 'local'`
   but in practice all production rows are 'hosted'.
@@ -300,8 +312,46 @@ In-app publish flow is item PD1 in the post-deployment roadmap.
 
 **Backend endpoints** (publicly accessible via Cloudflare Access bypass):
 - `GET /catalog/version` → `{max_version, card_count}`
-- `GET /catalog/delta?since=N` → photocards with `catalog_version > N`
+- `GET /catalog/delta?since=N` → raw table-row deltas the guest worker
+  replays into its local SQLite mirror with `INSERT OR REPLACE`. Shape:
+  `{ since, max_version, tables: { tbl_items, tbl_photocard_details,
+  xref_photocard_members, tbl_attachments, lkup_photocard_groups,
+  lkup_photocard_source_origins, lkup_photocard_members,
+  lkup_top_level_categories } }`. Lookup tables only include rows
+  referenced by changed items. **No tombstones yet** — admin has no
+  remove-from-catalog flow today; tombstones land alongside the admin
+  publish UI (PD1). A pure lookup edit (e.g. group rename) won't
+  propagate until something bumps a related item's catalog_version —
+  known limitation.
 - `GET /catalog/seed.db` → 302 redirect to R2 `catalog/seed.db`
+
+**Guest-side schema (`guest_` / `v_guest_` prefix = sync-untouchable):**
+- `guest_meta(key, value)` — KV store. Holds `last_synced_catalog_version`.
+- `guest_card_copies(copy_id, catalog_item_id, ownership_status_id, notes, ...)`
+  — per-card guest annotations. Mirrors admin's `tbl_photocard_copies` model
+  (multi-copy per card with Owned/Wanted/etc. status) but keyed by the
+  contractually-stable `catalog_item_id` so rows survive a full seed reset.
+- `v_guest_library_photocards` — read target for the future guest library.
+  Joins catalog `tbl_items` + `tbl_photocard_details` + LEFT JOIN
+  `guest_card_copies` (catalog cards with no annotation surface as
+  `guest_*` columns NULL). Phase 4b will UNION ALL guest-added cards into
+  this view.
+- **Guest-added cards (Phase 4b) deferred** until a real guest library page
+  exists to consume them. Schema decisions made: flat `guest_added_photocards`
+  table, separate `guest_added_attachments` for local-only images
+  (R2 upload not in scope for guests, ever), `guest_added_members_xref`
+  for member tags.
+
+**Guest backup/restore (Phase 5):** every `guest_%` table snapshots to JSON
+via `exportGuestBackup()` in `sqliteService.js`. Tables are discovered
+dynamically from `sqlite_master` so future guest tables are auto-included.
+Format: `{ version: 1, exported_at, tables: { table_name: [...rows] } }`.
+Restore is replace-strategy (DELETE all then INSERT, SAVEPOINT-wrapped) and
+tolerates extra/missing columns by binding only what the destination table
+declares. `guest_meta.last_backed_up_at` stamped on successful export so the
+future UI can show "Last backed up: N days ago." OPFS is durable-on-best-
+effort — the JSON snapshot is the only recovery path if site data is cleared
+or the device is lost.
 
 ---
 

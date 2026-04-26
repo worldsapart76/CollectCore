@@ -44,15 +44,22 @@ app.add_middleware(
 
 # ---------- Host-based SPA fallback ----------
 # The same FastAPI service is reached via multiple custom domains:
-#   - api.collectcoreapp.com → API only (legacy + machine-to-machine)
-#   - collectcoreapp.com     → SPA (the React bundle in backend/frontend_dist/)
+#   - api.collectcoreapp.com   → API only (legacy + machine-to-machine)
+#   - collectcoreapp.com       → admin SPA (backend/frontend_dist/)
+#   - guest.collectcoreapp.com → guest SPA (backend/frontend_dist_guest/)
 # When a SPA path like /photocards/library is requested on the apex host,
 # the browser would normally hit the photocards API router first and get
-# JSON instead of the SPA. This middleware short-circuits that: on apex
-# (and any non-API host), GETs that don't match a static asset prefix get
+# JSON instead of the SPA. This middleware short-circuits that: on a SPA
+# host, GETs that don't match a static asset prefix get the appropriate
 # index.html, letting React Router handle routing client-side.
+#
+# Static assets are URL-disambiguated to avoid collision: admin under
+# /assets/ (Vite default), guest under /guest-assets/ (set in vite.config.js
+# `assetsDir` for mode === 'guest'). Each bundle's index.html only
+# references its own prefix.
 _API_HOST_PREFIXES = ("api.",)
-_SPA_PASSTHROUGH_PREFIXES = ("/assets/", "/images/", "/vite.svg")
+_GUEST_HOST_PREFIXES = ("guest.",)
+_SPA_PASSTHROUGH_PREFIXES = ("/assets/", "/guest-assets/", "/images/", "/vite.svg")
 
 @app.middleware("http")
 async def spa_host_routing(request: Request, call_next):
@@ -68,8 +75,10 @@ async def spa_host_routing(request: Request, call_next):
     path = request.url.path
     if any(path.startswith(p) for p in _SPA_PASSTHROUGH_PREFIXES):
         return await call_next(request)
-    from routers.admin import FRONTEND_DIST
-    index_html = FRONTEND_DIST / "index.html"
+    from routers.admin import FRONTEND_DIST, FRONTEND_DIST_GUEST
+    is_guest_host = any(host.startswith(p) for p in _GUEST_HOST_PREFIXES)
+    dist = FRONTEND_DIST_GUEST if is_guest_host else FRONTEND_DIST
+    index_html = dist / "index.html"
     if index_html.exists():
         return FileResponse(str(index_html))
     return await call_next(request)

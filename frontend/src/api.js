@@ -14,6 +14,18 @@ async function handleJsonResponse(res, fallbackMessage) {
   return res.json();
 }
 
+// Phase 7b: guest data adapter. When the bundle is built with VITE_IS_ADMIN
+// other than "true", the photocard read functions delegate to local SQLite
+// queries instead of API fetches. Vite inline-replaces the env literal at
+// build time so admin bundles eliminate the dynamic import (and the entire
+// guestData → sqliteService → worker → sqlite-wasm chunk graph).
+//
+// Cached as a Promise so we only do the dynamic import once. Admin bundles
+// see `_guestData = null` and never load anything.
+const _guestData = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : import("./guest/guestData");
+
 // --- Shared lookups ---
 
 export async function fetchHealth() {
@@ -22,6 +34,10 @@ export async function fetchHealth() {
 }
 
 export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
+  if (_guestData) {
+    const m = await _guestData;
+    return m.fetchTopLevelCategories(collectionTypeIdOrCode);
+  }
   const param = typeof collectionTypeIdOrCode === "string"
     ? `collection_type_code=${encodeURIComponent(collectionTypeIdOrCode)}`
     : `collection_type_id=${encodeURIComponent(collectionTypeIdOrCode)}`;
@@ -30,6 +46,12 @@ export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
 }
 
 export async function fetchOwnershipStatuses(collectionTypeId = null) {
+  if (_guestData) {
+    const m = await _guestData;
+    // Guest sees Catalog (it's the entire point — filter to Catalog to find
+    // cards to add to your collection). No filtering in the guest path.
+    return m.fetchOwnershipStatuses(collectionTypeId);
+  }
   const url = collectionTypeId
     ? `${API}/ownership-statuses?collection_type_id=${collectionTypeId}`
     : `${API}/ownership-statuses`;
@@ -69,11 +91,19 @@ export async function toggleStatusVisibility(statusType, statusId, collectionTyp
 // --- Photocard lookups ---
 
 export async function fetchPhotocardGroups() {
+  if (_guestData) {
+    const m = await _guestData;
+    return m.fetchPhotocardGroups();
+  }
   const res = await fetch(`${API}/photocards/groups`);
   return handleJsonResponse(res, "Failed to fetch photocard groups");
 }
 
 export async function fetchPhotocardMembers(groupId) {
+  if (_guestData) {
+    const m = await _guestData;
+    return m.fetchPhotocardMembers(groupId);
+  }
   const res = await fetch(
     `${API}/photocards/groups/${encodeURIComponent(groupId)}/members`
   );
@@ -81,6 +111,10 @@ export async function fetchPhotocardMembers(groupId) {
 }
 
 export async function fetchPhotocardSourceOrigins(groupId, categoryId) {
+  if (_guestData) {
+    const m = await _guestData;
+    return m.fetchPhotocardSourceOrigins(groupId, categoryId);
+  }
   const res = await fetch(
     `${API}/photocards/source-origins?group_id=${encodeURIComponent(groupId)}&category_id=${encodeURIComponent(categoryId)}`
   );
@@ -103,6 +137,10 @@ export async function createPhotocardSourceOrigin({ groupId, categoryId, sourceO
 // --- Photocard CRUD ---
 
 export async function listPhotocards() {
+  if (_guestData) {
+    const m = await _guestData;
+    return m.listPhotocards();
+  }
   const res = await fetch(`${API}/photocards`);
   return handleJsonResponse(res, "Failed to fetch photocards");
 }

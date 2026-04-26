@@ -6,6 +6,373 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-26 (later) — Guest webview Phase 7: full guest UI
+
+Path A landed (one PhotocardLibraryPage with data-source adapters), with a
+forked detail modal because the admin editor and guest annotator are
+fundamentally different UX. **Untested on dev hardware** (leaked-SAH
+state from Phase 1b/2/3 still present); verification waits for Phase 6
+deploy + real-device session.
+
+**7a — First-run + auto-launch flow** in
+[GuestBootstrap.jsx](frontend/src/guest/GuestBootstrap.jsx):
+- Wraps the entire app for `!VITE_IS_ADMIN` builds via lazy + env-gated
+  import in [App.jsx](frontend/src/App.jsx). Constant-folds out of admin
+  bundles (verified: admin dist still 623KB, no sqlite-wasm).
+- Boot phases: init worker → if no catalog, fetch + import seed.db with
+  splash + spinner → silent background `syncCatalog()` → if
+  `guest_meta.welcome_dismissed` not set, show Welcome modal once.
+- [WelcomeModal.jsx](frontend/src/guest/WelcomeModal.jsx) uses the
+  approved 2026-04-24 copy (Q13 in `fancy-stirring-hollerith.md`),
+  trimmed: dropped Inbox section (Phase 4b deferred) and Sharing section
+  (PD2 Trading deferred). Same component re-used as the Help dialog
+  from the hamburger menu.
+- Memory-mode banner displayed at top of screen when SAHPool fell back.
+
+**7b — Library data adapters** in
+[guestData.js](frontend/src/guest/guestData.js) +
+[api.js](frontend/src/api.js):
+- 6 read functions adapted: `listPhotocards`, `fetchPhotocardGroups`,
+  `fetchPhotocardMembers`, `fetchPhotocardSourceOrigins`,
+  `fetchTopLevelCategories`, `fetchOwnershipStatuses`. Each delegates
+  to `guestData.js` when `_guestData` is non-null (constant-folded
+  per-build). Admin path unchanged; existing isAdmin Catalog-status
+  filter preserved on the admin branch.
+- `listPhotocards()` mirrors admin's denormalized response shape
+  exactly so `PhotocardLibraryPage` doesn't branch on data shape, only
+  on which adapter is called. Synthesizes `copies: []` (real copies
+  come from `guest_card_copies`); a card with no guest copies just has
+  empty copies, and the library renders accordingly.
+- Library page changes: hide Sort dropdown (per
+  `project_guest_ui_simplifications` memory), hide Select / Bulk Edit /
+  Admin DetailModal when `!isAdmin`. Default ownership filter for guests
+  excludes the Catalog status (per user requirement: "Catalog items are
+  excluded from current view unless specifically filtered upon"). Only
+  fires on first mount when no stored filter state — preserves user's
+  later choices.
+
+**7c — Guest detail modal** in
+[GuestPhotocardDetailModal.jsx](frontend/src/guest/GuestPhotocardDetailModal.jsx):
+- Read-only catalog metadata (group, members, source, version, category,
+  notes, front + back covers).
+- Writeable per-copy section: list existing `guest_card_copies`,
+  status+notes editor per row, Remove button, "Add copy as: [status
+  buttons]" footer.
+- Owned/Wanted mutual exclusion enforced client-side, mirroring admin's
+  server-side `_check_owned_wanted_conflict`. Pickers show the opposing
+  status as disabled when the other already exists.
+
+**7d — Hamburger menu items** in
+[GuestMenuItems.jsx](frontend/src/guest/GuestMenuItems.jsx):
+- Help → re-shows Welcome modal (with "Got it" CTA instead of "Get
+  started"). Doesn't reset the dismissed flag.
+- Refresh catalog → calls `syncCatalog()` with status feedback; manual
+  fallback for the silent auto-sync that runs on every launch.
+- Backup → builds JSON snapshot, triggers file download
+  (`collectcore-guest-backup-{iso}.json`).
+- Restore → file picker → `restoreGuestBackup()` after confirm prompt.
+  Replace strategy with rollback-on-error (worker SAVEPOINT).
+- Status line: storage mode warning, last catalog version synced, last
+  backup timestamp (relative).
+- TopNav also gates Admin link + Exit button on `isAdmin` (legacy
+  desktop-installer shutdown). `fetchSettings()` skipped entirely for
+  guest (single-module build, no `/admin/settings` to call — avoids
+  401 noise on every page load).
+
+**Deviations from Capacitor-era plan (Q13/Q14/Q15):**
+- Q14 said no backup/restore UI in v1 → re-included for web because
+  OPFS is more fragile than mobile app storage. User agreed.
+- Q14 said no manual refresh button → re-included as fallback for
+  silent auto-sync. User agreed.
+- Q13 long-press cycle to set ownership → skipped for v1; tap → detail
+  modal where status is editable. Touch-only ergonomics weaker on web
+  with mixed mouse/touch users.
+- Welcome copy trimmed: Inbox section removed (Phase 4b deferred,
+  guest-added cards) and Sharing section removed (PD2 Trading deferred).
+
+**Verified:**
+- Admin: `npm run build` → 623KB, NO sqlite-wasm, NO guest chunks.
+  Constant-fold elimination working as intended for every guest
+  import (App, library page, TopNav).
+- Guest: `npm run build:guest` → 596KB main + 864KB wasm + properly
+  split chunks (WelcomeModal, GuestBootstrap, GuestMenuItems,
+  sqliteService, guestData, GuestPhotocardDetailModal).
+
+**Phase 4b (guest-added cards) still deferred** per user — first ship
+read-only catalog + annotations, add guest-added in a follow-up once
+real-world need is confirmed.
+
+**Next:** Phase 6 deploy execution per
+[guest_deploy_runbook.md](docs/guest_deploy_runbook.md). All code
+prerequisites met.
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 6 prep: deploy plumbing
+
+Code-side prep so a future deploy of `guest.collectcoreapp.com` is one
+git push + a few CF/Railway clicks. **Nothing live yet** — guest bundle
+is still untracked, no DNS, no CF Access app. Runbook
+([docs/guest_deploy_runbook.md](docs/guest_deploy_runbook.md)) is the
+deploy-time checklist.
+
+- **Asset path collision avoided.** Both bundles previously emitted to
+  `assets/`. The same Railway service can't serve `/assets/index-XXX.js`
+  for two different files. Fix: guest build now uses `assetsDir:
+  'guest-assets'` ([vite.config.js](frontend/vite.config.js)), so its
+  index.html references `/guest-assets/index-XXX.js`. Admin unchanged.
+- **Host-routed SPA fallback** in
+  [backend/main.py](backend/main.py): `spa_host_routing` middleware now
+  serves `frontend_dist_guest/index.html` when Host starts with `guest.`.
+  `_GUEST_HOST_PREFIXES = ("guest.",)`; `/guest-assets/` added to
+  `_SPA_PASSTHROUGH_PREFIXES`. Static assets are URL-disambiguated so
+  the middleware only host-routes the catchall index.html, not every
+  asset request.
+- **Static mount** in
+  [backend/routers/admin.py](backend/routers/admin.py):
+  `register_frontend_static` extended to also mount `/guest-assets`
+  from `frontend_dist_guest/guest-assets/` when that dir exists. New
+  `FRONTEND_DIST_GUEST` constant exported for the middleware. Guarded
+  on `.exists()` so deploys without the guest bundle still boot.
+- **Verified both builds clean.** Admin: `frontend_dist/assets/` (623KB).
+  Guest: `frontend_dist_guest/guest-assets/` (623KB). No collision —
+  identical filenames coincidentally identical because the React app
+  is the same; production guest will diverge once a real guest UI
+  lands.
+
+**Pre-deploy gate:** the guest bundle currently only has the dev-only
+`/_guest_debug` route — production guest at `guest.collectcoreapp.com/`
+would render a blank page. Don't deploy until either (a) an actual guest
+library page exists, or (b) you're OK with a placeholder. The runbook
+calls this out.
+
+`npm run build` (admin) and `npm run build:guest` both clean.
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 5: backup / restore
+
+JSON snapshot in/out for every `guest_%` table. No UI surface yet — same
+service-layer-only pattern as Phases 3/4a. The future guest UI will wire
+these to a file download + `<input type="file">` restore.
+
+- **`exportGuestData` / `importGuestData` worker handlers** in
+  [sqliteWorker.js](frontend/src/guest/sqliteWorker.js). Tables discovered
+  dynamically from `sqlite_master WHERE name LIKE 'guest_%'` so Phase 4b's
+  `guest_added_*` tables get included automatically when they land —
+  no code change needed.
+- **Snapshot format:** `{ version: 1, exported_at, tables: { table_name:
+  [...rows] } }`. Versioned for future schema migrations. Rows are plain
+  objects keyed by column name.
+- **Restore is replace-strategy** (DELETE all guest_% tables, then INSERT
+  from snapshot). SAVEPOINT-wrapped — a malformed payload rolls back and
+  preserves existing data. Authoritative column list comes from the
+  destination table (via `PRAGMA table_info`), not the payload, so old
+  snapshots survive ALTER TABLE additions cleanly.
+- **`guest_meta.last_backed_up_at`** stamped on successful export. Powers
+  the future "Last backed up: N days ago" UI nudge.
+- **Service exports** in [sqliteService.js](frontend/src/guest/sqliteService.js):
+  `exportGuestBackup()`, `restoreGuestBackup(snapshot)`, `getLastBackupAt()`.
+
+**Phase plan complete except Phase 6 (DNS + deploy) and Phase 7 (UI
+polish).** Phase 7 needs a guest library page to polish; the actual
+guest library page isn't on the plan yet — implicit assumption was that
+guest reuses the admin React app gated by `VITE_IS_ADMIN`, but the admin
+library hits the API and the guest has no API. Worth a session to scope
+"build the guest library page" before Phase 7 makes sense. Phase 6 can
+proceed independently whenever ready.
+
+`npm run build:guest` clean (623KB / 149KB gzipped, no regression).
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 4a: per-card annotations
+
+Schema + service helpers for guest's per-card ownership/notes overlay on
+catalog cards. No UI surface yet — there's no guest library page to
+consume it. Phase 4b (guest-added cards) deferred until that page exists.
+
+- **`guest_card_copies` table** in
+  [sqliteWorker.js:ensureGuestSchema](frontend/src/guest/sqliteWorker.js):
+  mirrors admin's `tbl_photocard_copies` model (multi-copy per card with
+  Owned/Wanted/etc.) but keyed by `catalog_item_id` (TEXT, the
+  contractually-stable `{group_code}_{id:06d}` key) instead of `item_id`.
+  Survives a full seed reset. FK into the synced `lkup_ownership_statuses`
+  so guest pickers reuse admin's vocabulary.
+- **`v_guest_library_photocards` view** — read target for the future
+  guest library. Joins catalog `tbl_items` + `tbl_photocard_details`
+  with LEFT JOIN `guest_card_copies` so untouched catalog cards still
+  appear (with `guest_*` columns NULL). Phase 4b will UNION ALL
+  guest-added cards in. The `collection_type_id` filter resolves the
+  photocards id via subquery rather than hardcoding 1, since that ID
+  isn't schema-guaranteed.
+- **Service helpers** in
+  [sqliteService.js](frontend/src/guest/sqliteService.js):
+  `addGuestCardCopy`, `updateGuestCardCopy`, `deleteGuestCardCopy`,
+  `listGuestCopiesForCard`. Standard CRUD; the eventual guest library
+  + detail modal will consume these.
+- **No debug-page exposure** — same call as Phase 3. User won't test on
+  dev machine; verification waits for Phase 6 real-device session.
+
+**Phase 4b scope decisions made (deferred until needed):**
+- Flat `guest_added_photocards` table (not a parallel `guest_items` /
+  `guest_photocard_details` mirror)
+- `guest_added_attachments` for local-only images (R2 upload not in
+  scope for guests, ever — local-only is the permanent design)
+- `guest_added_members_xref` for member tags
+- `v_guest_library_photocards` extended with UNION ALL of guest-added
+
+`npm run build:guest` clean (623KB / 149KB gzipped, no regression vs
+Phase 3). Next: Phase 5 (backup/restore of guest_* rows) per the plan,
+or move to building the actual guest library page so Phase 4b has a
+consumer.
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 3: delta sync
+
+Catalog refresh path is now end-to-end code-complete. Untested on the dev
+machine for the same reason as Phases 1b/2 (leaked SAH state forces
+in-memory mode); will be verified together on real device at Phase 6.
+
+- **`/catalog/delta?since=N` rewritten** in
+  [backend/routers/catalog.py](backend/routers/catalog.py) to return raw
+  table-row deltas instead of the original denormalized JSON. The
+  pre-pivot shape (joined `category_name`, `source_origin_name`, member
+  arrays, attachment URLs) was designed for a Capacitor render-from-JSON
+  client that never shipped — confirmed via git blame (added 2026-04-24
+  in phase 0b) and grep (zero frontend callers). Replaying it into the
+  guest's normalized SQLite mirror would have required ugly reverse-joins;
+  raw rows go straight through `INSERT OR REPLACE`.
+- **Payload shape:** `{ since, max_version, tables: { tbl_items,
+  tbl_photocard_details, xref_photocard_members, tbl_attachments,
+  lkup_photocard_groups, lkup_photocard_source_origins,
+  lkup_photocard_members, lkup_top_level_categories } }`. Lookup tables
+  ship only the rows referenced by changed items (avoids re-shipping the
+  full lookup set every sync).
+- **Worker `applyCatalogDelta`** in
+  [sqliteWorker.js](frontend/src/guest/sqliteWorker.js): wraps the
+  apply in a SAVEPOINT for transactional rollback. Order: lookups →
+  items → details → (delete-by-item then reinsert) xrefs + attachments.
+  The delete-then-reinsert pattern handles removed members and replaced
+  attachments correctly — the endpoint sends the full current set per
+  touched item, so absence == removal.
+- **Service `syncCatalog()`** in
+  [sqliteService.js](frontend/src/guest/sqliteService.js): reads the
+  cursor from `guest_meta.last_synced_catalog_version`, fetches the
+  delta, calls the worker, advances the cursor to the server's
+  `max_version`. Cursor only advances on successful apply, so a network
+  or apply failure is safely retryable. First sync after a fresh seed
+  derives the cursor from local `MAX(catalog_version)` so we don't
+  redundantly re-fetch every row already in the seed. Also exports
+  `getLastSyncedVersion()` for read-only inspection.
+- **No debug-page UI added** — user will not exercise this path on the
+  dev machine. The real "Refresh catalog" button lives in the actual
+  guest UI in a later phase. Service-layer API is the only Phase 3
+  surface.
+
+**Tombstones deferred.** Admin has no remove-from-catalog flow today, so
+items only ever get added/updated. When the admin publish UI lands (PD1),
+a `tombstones` key carrying `catalog_item_id` values to delete locally
+will be added. Documented in CLAUDE.md catalog architecture section as
+a known limitation, plus the related lookup-edit-without-item-bump gap
+(pure lookup edits like a group rename won't propagate until something
+forces a related item's catalog_version to bump).
+
+`npm run build:guest` clean (623KB / 149KB gzipped, no chunk-size
+regression vs Phase 2). Phases 1b/2/3 all share the same real-device
+verification window.
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 2: schema-separation contract + storage persist
+
+Lays the foundation Phase 3 (delta sync) needs: a stable convention for which
+tables sync is allowed to overwrite, plus a request for the browser to mark
+our OPFS storage as durable.
+
+- **Convention:** anything prefixed `guest_` is guest-owned and untouchable
+  by sync. Everything else is catalog data and fair game for delta INSERT/
+  UPDATE/DELETE. Catalog tables are NOT renamed — `tbl_items` etc. stay as
+  they are; the prefix only applies to new guest-side tables. This matches
+  the original 2026-04-23 catalog architecture decision (no separate
+  `tbl_catalog_items`; admin's `tbl_items` IS the catalog).
+- **`guest_meta(key TEXT PRIMARY KEY, value TEXT)`** — only guest table for
+  now. Holds the `last_synced_catalog_version` marker that Phase 3 will
+  read/write. Annotation tables (per-card ownership, notes) deferred to
+  Phase 4 where they pair with UI.
+- **Migration runner** in [sqliteWorker.js](frontend/src/guest/sqliteWorker.js):
+  `ensureGuestSchema()` runs `CREATE TABLE IF NOT EXISTS` after both DB
+  open paths — post-init reopen-from-OPFS AND post-loadSeed fresh import.
+  Idempotent.
+- **`navigator.storage.persist()`** called on first `initSqlite()` from the
+  main thread (window-only API). Result surfaced as `persistGranted` in the
+  init payload. Failures are non-fatal — guest still works, OPFS just
+  becomes evictable under disk pressure.
+- **New service exports** in [sqliteService.js](frontend/src/guest/sqliteService.js):
+  `getGuestMeta(key)` / `setGuestMeta(key, value)` / `getPersistGranted()`.
+- **Debug page** ([GuestDebugPage.jsx](frontend/src/guest/GuestDebugPage.jsx))
+  gains: persist state in the header line, and a "Phase 2 — guest_meta
+  survival test" section. Workflow: Write timestamp → Load seed (full
+  catalog overwrite) → Read. Same timestamp must come back to prove the
+  contract.
+
+`npm run build:guest` confirms the changes compile; the guest production
+bundle still excludes the debug page + worker chunk via the existing
+`import.meta.env.DEV` gate. Phase 3 (delta sync) is unblocked.
+
+**Survival test unverified on real hardware.** Dev machine still has the
+leaked-SAH state from Phase 1b, so the worker keeps falling back to memory
+mode and the survival test can't be exercised end-to-end here. Verify
+during Phase 6 real-device testing alongside the Phase 1b persistence
+check — the two checks share the same recovery path (close other tabs /
+restart browser) and both confirm the same OPFS-survives-reload contract.
+
+---
+
+### 2026-04-26 (later) — Guest webview Phase 1b: SAHPool worker + memory fallback
+
+Dedicated worker now owns the sqlite3 runtime and a SAHPool-backed catalog
+DB. Persistence path is code-complete but **not yet verified on real
+hardware** — see "Persistence verification" below.
+
+- New [frontend/src/guest/sqliteWorker.js](frontend/src/guest/sqliteWorker.js):
+  installs `OpfsSAHPoolVfs({ name: 'guest-pool' })`, opens existing
+  `/catalog.db` from the pool on init if present, accepts seed bytes via
+  `loadSeed` and `importDb()`s them. Includes retry-with-backoff on the
+  install (handles leak briefly across HMR), `pauseVfs` on
+  `import.meta.hot.dispose`, and a `nukeOpfs` escape hatch that deletes
+  the pool directory via the raw OPFS API.
+- [frontend/src/guest/sqliteService.js](frontend/src/guest/sqliteService.js)
+  rewritten as a worker-RPC proxy. `query()` and `isLoaded()` are now
+  async (forced by the worker boundary). New `getStorageMode()` /
+  `getFallbackReason()` / `nukeOpfsAndReset()` exports. ArrayBuffer is
+  transferred (not copied) on seed load.
+- [frontend/vite.config.js](frontend/vite.config.js) gains
+  `worker: { format: 'es' }` so production worker bundles stay ESM
+  (default would be IIFE, which can't `import` sqlite-wasm).
+- [frontend/src/guest/GuestDebugPage.jsx](frontend/src/guest/GuestDebugPage.jsx)
+  auto-runs init on mount, surfaces `storageMode` + `hasCatalog`, shows a
+  yellow "In-memory mode" banner when SAHPool fails. New "Re-check init",
+  "Clear OPFS", and "Nuke OPFS pool" buttons.
+
+**SAHPool single-tenant fallback (Option 1 from this session's discussion):**
+SAHPool is single-tenant per origin/directory by design — a second tab on
+the same origin can't acquire the slot SAHs. Rather than fight this, the
+worker now catches the install error and falls back to a Phase-1a-style
+in-memory DB. The page stays functional; the banner tells the user that
+data won't survive a reload until the conflict clears. Same path covers
+Chrome's occasional handle-leak behavior across HMR cycles.
+
+**Persistence verification deferred:** dev environment is currently stuck
+in the leaked-handles state and won't release without a full browser
+restart, which the user opted not to do. The persistence code path is
+~6 lines of SAHPool API calls with no runtime branching consumed by
+downstream phases, so verification is safe to defer to real-device
+testing. Phases 2–5 build against the in-memory fallback unchanged.
+
+---
+
 ### 2026-04-26 — Guest webview Phase 1a: sqlite-wasm proof-of-life
 
 In-memory load + query verified working in dev. Persistence (OPFS) deferred
@@ -231,13 +598,14 @@ guest project track):
 |---|---|---|
 | 0 | Build skeleton (separate guest dist, VITE_IS_ADMIN gate, DCE-friendly isAdmin expression) | done 2026-04-25 |
 | 1a | sqlite-wasm proof-of-life: download seed.db, deserialize, query | done 2026-04-26 |
-| 1b | OPFS SAHPool persistence: dedicated worker, import seed bytes once, survive page refresh | NEXT |
-| 2 | Schema separation: `catalog_*` (read-only, replaced on delta) vs `guest_*` (their data, never touched by sync). `navigator.storage.persist()` on first launch. | pending |
-| 3 | Delta sync — only touches catalog tables. "Refresh catalog" button. | pending |
-| 4 | Guest annotation layer: per-card local ownership + notes, plus guest-added cards (`guest_*` tables). UNION reads in library. | pending |
-| 5 | Backup/restore: export `guest_*` rows as JSON, import inverse. "Last backed up: N days ago" UI. | pending |
-| 6 | Subdomain + Cloudflare config: DNS for `guest.collectcoreapp.com`, Railway deploy, Cloudflare Access bypass. | pending |
-| 7 | Polish: gate admin-only UI per `project_guest_ui_simplifications` memory. | pending |
+| 1b | OPFS SAHPool persistence: dedicated worker + in-memory fallback for single-tenant conflicts | code-complete 2026-04-26; persistence unverified (dev machine has leaked handles) — verify on real device before Phase 6 |
+| 2 | Schema separation: `guest_` prefix = sync-untouchable; rest is catalog. `guest_meta` table seeded. `navigator.storage.persist()` on first launch. | code-complete 2026-04-26; survival test unverified (dev stuck in memory-mode fallback) — verify on real device with Phase 1b |
+| 3 | Delta sync — only touches catalog tables (i.e. anything not prefixed `guest_`). Service-layer `syncCatalog()` reads/writes `guest_meta.last_synced_catalog_version`; UI button deferred to Phase 7. Tombstones deferred (no admin remove-from-catalog flow). | code-complete 2026-04-26; verify with Phases 1b/2 on real device |
+| 4a | Per-card annotations (`guest_card_copies` keyed by catalog_item_id, mirrors admin multi-copy model) + `v_guest_library_photocards` view. Service-layer CRUD only; no UI consumer yet. | code-complete 2026-04-26; verify with Phases 1b/2/3 on real device |
+| 4b | Guest-added cards: flat `guest_added_photocards` + `guest_added_attachments` (local images only) + `guest_added_members_xref`. UNION ALL into the library view. | deferred until guest library page exists |
+| 5 | Backup/restore: export `guest_*` rows as JSON, import inverse. Service-layer + `last_backed_up_at` cursor done; "Last backed up: N days ago" UI deferred to Phase 7 alongside the rest of guest UI work. | code-complete 2026-04-26; verify on real device |
+| 6 | Subdomain + Cloudflare config: DNS for `guest.collectcoreapp.com`, Railway deploy, Cloudflare Access bypass. | code prep done 2026-04-26 (vite assetsDir, host-routing middleware, static mount); deploy-time clicks in `docs/guest_deploy_runbook.md` |
+| 7 | Full guest UI: first-run flow + welcome modal (7a), library data adapters + filter defaults (7b), guest detail modal with copies CRUD (7c), hamburger menu Help/Refresh/Backup/Restore (7d). Path A — reuse PhotocardLibraryPage with data-source adapters; fork the detail modal. | code-complete 2026-04-26; verify on real device |
 
 **Phase 1b implementation notes for resume:**
 - SAHPool VFS is worker-only — needs a dedicated `sqliteWorker.js` in

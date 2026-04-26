@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   listPhotocards,
   fetchPhotocardGroups,
   fetchTopLevelCategories,
   fetchOwnershipStatuses,
 } from "../api";
+import { isAdmin } from "../utils/env";
 import PhotocardFilters from "../components/photocard/PhotocardFilters";
 import PhotocardGrid from "../components/photocard/PhotocardGrid";
 import PhotocardDetailModal from "../components/photocard/PhotocardDetailModal";
@@ -17,6 +18,13 @@ import {
 import { libraryState, persistMobileCardsPerRow } from "../photocardPageState";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import { usePageActions } from "../contexts/PageActionsContext";
+
+// Guest-mode detail modal (Phase 7c). Imported lazily and only when
+// !VITE_IS_ADMIN — admin builds eliminate the chunk + the sqliteService
+// graph it pulls in. Same pattern as App.jsx's GuestBootstrap gating.
+const GuestPhotocardDetailModal = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : lazy(() => import("../guest/GuestPhotocardDetailModal"));
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
@@ -94,6 +102,11 @@ export default function PhotocardLibraryPage() {
     persistMobileCardsPerRow(mobileCardsPerRow);
   }, [filters, sortMode, viewMode, sizeMode, showCaptions, pageSize, mobileCardsPerRow]);
 
+  // Track whether libraryState had filters at first mount. Used to decide
+  // whether the guest's "exclude Catalog by default" should fire (we don't
+  // want to clobber filters the user already picked in this session).
+  const hadStoredFiltersRef = useRef(libraryState.filters != null);
+
   // Load all lookup data + cards
   useEffect(() => {
     async function loadAll() {
@@ -110,6 +123,25 @@ export default function PhotocardLibraryPage() {
         setGroups(groupData);
         setCategories(categoryData);
         setOwnershipStatuses(statusData);
+
+        // Guest default: exclude the Catalog status from the initial view.
+        // Only fires on the very first mount (no stored filters yet) — once
+        // the user touches the ownership filter, their state is preserved.
+        // Per user requirement: catalog cards are hidden by default; guest
+        // explicitly filters TO Catalog to discover what they could collect.
+        if (!isAdmin && !hadStoredFiltersRef.current) {
+          const catalogStatus = statusData.find((s) => s.status_code === "catalog");
+          if (catalogStatus) {
+            setFilters((prev) => ({
+              ...prev,
+              ownership: {
+                mode: "or",
+                include: [],
+                exclude: [String(catalogStatus.ownership_status_id)],
+              },
+            }));
+          }
+        }
       } catch (err) {
         setError(err.message || "Failed to load library");
       } finally {
@@ -332,32 +364,36 @@ export default function PhotocardLibraryPage() {
   );
 
   // Register Sort + Select as TopNav icon buttons on mobile (page-actions context).
+  // Guest mode (per project_guest_ui_simplifications memory): hide Sort
+  // (filter is the right primitive at 10K+ scale) and Select (no bulk edit).
   usePageActions(
-    [
-      {
-        id: "sort",
-        iconName: "sort",
-        kind: "menu",
-        label: "Sort",
-        value: sortMode,
-        options: SORT_OPTIONS,
-        onChange: (v) => { setSortMode(v); setPage(1); },
-      },
-      {
-        id: "select",
-        iconName: "select",
-        kind: "toggle",
-        label: selectMode ? "Done" : "Select",
-        active: selectMode,
-        onClick: () => {
-          if (selectMode) {
-            exitSelectMode();
-          } else {
-            setSelectMode(true);
-          }
-        },
-      },
-    ],
+    isAdmin
+      ? [
+          {
+            id: "sort",
+            iconName: "sort",
+            kind: "menu",
+            label: "Sort",
+            value: sortMode,
+            options: SORT_OPTIONS,
+            onChange: (v) => { setSortMode(v); setPage(1); },
+          },
+          {
+            id: "select",
+            iconName: "select",
+            kind: "toggle",
+            label: selectMode ? "Done" : "Select",
+            active: selectMode,
+            onClick: () => {
+              if (selectMode) {
+                exitSelectMode();
+              } else {
+                setSelectMode(true);
+              }
+            },
+          },
+        ]
+      : [],
     [sortMode, selectMode]
   );
 
@@ -429,19 +465,22 @@ export default function PhotocardLibraryPage() {
             </div>
           </div>
 
-          {/* Sort (desktop only — mobile uses TopNav icon) */}
-          <div className="desktop-only" style={styles.controlGroup}>
-            <span style={styles.controlLabel}>Sort</span>
-            <select
-              value={sortMode}
-              onChange={(e) => { setSortMode(e.target.value); setPage(1); }}
-              style={styles.controlSelect}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
+          {/* Sort (desktop only — mobile uses TopNav icon). Hidden in guest
+              mode per project_guest_ui_simplifications memory. */}
+          {isAdmin && (
+            <div className="desktop-only" style={styles.controlGroup}>
+              <span style={styles.controlLabel}>Sort</span>
+              <select
+                value={sortMode}
+                onChange={(e) => { setSortMode(e.target.value); setPage(1); }}
+                style={styles.controlSelect}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Captions */}
           <label style={styles.toggleLabel}>
@@ -475,7 +514,9 @@ export default function PhotocardLibraryPage() {
             {sortedCards.length} cards
             {selectMode && selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
           </span>
-          {!selectMode && (
+          {/* Select / bulk-edit are admin-only — guest mode has no
+              destructive bulk operations against catalog data. */}
+          {isAdmin && !selectMode && (
             <button
               className="desktop-only"
               style={styles.controlBtn}
@@ -488,7 +529,7 @@ export default function PhotocardLibraryPage() {
       </div>
 
       {/* Select-mode toolbar — own row so card count stays on the main controls bar */}
-      {selectMode && (
+      {isAdmin && selectMode && (
         <div style={styles.selectBar}>
           <button style={styles.controlBtn} onClick={handleSelectAll}>All ({sortedCards.length})</button>
           <button style={styles.controlBtn} onClick={handleClearSelection}>Clear</button>
@@ -537,8 +578,8 @@ export default function PhotocardLibraryPage() {
         </div>
       </div>
 
-      {/* Bulk edit modal */}
-      {showBulkEdit && selectedCards.length > 0 && (
+      {/* Bulk edit modal — admin-only */}
+      {isAdmin && showBulkEdit && selectedCards.length > 0 && (
         <PhotocardBulkEdit
           selectedCards={selectedCards}
           categories={categories}
@@ -557,8 +598,9 @@ export default function PhotocardLibraryPage() {
         />
       )}
 
-      {/* Detail modal */}
-      {detailCard && (
+      {/* Detail modal — admin path edits the catalog, guest path edits local
+          guest_card_copies (catalog data is read-only on the guest side). */}
+      {detailCard && isAdmin && (
         <PhotocardDetailModal
           card={detailCard}
           allCards={sortedCards}
@@ -571,6 +613,17 @@ export default function PhotocardLibraryPage() {
             setCards((prev) => prev.filter((c) => c.item_id !== itemId));
           }}
         />
+      )}
+      {detailCard && !isAdmin && GuestPhotocardDetailModal && (
+        <Suspense fallback={null}>
+          <GuestPhotocardDetailModal
+            card={detailCard}
+            allCards={sortedCards}
+            ownershipStatuses={ownershipStatuses}
+            onClose={() => setDetailCard(null)}
+            onChanged={reloadCards}
+          />
+        </Suspense>
       )}
     </div>
   );

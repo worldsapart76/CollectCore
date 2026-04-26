@@ -1,18 +1,20 @@
 """
-Public Catalog endpoints for guest mobile clients.
+Public Catalog endpoints for the guest webview.
 
-These are unauthenticated — they serve the shared photocard catalog so guest apps
-can download a starter seed and pull deltas thereafter. All write operations
-require admin auth (not implemented in v1 — admin runs locally).
+These are unauthenticated (Cloudflare Access bypass on /catalog/*) — they serve
+the shared photocard catalog so the guest browser can download a starter seed
+and pull deltas thereafter. All write operations require admin auth (admin runs
+behind Cloudflare Access at the apex domain).
 
 Endpoints:
   GET /catalog/version          -> { max_version, card_count }
-  GET /catalog/delta?since=N    -> [{ ...card }], cards with catalog_version > N
-  GET /catalog/seed.db          -> redirect to R2 (if configured) or local file
+  GET /catalog/delta?since=N    -> raw table-row deltas the guest worker
+                                   replays into its local SQLite mirror.
+                                   See `catalog_delta` for the payload shape.
+  GET /catalog/seed.db          -> local file (dev) or redirect to R2 (prod)
 """
 
 import os
-from collections import defaultdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,6 +29,11 @@ from file_helpers import DATA_ROOT
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 SEED_DB_PATH = DATA_ROOT / "data" / "mobile_seed.db"
+
+
+def _rows_as_dicts(result) -> list[dict]:
+    """SQLAlchemy Row -> plain dict, suitable for JSON + worker INSERT-OR-REPLACE."""
+    return [dict(r._mapping) for r in result]
 
 
 @router.get("/version")
@@ -47,98 +54,150 @@ def catalog_version(db=Depends(get_db)):
 
 @router.get("/delta")
 def catalog_delta(
-    since: int = Query(0, ge=0, description="Return cards with catalog_version > since"),
+    since: int = Query(0, ge=0, description="Return rows for items with catalog_version > since"),
     db=Depends(get_db),
 ):
-    card_rows = db.execute(
+    """
+    Return raw table-row deltas the guest worker can replay into its local
+    SQLite mirror with INSERT OR REPLACE. The guest schema mirrors admin's, so
+    column names and IDs match verbatim.
+
+    Shape:
+      {
+        "since": N,
+        "max_version": M,
+        "tables": {
+          "tbl_items":                    [...rows],
+          "tbl_photocard_details":        [...rows],
+          "xref_photocard_members":       [...rows],   # all rows for touched items
+          "tbl_attachments":              [...rows],   # front + back, all rows for touched items
+          "lkup_photocard_groups":        [...rows],   # only rows referenced by touched items
+          "lkup_photocard_source_origins":[...rows],
+          "lkup_photocard_members":       [...rows],
+          "lkup_top_level_categories":    [...rows]
+        }
+      }
+
+    Tombstones (items removed from the catalog) are not yet emitted — admin has
+    no remove-from-catalog flow today. When that flow lands (admin publish UI,
+    PD1) a `tombstones` key will be added carrying catalog_item_id values to
+    delete locally. Until then, items only ever get added/updated.
+
+    Lookup tables only ship rows referenced by the changed items. A pure
+    lookup edit (e.g. renaming a group with no item changes) won't propagate
+    until something forces those items to bump their catalog_version. Known
+    limitation; revisit if it becomes an actual user-visible problem.
+    """
+    max_version_row = db.execute(
         text(
             """
-            SELECT i.item_id,
-                   i.catalog_item_id,
-                   i.catalog_version,
-                   i.top_level_category_id,
-                   tlc.category_name,
-                   i.notes,
-                   g.group_code,
-                   g.group_name,
-                   d.version,
-                   d.is_special,
-                   so.source_origin_name
-            FROM tbl_items i
-            JOIN tbl_photocard_details d ON d.item_id = i.item_id
-            JOIN lkup_photocard_groups g ON g.group_id = d.group_id
-            LEFT JOIN lkup_photocard_source_origins so ON so.source_origin_id = d.source_origin_id
-            LEFT JOIN lkup_top_level_categories tlc ON tlc.top_level_category_id = i.top_level_category_id
-            WHERE i.collection_type_id = :pc
-              AND i.catalog_item_id IS NOT NULL
-              AND i.catalog_version > :since
-            ORDER BY i.item_id
+            SELECT COALESCE(MAX(catalog_version), 0) AS max_version
+            FROM tbl_items
+            WHERE collection_type_id = :pc AND catalog_item_id IS NOT NULL
+            """
+        ),
+        {"pc": PHOTOCARD_COLLECTION_TYPE_ID},
+    ).fetchone()
+    max_version = max_version_row[0]
+
+    item_rows = _rows_as_dicts(db.execute(
+        text(
+            """
+            SELECT *
+            FROM tbl_items
+            WHERE collection_type_id = :pc
+              AND catalog_item_id IS NOT NULL
+              AND catalog_version > :since
+            ORDER BY item_id
             """
         ),
         {"pc": PHOTOCARD_COLLECTION_TYPE_ID, "since": since},
-    ).fetchall()
+    ))
 
-    if not card_rows:
-        return {"since": since, "count": 0, "cards": []}
+    if not item_rows:
+        return {
+            "since": since,
+            "max_version": max_version,
+            "tables": {
+                "tbl_items": [],
+                "tbl_photocard_details": [],
+                "xref_photocard_members": [],
+                "tbl_attachments": [],
+                "lkup_photocard_groups": [],
+                "lkup_photocard_source_origins": [],
+                "lkup_photocard_members": [],
+                "lkup_top_level_categories": [],
+            },
+        }
 
-    item_ids = [r[0] for r in card_rows]
+    item_ids = [r["item_id"] for r in item_rows]
     placeholders = ",".join(f":id{i}" for i in range(len(item_ids)))
     id_params = {f"id{i}": v for i, v in enumerate(item_ids)}
 
-    member_rows = db.execute(
-        text(
-            f"""
-            SELECT x.item_id, m.member_code, m.member_name
-            FROM xref_photocard_members x
-            JOIN lkup_photocard_members m ON m.member_id = x.member_id
-            WHERE x.item_id IN ({placeholders})
-            ORDER BY m.sort_order, m.member_name
-            """
-        ),
+    detail_rows = _rows_as_dicts(db.execute(
+        text(f"SELECT * FROM tbl_photocard_details WHERE item_id IN ({placeholders})"),
         id_params,
-    ).fetchall()
-    members_by_item: dict[int, list[dict]] = defaultdict(list)
-    for item_id, code, name in member_rows:
-        members_by_item[item_id].append({"code": code, "name": name})
+    ))
 
-    att_rows = db.execute(
+    # All xref rows for touched items — guest replays as delete-by-item then
+    # reinsert, so a removed member shows up as the absence of its row in this set.
+    xref_rows = _rows_as_dicts(db.execute(
+        text(f"SELECT * FROM xref_photocard_members WHERE item_id IN ({placeholders})"),
+        id_params,
+    ))
+
+    # Same shape contract for attachments: guest deletes all front/back rows
+    # for the touched item, then reinserts these. Handles cover swaps cleanly
+    # (admin replaces an attachment row → old row gone from this payload).
+    att_rows = _rows_as_dicts(db.execute(
         text(
             f"""
-            SELECT item_id, attachment_type, file_path, storage_type
-            FROM tbl_attachments
+            SELECT * FROM tbl_attachments
             WHERE item_id IN ({placeholders})
               AND attachment_type IN ('front', 'back')
             """
         ),
         id_params,
-    ).fetchall()
-    atts_by_item: dict[int, dict[str, dict]] = defaultdict(dict)
-    for item_id, atype, file_path, storage_type in att_rows:
-        atts_by_item[item_id][atype] = {"url": file_path, "storage_type": storage_type}
+    ))
 
-    cards = []
-    for (
-        item_id, cat_id, cat_ver, top_cat_id, cat_name,
-        notes, group_code, group_name, version, is_special, source_origin_name,
-    ) in card_rows:
-        att = atts_by_item.get(item_id, {})
-        cards.append({
-            "catalog_item_id": cat_id,
-            "catalog_version": cat_ver,
-            "group_code": group_code,
-            "group_name": group_name,
-            "top_level_category_id": top_cat_id,
-            "category": cat_name,
-            "source_origin": source_origin_name,
-            "version": version,
-            "is_special": bool(is_special),
-            "members": members_by_item.get(item_id, []),
-            "notes": notes,
-            "front": att.get("front"),
-            "back": att.get("back"),
-        })
+    # Lookup rows referenced by the changed items. Includes the union of all
+    # FKs the guest needs to insert these items without FK violations.
+    group_ids = sorted({r["group_id"] for r in detail_rows})
+    source_origin_ids = sorted({
+        r["source_origin_id"] for r in detail_rows if r["source_origin_id"] is not None
+    })
+    member_ids = sorted({r["member_id"] for r in xref_rows})
+    top_cat_ids = sorted({r["top_level_category_id"] for r in item_rows})
 
-    return {"since": since, "count": len(cards), "cards": cards}
+    def _fetch_lkup(table: str, pk: str, ids: list[int]) -> list[dict]:
+        if not ids:
+            return []
+        ph = ",".join(f":v{i}" for i in range(len(ids)))
+        params = {f"v{i}": v for i, v in enumerate(ids)}
+        return _rows_as_dicts(db.execute(
+            text(f"SELECT * FROM {table} WHERE {pk} IN ({ph})"), params,
+        ))
+
+    return {
+        "since": since,
+        "max_version": max_version,
+        "tables": {
+            "tbl_items": item_rows,
+            "tbl_photocard_details": detail_rows,
+            "xref_photocard_members": xref_rows,
+            "tbl_attachments": att_rows,
+            "lkup_photocard_groups": _fetch_lkup("lkup_photocard_groups", "group_id", group_ids),
+            "lkup_photocard_source_origins": _fetch_lkup(
+                "lkup_photocard_source_origins", "source_origin_id", source_origin_ids,
+            ),
+            "lkup_photocard_members": _fetch_lkup(
+                "lkup_photocard_members", "member_id", member_ids,
+            ),
+            "lkup_top_level_categories": _fetch_lkup(
+                "lkup_top_level_categories", "top_level_category_id", top_cat_ids,
+            ),
+        },
+    }
 
 
 @router.get("/seed.db")

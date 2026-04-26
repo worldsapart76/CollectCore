@@ -25,6 +25,12 @@ from file_helpers import DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
 # as /app/ on Railway with Root Directory=backend).
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend_dist"
 
+# Built guest React bundle (`vite build --mode guest`). Served at
+# guest.collectcoreapp.com by the host-routing middleware in main.py. Assets
+# live under /guest-assets/ rather than /assets/ to avoid colliding with the
+# admin bundle when both share the same Railway service.
+FRONTEND_DIST_GUEST = Path(__file__).resolve().parents[1] / "frontend_dist_guest"
+
 router = APIRouter(tags=["admin"])
 
 
@@ -445,11 +451,25 @@ def register_frontend_static(app):
 
     Must be called AFTER all API routers are included, so the catch-all
     SPA route doesn't shadow API endpoints.
+
+    Mounts both bundles when present:
+      /assets/        → admin (frontend_dist/assets/)
+      /guest-assets/  → guest (frontend_dist_guest/guest-assets/)
+
+    The catch-all `/{full_path}` falls back to admin's index.html. The
+    guest bundle's index.html is served by the host-routing middleware
+    in main.py (which fires *before* this catch-all reaches it).
     """
+    if FRONTEND_DIST.exists():
+        app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    if FRONTEND_DIST_GUEST.exists():
+        guest_assets = FRONTEND_DIST_GUEST / "guest-assets"
+        if guest_assets.exists():
+            app.mount("/guest-assets", StaticFiles(directory=str(guest_assets)), name="guest-assets")
+
     if not FRONTEND_DIST.exists():
         return
-
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
     @app.get("/vite.svg", include_in_schema=False)
     async def _serve_favicon():

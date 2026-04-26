@@ -1,9 +1,16 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
-import { useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { MODULE_DEFS, getActiveModuleId } from "../../modules";
 import { fetchSettings } from "../../api";
 import { API_BASE } from "../../utils/imageUrl";
+import { isAdmin } from "../../utils/env";
 import { usePageActionsList } from "../../contexts/PageActionsContext";
+
+// Phase 7d: guest-mode hamburger menu items. Lazy + env-gated so admin
+// builds eliminate the chunk + the sqliteService graph it pulls in.
+const GuestMenuItems = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : lazy(() => import("../../guest/GuestMenuItems"));
 
 function navClass({ isActive }) {
   return isActive ? "topnav-link active" : "topnav-link";
@@ -50,6 +57,14 @@ export default function TopNav({ theme, toggleTheme }) {
 
   const loadSettingsRef = useRef(() => {});
   useEffect(() => {
+    // Guest mode runs in single-module configuration (`VITE_ENABLED_MODULES=
+    // photocards`) and has no /admin/settings endpoint to call — skip the
+    // fetch entirely so we don't generate a 401/CORS error every page load.
+    if (!isAdmin) {
+      loadSettingsRef.current = () => {};
+      setEnabledModuleIds(["photocards"]);
+      return;
+    }
     function loadSettings() {
       fetchSettings()
         .then(settings => {
@@ -397,12 +412,26 @@ export default function TopNav({ theme, toggleTheme }) {
         )}
 
         <div className="topnav-nav-drawer__section">
-          <NavLink
-            to="/admin"
-            className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
-          >
-            Admin
-          </NavLink>
+          {/* Admin link + Exit (legacy desktop-installer shutdown) are
+              admin-only. Guest mode replaces them with Help / Refresh /
+              Backup / Restore via GuestMenuItems below. */}
+          {isAdmin && (
+            <>
+              <NavLink
+                to="/admin"
+                className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
+              >
+                Admin
+              </NavLink>
+              <button
+                type="button"
+                className="topnav-nav-drawer__item"
+                onClick={handleExit}
+              >
+                Exit
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="topnav-nav-drawer__item"
@@ -410,13 +439,11 @@ export default function TopNav({ theme, toggleTheme }) {
           >
             {theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}
           </button>
-          <button
-            type="button"
-            className="topnav-nav-drawer__item"
-            onClick={handleExit}
-          >
-            Exit
-          </button>
+          {GuestMenuItems && (
+            <Suspense fallback={null}>
+              <GuestMenuItems itemClassName="topnav-nav-drawer__item" />
+            </Suspense>
+          )}
         </div>
       </aside>
     </header>

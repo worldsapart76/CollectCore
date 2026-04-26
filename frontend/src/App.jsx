@@ -30,12 +30,23 @@ const GuestDebugPage = import.meta.env.DEV
   ? lazy(() => import("./guest/GuestDebugPage"))
   : null;
 
+// Guest bootstrap (Phase 7a) wraps the app for !isAdmin builds. Owns first-
+// launch flow: catalog seed download, background delta sync, welcome modal.
+// Use `import.meta.env.VITE_IS_ADMIN` directly (NOT the imported `isAdmin`
+// constant) so Vite inline-replaces the literal before Rollup's chunk-graph
+// pass — guarantees the lazy import + sqlite-wasm chunk are eliminated from
+// admin bundles. Verified with `import.meta.env.DEV` in the GuestDebugPage
+// line above, same mechanism.
+const GuestBootstrap = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : lazy(() => import("./guest/GuestBootstrap"));
+
 // When only one module is configured (e.g. mobile build), skip the home page
 // and land directly on that module's primary path.
 const singleModulePath = activeModules.length === 1 ? activeModules[0].primaryPath : null;
 
 export default function App() {
-  return (
+  const inner = (
     <AppShell>
       <Routes>
         <Route
@@ -75,4 +86,13 @@ export default function App() {
       </Routes>
     </AppShell>
   );
+
+  if (GuestBootstrap) {
+    return (
+      <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+        <GuestBootstrap>{inner}</GuestBootstrap>
+      </Suspense>
+    );
+  }
+  return inner;
 }

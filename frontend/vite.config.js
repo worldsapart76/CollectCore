@@ -62,18 +62,33 @@ function outDirFor(mode) {
   return '../backend/frontend_dist'
 }
 
+// Guest mode emits assets under `guest-assets/` (rather than the default
+// `assets/`) so the same Railway server can host both bundles without URL
+// collision. Admin's static mount owns `/assets/`; the guest's `/guest-assets/`
+// is mounted separately. See spa_host_routing in backend/main.py.
+function assetsDirFor(mode) {
+  if (mode === 'guest') return 'guest-assets'
+  return 'assets'
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   base: mode === 'mobile' ? './' : '/',
   build: {
     outDir: outDirFor(mode),
     emptyOutDir: true,
+    assetsDir: assetsDirFor(mode),
   },
   // sqlite-wasm loads its .wasm via import.meta.url — Vite's pre-bundling
   // breaks those relative paths. Excluding from optimizeDeps preserves the
   // dynamic asset loading.
   optimizeDeps: {
     exclude: ['@sqlite.org/sqlite-wasm'],
+  },
+  // The guest sqlite worker uses ESM imports (sqlite-wasm). Without this,
+  // Vite's production build emits an IIFE worker that can't `import`.
+  worker: {
+    format: 'es',
   },
   server: {
     port: 5181,
