@@ -124,22 +124,29 @@ export default function PhotocardLibraryPage() {
         setCategories(categoryData);
         setOwnershipStatuses(statusData);
 
-        // Guest default: exclude the Catalog status from the initial view.
-        // Only fires on the very first mount (no stored filters yet) — once
-        // the user touches the ownership filter, their state is preserved.
-        // Per user requirement: catalog cards are hidden by default; guest
-        // explicitly filters TO Catalog to discover what they could collect.
+        // Guest default-filter logic:
+        // - First-visit experience (guest has zero real copies): show the full
+        //   catalog, no filter applied. User scrolls + adds Wanted/Owned cards.
+        // - Subsequent visits (any real copies exist): default to excluding
+        //   the synthetic Catalog status so the library shows only what the
+        //   guest has claimed. They can re-filter to Catalog to add more.
+        // Only sets the default when no per-session filter state was loaded.
         if (!isAdmin && !hadStoredFiltersRef.current) {
-          const catalogStatus = statusData.find((s) => s.status_code === "catalog");
-          if (catalogStatus) {
-            setFilters((prev) => ({
-              ...prev,
-              ownership: {
-                mode: "or",
-                include: [],
-                exclude: [String(catalogStatus.ownership_status_id)],
-              },
-            }));
+          const guestHasRealCopies = cardData.some((c) =>
+            (c.copies || []).some((cp) => cp.copy_id != null),
+          );
+          if (guestHasRealCopies) {
+            const catalogStatus = statusData.find((s) => s.status_code === "catalog");
+            if (catalogStatus) {
+              setFilters((prev) => ({
+                ...prev,
+                ownership: {
+                  mode: "or",
+                  include: [],
+                  exclude: [String(catalogStatus.ownership_status_id)],
+                },
+              }));
+            }
           }
         }
       } catch (err) {

@@ -114,8 +114,29 @@ export async function listPhotocards() {
     });
   }
 
+  // Synthesize a Catalog row for any card the guest hasn't annotated yet.
+  // Mirrors what admin's seed does (every catalog item has a tbl_photocard_copies
+  // row with Catalog status). Without this, the ownership filter can't
+  // include/exclude untouched cards because they'd have no status at all.
+  // The synthetic row is identifiable by `copy_id: null`; the detail modal
+  // and grid badge logic both treat it specially.
+  const catalogStatus = (await query(
+    "SELECT ownership_status_id, status_name FROM lkup_ownership_statuses WHERE status_code = 'catalog' LIMIT 1",
+  ))[0];
+
   return cardRows.map((r) => {
     const att = attsByItem.get(r.item_id) || {};
+    const realCopies = copiesByCatalogId.get(r.catalog_item_id) || [];
+    const copies = realCopies.length > 0
+      ? realCopies
+      : (catalogStatus
+          ? [{
+              copy_id: null, // synthetic — no DB row
+              ownership_status_id: catalogStatus.ownership_status_id,
+              ownership_status: catalogStatus.status_name,
+              notes: null,
+            }]
+          : []);
     return {
       item_id: r.item_id,
       // Expose catalog_item_id too — guest's add/update/delete copy calls
@@ -133,7 +154,7 @@ export async function listPhotocards() {
       front_image_path: att.front || null,
       back_image_path: att.back || null,
       is_special: !!r.is_special,
-      copies: copiesByCatalogId.get(r.catalog_item_id) || [],
+      copies,
     };
   });
 }

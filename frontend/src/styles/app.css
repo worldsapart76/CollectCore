@@ -801,8 +801,13 @@ select {
     display: none !important;
   }
 
+  /* `!important` is required: the base rule for these classes is now
+     `display: none !important` (added when the .mobile-only utility was
+     hardened), so the mobile-show rules need !important to override it.
+     Same applies to .topnav-nav-backdrop / .topnav-nav-drawer /
+     .filter-sidebar-backdrop below. */
   .topnav-mobile-controls {
-    display: flex;
+    display: flex !important;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
@@ -878,7 +883,7 @@ select {
 
   /* --- Mobile nav drawer (slides in from left) --- */
   .topnav-nav-backdrop {
-    display: block;
+    display: block !important;
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
@@ -886,7 +891,7 @@ select {
   }
 
   .topnav-nav-drawer {
-    display: flex;
+    display: flex !important;
     flex-direction: column;
     position: fixed;
     top: 0;
@@ -957,7 +962,7 @@ select {
 
   /* --- Filter sidebar slides in from the right as a drawer --- */
   .filter-sidebar-backdrop {
-    display: block;
+    display: block !important;
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);

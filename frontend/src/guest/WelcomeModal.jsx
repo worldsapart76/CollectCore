@@ -54,10 +54,18 @@ export default function WelcomeModal({ isOpen, onClose, ctaLabel = "Get started"
         </p>
 
         <p>
+          <strong>Browsing the catalog</strong> — Right now you're seeing the
+          full catalog. Scroll through, tap any card to see details, and pick
+          a status (Wanted, Owned, etc.) to add it to your collection. Once
+          you've claimed a few, the next time you open the app your library
+          will switch to showing just <em>your</em> cards. To browse the full
+          catalog again later, tap the filter icon and switch the
+          <em> Catalog</em> filter back on.
+        </p>
+
+        <p>
           <strong>Filtering</strong> — Tap the filter icon to narrow your
-          library by group, member, ownership status, and more. By default,
-          cards without any ownership are hidden — filter to <em>Catalog</em> to
-          see everything and pick out what you want to add.
+          library by group, member, ownership status, and more.
         </p>
 
         <p>
