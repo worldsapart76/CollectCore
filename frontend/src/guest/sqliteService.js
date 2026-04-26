@@ -122,7 +122,14 @@ export function initSqlite() {
  */
 export async function loadSeedFromUrl(url = SEED_URL) {
   await initSqlite();
-  const res = await fetch(url, { credentials: "include" });
+  // No `credentials: "include"` here. The api.* /catalog/seed.db endpoint
+  // 302-redirects to the public R2 host (images.collectcoreapp.com) which
+  // serves the file anonymously. Credentialed fetches require the response
+  // to include Access-Control-Allow-Credentials: true, but R2's bucket-
+  // level CORS config can't emit that header. Sending credentials would
+  // force CORS to fail on the redirected response. The seed needs no auth
+  // anyway — it's a public catalog snapshot.
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Seed fetch failed: ${res.status}`);
   const buf = await res.arrayBuffer();
   const bytes = new Uint8Array(buf);
