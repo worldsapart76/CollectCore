@@ -205,12 +205,17 @@ def catalog_seed_db():
     """
     Return the current guest seed DB.
 
-    - Local dev: serves data/mobile_seed.db directly (avoids the cross-origin
-      redirect that would otherwise break a fetch from localhost:5181 because
-      R2's public domain isn't CORS-configured for dev origins).
-    - Production (Railway): no local file present, so falls through to a 302
-      redirect to R2 where the seed has been uploaded by
-      tools/prepare_mobile_seed.py --upload.
+    Three serving paths:
+    1. Local dev — serves data/mobile_seed.db directly (FileResponse).
+    2. Production (Railway) — proxies the file from R2 inline. R2's
+       public domain (images.collectcoreapp.com) doesn't reliably emit
+       CORS headers for browser fetches via custom-domain — bucket-level
+       CORS doesn't apply, and Transform Rules at the Cloudflare edge
+       proved fragile under cache churn. Proxying inline lets FastAPI's
+       CORSMiddleware (already configured for https://collectcoreapp.com)
+       handle CORS uniformly. Trade-off: ~10MB egress per guest first-
+       visit through Railway, which is fine at household scale.
+    3. Misconfigured deploy — returns 404 with a setup hint.
     """
     if SEED_DB_PATH.is_file():
         return FileResponse(
@@ -221,7 +226,41 @@ def catalog_seed_db():
 
     public_base = os.environ.get("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
     if public_base:
-        return RedirectResponse(f"{public_base}/catalog/seed.db", status_code=302)
+        import urllib.request
+        from fastapi.responses import StreamingResponse
+
+        upstream_url = f"{public_base}/catalog/seed.db"
+        try:
+            upstream = urllib.request.urlopen(upstream_url, timeout=30)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch seed from R2: {exc}",
+            )
+
+        # Stream the body in chunks rather than loading the full ~10MB into
+        # memory before responding. CORS headers come from CORSMiddleware
+        # (allow_origins includes the apex SPA origin).
+        def iter_chunks():
+            try:
+                while True:
+                    chunk = upstream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                upstream.close()
+
+        headers = {}
+        # Let browsers cache aggressively — the seed is content-addressed
+        # (callers refresh via /catalog/delta on top of it) so a stale seed
+        # is fine for a few minutes.
+        headers["Cache-Control"] = "public, max-age=300"
+        return StreamingResponse(
+            iter_chunks(),
+            media_type="application/x-sqlite3",
+            headers=headers,
+        )
 
     raise HTTPException(
         status_code=404,
