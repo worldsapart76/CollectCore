@@ -437,6 +437,27 @@ def toggle_status_visibility(payload: StatusVisibilityToggle, db=Depends(get_db)
     return {"ok": True}
 
 
+# ---------- Guest seed regeneration ----------
+# Rebuilds backend/data/mobile_seed.db from the live admin DB. Useful any
+# time the catalog or a relevant lookup (status visibility, group rename,
+# new member, etc.) changes — guests pick up the new seed on their next
+# first-visit, and the existing /catalog/delta sync covers per-card changes.
+#
+# The output goes to DATA_ROOT/data/mobile_seed.db (the volume on Railway,
+# project-root in dev). routers/catalog.py:_find_seed_db() prefers that
+# path over the baked-into-repo fallback, so the regenerated copy is served
+# the next request after this completes.
+
+@router.post("/admin/regenerate-seed")
+def regenerate_seed():
+    from seed_builder import build_seed
+    try:
+        info = build_seed()
+        return {"ok": True, **info}
+    except Exception as exc:  # noqa: BLE001 — surface anything to the admin
+        raise HTTPException(status_code=500, detail=f"Seed rebuild failed: {exc}")
+
+
 # ---------- Frontend static files (production) ----------
 # Serve the pre-built React app so the frontend dev server is not needed.
 # The /assets mount and /vite.svg route must be registered before the catch-all

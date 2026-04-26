@@ -13,6 +13,7 @@ import {
   mergeLookupRows,
   patchLookupRow,
   prepareBackup,
+  regenerateGuestSeed,
   restoreBackup,
   scanUnusedLookups,
   toggleStatusVisibility,
@@ -58,6 +59,11 @@ export default function AdminPage() {
   const [restoreStatus, setRestoreStatus] = useState(null);
   const [restoreError, setRestoreError] = useState(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState(null);
+
+  // ── Guest seed regeneration ──────────────────────────────────────────────────
+  const [seedStatus, setSeedStatus] = useState(null);
+  const [seedInfo, setSeedInfo] = useState(null);
+  const [seedError, setSeedError] = useState(null);
   const restoreInputRef = useRef(null);
 
   // ── Lookup Cleanup ────────────────────────────────────────────────────────────
@@ -145,6 +151,18 @@ export default function AdminPage() {
     if (restoreInputRef.current) restoreInputRef.current.value = "";
   }
   function handleRestoreCancel() { setPendingRestoreFile(null); setRestoreStatus(null); setRestoreError(null); }
+
+  async function handleRegenerateSeed() {
+    setSeedStatus("working"); setSeedInfo(null); setSeedError(null);
+    try {
+      const info = await regenerateGuestSeed();
+      setSeedInfo(info);
+      setSeedStatus("done");
+    } catch (e) {
+      setSeedError(e.message || "Seed regeneration failed.");
+      setSeedStatus("error");
+    }
+  }
   async function handleRestoreConfirm() {
     if (!pendingRestoreFile) return;
     setRestoreStatus("working"); setRestoreError(null);
@@ -315,6 +333,33 @@ export default function AdminPage() {
             {restoreStatus === "working" && <span style={{ color: "#444", fontSize: "0.9rem" }}>Restoring…</span>}
             {restoreStatus === "done" && <span style={{ color: "#166534", fontSize: "0.9rem", marginLeft: 10 }}>Restore complete. Reload the page to continue.</span>}
             {restoreStatus === "error" && <span style={{ color: "#9b1c1c", fontSize: "0.9rem", marginLeft: 10 }}>{restoreError}</span>}
+          </div>
+
+          {/* Guest seed */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Guest Webview Seed</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            Rebuilds the catalog snapshot served to guests at <code>/guest/</code>.
+            Run this after editing photocard catalog data, status visibility,
+            or any other lookup that affects what guests see. Existing guests
+            pick up the new snapshot the next time they load the app.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={handleRegenerateSeed}
+              disabled={seedStatus === "working"}
+              style={{ padding: "5px 14px", cursor: seedStatus === "working" ? "default" : "pointer" }}
+            >
+              {seedStatus === "working" ? "Regenerating…" : "Regenerate Guest Seed"}
+            </button>
+            {seedStatus === "done" && seedInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                Rebuilt: {seedInfo.card_count} cards, {(seedInfo.size_bytes / (1024 * 1024)).toFixed(2)} MB.
+              </span>
+            )}
+            {seedStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{seedError}</span>
+            )}
           </div>
         </section>
       )}

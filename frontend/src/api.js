@@ -684,6 +684,11 @@ export async function restoreBackup(file) {
   return handleJsonResponse(res, "Restore failed.");
 }
 
+export async function regenerateGuestSeed() {
+  const res = await fetch(`${API}/admin/regenerate-seed`, { method: "POST" });
+  return handleJsonResponse(res, "Seed regeneration failed.");
+}
+
 // --- Admin: Unused Lookup Cleanup ---
 
 export async function scanUnusedLookups() {
