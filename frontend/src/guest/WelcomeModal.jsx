@@ -37,8 +37,11 @@ export default function WelcomeModal({ isOpen, onClose, ctaLabel = "Get started"
         </p>
 
         <p>
-          <strong>Library</strong> — Browse every card in the catalog. Tap a
-          card to see details, photos, and ownership info.
+          <strong>Library</strong> — On first run, you will see the entire
+          catalog. Tap any card to see details and add to your list (Wanted,
+          Owned, etc.). The next time you load the app, you will only see
+          those tracked cards. If you want to see the Catalog again, add it
+          in your filters. (It is filtered off by default.)
         </p>
 
         <p>
@@ -51,16 +54,6 @@ export default function WelcomeModal({ isOpen, onClose, ctaLabel = "Get started"
           <strong>Copies</strong> — You can own more than one of the same card.
           Each copy tracks its own status, so you can mark one as Owned and
           another as For Trade.
-        </p>
-
-        <p>
-          <strong>Browsing the catalog</strong> — Right now you're seeing the
-          full catalog. Scroll through, tap any card to see details, and pick
-          a status (Wanted, Owned, etc.) to add it to your collection. Once
-          you've claimed a few, the next time you open the app your library
-          will switch to showing just <em>your</em> cards. To browse the full
-          catalog again later, tap the filter icon and switch the
-          <em> Catalog</em> filter back on.
         </p>
 
         <p>
