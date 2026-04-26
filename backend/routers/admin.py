@@ -26,9 +26,10 @@ from file_helpers import DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend_dist"
 
 # Built guest React bundle (`vite build --mode guest`). Served at
-# guest.collectcoreapp.com by the host-routing middleware in main.py. Assets
-# live under /guest-assets/ rather than /assets/ to avoid colliding with the
-# admin bundle when both share the same Railway service.
+# collectcoreapp.com/guest/* by the path-routing middleware in main.py.
+# Vite is configured with base='/guest/' + assetsDir='guest-assets', so the
+# bundle's index.html references /guest/guest-assets/... — no collision
+# with admin's /assets/.
 FRONTEND_DIST_GUEST = Path(__file__).resolve().parents[1] / "frontend_dist_guest"
 
 router = APIRouter(tags=["admin"])
@@ -453,12 +454,13 @@ def register_frontend_static(app):
     SPA route doesn't shadow API endpoints.
 
     Mounts both bundles when present:
-      /assets/        → admin (frontend_dist/assets/)
-      /guest-assets/  → guest (frontend_dist_guest/guest-assets/)
+      /assets/              → admin (frontend_dist/assets/)
+      /guest/guest-assets/  → guest (frontend_dist_guest/guest-assets/)
 
     The catch-all `/{full_path}` falls back to admin's index.html. The
-    guest bundle's index.html is served by the host-routing middleware
-    in main.py (which fires *before* this catch-all reaches it).
+    guest bundle's index.html is served by the path-routing middleware
+    in main.py (which fires *before* this catch-all reaches it) for any
+    GET to /guest or /guest/...
     """
     if FRONTEND_DIST.exists():
         app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
@@ -466,13 +468,27 @@ def register_frontend_static(app):
     if FRONTEND_DIST_GUEST.exists():
         guest_assets = FRONTEND_DIST_GUEST / "guest-assets"
         if guest_assets.exists():
-            app.mount("/guest-assets", StaticFiles(directory=str(guest_assets)), name="guest-assets")
+            app.mount(
+                "/guest/guest-assets",
+                StaticFiles(directory=str(guest_assets)),
+                name="guest-assets",
+            )
 
     if not FRONTEND_DIST.exists():
         return
 
     @app.get("/vite.svg", include_in_schema=False)
     async def _serve_favicon():
+        return _FileResponse(str(FRONTEND_DIST / "vite.svg"))
+
+    # Guest's index.html references /guest/vite.svg (because base='/guest/').
+    # Serve the guest dist's copy when present; falls back to admin's so a
+    # missing-guest-dist deploy doesn't 404 the favicon either.
+    @app.get("/guest/vite.svg", include_in_schema=False)
+    async def _serve_guest_favicon():
+        guest_svg = FRONTEND_DIST_GUEST / "vite.svg"
+        if guest_svg.exists():
+            return _FileResponse(str(guest_svg))
         return _FileResponse(str(FRONTEND_DIST / "vite.svg"))
 
     @app.get("/{full_path:path}", include_in_schema=False)

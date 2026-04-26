@@ -168,7 +168,7 @@ All docs are in the `docs/` folder. Use these as authoritative references:
 | `C:\Users\world\.claude\plans\pure-inventing-whisper.md` | **Future modules plan** — full schema decisions for all 5 modules (all now implemented; plan file remains as schema reference) |
 | `C:\Users\world\.claude\plans\fancy-stirring-hollerith.md` | **PARTIALLY SUPERSEDED 2026-04-25** — Capacitor mobile sections shelved (mobile build deferred indefinitely in favor of responsive web); hosting + Path A/B sections still useful as architectural context. Use only for historical reference; current state is in CLAUDE.md → Hosting / Auth / Multi-User Model sections. |
 | `docs/session_notes.md` | Working session history — completed work and next steps. **2026-04-25 entry** documents the apex-SPA cutover, Cloudflare Access auth, and web-only guest pivot in detail. |
-| `docs/guest_deploy_runbook.md` | Step-by-step checklist for taking `guest.collectcoreapp.com` live (build, custom domain, DNS, Cloudflare Access bypass, CORS, smoke test, rollback). Code prep landed 2026-04-26; runbook is the deploy-time clicks. |
+| `docs/guest_deploy_runbook.md` | Step-by-step checklist for taking `collectcoreapp.com/guest/` live (build, Cloudflare Access bypass for `/guest/*`, smoke test, rollback). No new domain or DNS — guest shares the apex via path mount. Code prep landed 2026-04-26; runbook is the deploy-time clicks. |
 
 ---
 
@@ -220,28 +220,33 @@ up wholesale.
   apex paths return `index.html` (avoiding API route collisions like
   `/photocards/library` matching the books detail route).
 - **Frontend (guest):** Separate React build via `npm run build:guest`,
-  outputs to `backend/frontend_dist_guest/` with assets under
-  `guest-assets/` (NOT `assets/`) so the two bundles don't collide on the
-  shared Railway service. Same `spa_host_routing` middleware serves the
-  guest `index.html` when Host starts with `guest.`. Bundle is NOT yet
-  committed to git or deployed — see `docs/guest_deploy_runbook.md` for
-  the deploy sequence when ready. Guest UI lives in `frontend/src/guest/`
-  (GuestBootstrap, WelcomeModal, GuestPhotocardDetailModal,
-  GuestMenuItems, guestData adapter, sqliteService + worker). Reuses
-  admin's `PhotocardLibraryPage` with data-source branching and
-  isAdmin-gated controls (Path A).
+  outputs to `backend/frontend_dist_guest/` with `base='/guest/'` and
+  `assetsDir='guest-assets'` — bundle ships at
+  `collectcoreapp.com/guest/` with assets under `/guest/guest-assets/`.
+  Same `spa_host_routing` middleware in `backend/main.py` does
+  path-based routing — `/guest/*` GETs return the guest bundle's
+  `index.html`, everything else returns admin's. **Path-based mount,
+  not a subdomain** — Railway free tier is capped at 2 custom domains
+  (api + apex) and the design intentionally avoids needing a third.
+  Bundle is NOT yet committed to git or deployed — see
+  `docs/guest_deploy_runbook.md` for the deploy sequence (just one
+  step: add a Cloudflare Access bypass app for the `/guest` path).
+  Guest UI lives in `frontend/src/guest/` (GuestBootstrap, WelcomeModal,
+  GuestPhotocardDetailModal, GuestMenuItems, guestData adapter,
+  sqliteService + worker). Reuses admin's `PhotocardLibraryPage` with
+  data-source branching and isAdmin-gated controls (Path A).
 - **Images:** Cloudflare R2, served via custom domain
   `images.collectcoreapp.com`. `tbl_attachments.storage_type = 'hosted' | 'local'`
   but in practice all production rows are 'hosted'.
 - **Custom domains (all on Cloudflare proxy / orange cloud):**
-  - `collectcoreapp.com` — admin SPA
+  - `collectcoreapp.com` — admin SPA at `/`, guest SPA at `/guest/*`
+    (path-mounted to stay within the Railway free-tier 2-custom-domain limit)
   - `api.collectcoreapp.com` — API (also used for machine-to-machine and
     by the lingering desktop installer until users uninstall)
   - `images.collectcoreapp.com` — R2 public asset CDN
-  - `guest.collectcoreapp.com` — RESERVED for guest webview, not yet
-    configured
-  - `collectcore-production.up.railway.app` — Railway's auto-generated URL,
-    still active for backwards compatibility, will eventually retire
+  - `collectcore-production.up.railway.app` — Railway's auto-generated URL.
+    Marked as the "primary service domain" by Railway, so leave it in place;
+    deletion has unclear side effects per the dashboard warning.
 - **Scope:** CollectCore only. MediaManager, Calibre Content Server, Jellyfin
   still target Unraid.
 - **Fallback:** Unraid self-hosting retained in ARCHITECTURE.md Decision A
@@ -285,11 +290,15 @@ Thread 8 for the full reasoning.
 - **Admin tier** (household only): Cloudflare Access auth via Google, full CRUD
   against Railway, all images on R2. Uses `https://collectcoreapp.com`.
 - **Guest tier** (friends, future): no account, no login. Webview at
-  `https://guest.collectcoreapp.com` (NOT YET BUILT). WASM SQLite in browser
-  (sqlite-wasm or sql.js, persisted to OPFS / IndexedDB) holds the guest's
-  local catalog + annotations. Pulls catalog snapshot from R2 on first visit,
-  pulls deltas from Railway `/catalog/*` endpoints (Cloudflare Access bypass)
-  thereafter. No writes against the cloud DB ever.
+  `https://collectcoreapp.com/guest/` (path-mounted on the apex, code-
+  complete as of Phase 7 2026-04-26 but not yet deployed — the only
+  remaining step is adding a Cloudflare Access bypass app for the
+  `/guest` path; see `docs/guest_deploy_runbook.md`). WASM SQLite in
+  browser (`@sqlite.org/sqlite-wasm`, persisted to OPFS via SAHPool VFS)
+  holds the guest's local catalog + annotations. Pulls catalog snapshot
+  from R2 on first visit, pulls deltas from Railway `/catalog/*`
+  endpoints (Cloudflare Access bypass) thereafter. No writes against the
+  cloud DB ever.
 
 **Capacitor mobile is INDEFINITELY DEFERRED.** The `mobile-shell` branch holds
 the Phase 1 scaffold (Capacitor + Android Gradle project + mode-aware Vite

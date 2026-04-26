@@ -42,24 +42,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------- Host-based SPA fallback ----------
-# The same FastAPI service is reached via multiple custom domains:
-#   - api.collectcoreapp.com   → API only (legacy + machine-to-machine)
-#   - collectcoreapp.com       → admin SPA (backend/frontend_dist/)
-#   - guest.collectcoreapp.com → guest SPA (backend/frontend_dist_guest/)
-# When a SPA path like /photocards/library is requested on the apex host,
-# the browser would normally hit the photocards API router first and get
-# JSON instead of the SPA. This middleware short-circuits that: on a SPA
-# host, GETs that don't match a static asset prefix get the appropriate
-# index.html, letting React Router handle routing client-side.
+# ---------- SPA fallback (host- + path-based routing) ----------
+# The same FastAPI service is reached via two custom domains today:
+#   - api.collectcoreapp.com → API only (machine-to-machine + cross-subdomain
+#     fetches from the SPA, which can include CF Access cookies because both
+#     hosts are under the same Cloudflare Access app).
+#   - collectcoreapp.com     → SPA host. Two SPAs are mounted under it:
+#       /         → admin SPA  (backend/frontend_dist/)
+#       /guest/*  → guest SPA  (backend/frontend_dist_guest/)
 #
-# Static assets are URL-disambiguated to avoid collision: admin under
-# /assets/ (Vite default), guest under /guest-assets/ (set in vite.config.js
-# `assetsDir` for mode === 'guest'). Each bundle's index.html only
-# references its own prefix.
+# Why path-routing for guest instead of a `guest.` subdomain? Railway's
+# free tier limits custom domains to two (api + apex), and Cloudflare Access
+# only needs one bypass policy added to the existing apex app to expose
+# /guest/* publicly. Trade-off: URL is collectcoreapp.com/guest/ instead
+# of guest.collectcoreapp.com.
+#
+# Path collision protection: a SPA route like /photocards/library would
+# normally hit the photocards API router first and get JSON. This middleware
+# short-circuits — on the apex host, GETs that don't match a static asset
+# prefix or the API host return the right index.html (admin or guest), so
+# React Router handles routing client-side.
+#
+# Static assets are URL-disambiguated so neither SPA fights for /assets/:
+#   admin → /assets/         (Vite default)
+#   guest → /guest/guest-assets/  (Vite base='/guest/' + assetsDir='guest-assets')
 _API_HOST_PREFIXES = ("api.",)
-_GUEST_HOST_PREFIXES = ("guest.",)
-_SPA_PASSTHROUGH_PREFIXES = ("/assets/", "/guest-assets/", "/images/", "/vite.svg")
+_GUEST_PATH_PREFIX = "/guest"
+_SPA_PASSTHROUGH_PREFIXES = (
+    "/assets/",
+    "/guest/guest-assets/",
+    "/images/",
+    "/vite.svg",
+    "/guest/vite.svg",
+)
 
 @app.middleware("http")
 async def spa_host_routing(request: Request, call_next):
@@ -76,8 +91,10 @@ async def spa_host_routing(request: Request, call_next):
     if any(path.startswith(p) for p in _SPA_PASSTHROUGH_PREFIXES):
         return await call_next(request)
     from routers.admin import FRONTEND_DIST, FRONTEND_DIST_GUEST
-    is_guest_host = any(host.startswith(p) for p in _GUEST_HOST_PREFIXES)
-    dist = FRONTEND_DIST_GUEST if is_guest_host else FRONTEND_DIST
+    # Anything under /guest (with or without trailing path) gets the guest
+    # bundle's index.html so React Router with basename='/guest' can take over.
+    is_guest_path = path == _GUEST_PATH_PREFIX or path.startswith(_GUEST_PATH_PREFIX + "/")
+    dist = FRONTEND_DIST_GUEST if is_guest_path else FRONTEND_DIST
     index_html = dist / "index.html"
     if index_html.exists():
         return FileResponse(str(index_html))

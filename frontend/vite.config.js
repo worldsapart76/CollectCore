@@ -71,9 +71,21 @@ function assetsDirFor(mode) {
   return 'assets'
 }
 
+// Public base for the bundle. Three modes today:
+//   mobile → './'         (Capacitor, file:// asset loads)
+//   guest  → '/guest/'    (mounted at apex /guest/* — uses Railway custom-
+//                          domain quota efficiently by sharing the apex with
+//                          admin instead of needing a `guest.` subdomain)
+//   admin  → '/'          (apex root)
+function baseFor(mode) {
+  if (mode === 'mobile') return './'
+  if (mode === 'guest') return '/guest/'
+  return '/'
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  base: mode === 'mobile' ? './' : '/',
+  base: baseFor(mode),
   build: {
     outDir: outDirFor(mode),
     emptyOutDir: true,

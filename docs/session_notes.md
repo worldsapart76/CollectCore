@@ -6,6 +6,61 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-26 (later) — Guest webview Phase 6 prep v2: pivot to path-based mount
+
+User hit Railway's 2-custom-domain limit (api.* + apex are both consumed).
+Adding `guest.collectcoreapp.com` as a third would have required a paid
+tier upgrade. Pivoted from subdomain mount to path mount:
+**`collectcoreapp.com/guest/`** instead of `guest.collectcoreapp.com`.
+
+**Why path-based won the redesign decision:**
+- Lower blast radius vs the alternative (drop `api.collectcoreapp.com`,
+  same-origin everything) which would have touched all 140+ API call
+  sites + the Host-disambiguation logic in spa_host_routing that keeps
+  /photocards SPA route from colliding with /photocards API endpoint.
+- Reversible — remove the CF Access bypass app and `/guest/*` re-gates
+  itself. Easy git revert if the bundle itself breaks.
+- ~3 small file edits, plus runbook + docs.
+- Doesn't disturb the api/apex/CF-Access-cookie split that's been
+  working since 2026-04-25.
+
+**Code changes:**
+- [vite.config.js](frontend/vite.config.js): guest mode now builds with
+  `base: '/guest/'`. The bundle's `index.html` references
+  `/guest/guest-assets/...` instead of `/guest-assets/...`.
+- [main.jsx](frontend/src/main.jsx): `BrowserRouter` reads
+  `import.meta.env.BASE_URL` (set by Vite from the `base` config) and
+  passes it as `basename` (with trailing slash stripped). Admin gets
+  `undefined`; guest gets `/guest`. React Router knows where it's mounted.
+- [backend/main.py](backend/main.py): `spa_host_routing` middleware
+  rewritten to route by **path prefix** instead of Host header. Any GET
+  to `/guest` or `/guest/...` (that isn't a static asset) returns the
+  guest bundle's `index.html`. Apex root continues to serve admin's.
+  `_GUEST_HOST_PREFIXES` constant removed; `_GUEST_PATH_PREFIX = "/guest"`
+  added. Passthrough prefixes updated: `/guest/guest-assets/` and
+  `/guest/vite.svg` added.
+- [backend/routers/admin.py](backend/routers/admin.py):
+  `register_frontend_static` mounts `/guest/guest-assets` (was
+  `/guest-assets`). New explicit `/guest/vite.svg` route serves the
+  guest favicon (falls back to admin's if guest dist missing).
+- [docs/guest_deploy_runbook.md](docs/guest_deploy_runbook.md):
+  rewritten end-to-end. Steps 2 (DNS) and 4 (CORS) now no-ops; steps
+  3 (CF Access) simplified to just adding one bypass app for the
+  `/guest` path. Smoke test rewritten for the new URL shape.
+- [CLAUDE.md](CLAUDE.md): custom-domains list, hosting section, and
+  multi-user model section all updated to reflect path-based mount.
+  `guest.collectcoreapp.com` references removed.
+
+**Verified:** admin build (623KB main, no sqlite-wasm, references
+`/assets/`); guest build (596KB main + 864KB wasm, references
+`/guest/guest-assets/`). No URL collision, both bundles tree-shake
+correctly.
+
+**Untouched by this pivot:** Phase 2/3/4a/5/7 work all still applies.
+Only the deploy plumbing changed.
+
+---
+
 ### 2026-04-26 (later) — Guest webview Phase 7: full guest UI
 
 Path A landed (one PhotocardLibraryPage with data-source adapters), with a
@@ -604,7 +659,7 @@ guest project track):
 | 4a | Per-card annotations (`guest_card_copies` keyed by catalog_item_id, mirrors admin multi-copy model) + `v_guest_library_photocards` view. Service-layer CRUD only; no UI consumer yet. | code-complete 2026-04-26; verify with Phases 1b/2/3 on real device |
 | 4b | Guest-added cards: flat `guest_added_photocards` + `guest_added_attachments` (local images only) + `guest_added_members_xref`. UNION ALL into the library view. | deferred until guest library page exists |
 | 5 | Backup/restore: export `guest_*` rows as JSON, import inverse. Service-layer + `last_backed_up_at` cursor done; "Last backed up: N days ago" UI deferred to Phase 7 alongside the rest of guest UI work. | code-complete 2026-04-26; verify on real device |
-| 6 | Subdomain + Cloudflare config: DNS for `guest.collectcoreapp.com`, Railway deploy, Cloudflare Access bypass. | code prep done 2026-04-26 (vite assetsDir, host-routing middleware, static mount); deploy-time clicks in `docs/guest_deploy_runbook.md` |
+| 6 | Path-mounted guest at `collectcoreapp.com/guest/` (pivoted from `guest.` subdomain — Railway free tier custom-domain limit). Code prep done 2026-04-26 v2 (vite base + assetsDir, basename'd BrowserRouter, path-routing middleware, static mount). Deploy is one CF Access bypass app per `docs/guest_deploy_runbook.md`. | code prep done; awaiting deploy clicks |
 | 7 | Full guest UI: first-run flow + welcome modal (7a), library data adapters + filter defaults (7b), guest detail modal with copies CRUD (7c), hamburger menu Help/Refresh/Backup/Restore (7d). Path A — reuse PhotocardLibraryPage with data-source adapters; fork the detail modal. | code-complete 2026-04-26; verify on real device |
 
 **Phase 1b implementation notes for resume:**
