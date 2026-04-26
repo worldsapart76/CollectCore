@@ -14,11 +14,10 @@ Endpoints:
   GET /catalog/seed.db          -> local file (dev) or redirect to R2 (prod)
 """
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 
 from constants import PHOTOCARD_COLLECTION_TYPE_ID
@@ -28,7 +27,26 @@ from file_helpers import DATA_ROOT
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
+# Two places we look for the seed DB, in order:
+#   1. The volume-mounted DATA_ROOT/data/mobile_seed.db — used in dev (where
+#      DATA_ROOT == project root) and as the preferred path on Railway if
+#      something pre-stages it on the volume.
+#   2. backend/data/mobile_seed.db — committed into the repo, ships with the
+#      Railway deploy. This is the production fallback after we abandoned the
+#      R2 redirect / proxy approach (R2 CORS doesn't apply to custom-domain
+#      requests; Cloudflare Transform Rules and inline urllib proxy both
+#      proved fragile). Bumping the seed = re-running prepare_mobile_seed.py
+#      and committing the new file.
 SEED_DB_PATH = DATA_ROOT / "data" / "mobile_seed.db"
+SEED_DB_PATH_BAKED = Path(__file__).resolve().parents[1] / "data" / "mobile_seed.db"
+
+
+def _find_seed_db() -> Path | None:
+    if SEED_DB_PATH.is_file():
+        return SEED_DB_PATH
+    if SEED_DB_PATH_BAKED.is_file():
+        return SEED_DB_PATH_BAKED
+    return None
 
 
 def _rows_as_dicts(result) -> list[dict]:
@@ -203,66 +221,23 @@ def catalog_delta(
 @router.get("/seed.db")
 def catalog_seed_db():
     """
-    Return the current guest seed DB.
+    Return the current guest seed DB. FileResponse from local disk —
+    CORS headers come from CORSMiddleware uniformly.
 
-    Three serving paths:
-    1. Local dev — serves data/mobile_seed.db directly (FileResponse).
-    2. Production (Railway) — proxies the file from R2 inline. R2's
-       public domain (images.collectcoreapp.com) doesn't reliably emit
-       CORS headers for browser fetches via custom-domain — bucket-level
-       CORS doesn't apply, and Transform Rules at the Cloudflare edge
-       proved fragile under cache churn. Proxying inline lets FastAPI's
-       CORSMiddleware (already configured for https://collectcoreapp.com)
-       handle CORS uniformly. Trade-off: ~10MB egress per guest first-
-       visit through Railway, which is fine at household scale.
-    3. Misconfigured deploy — returns 404 with a setup hint.
+    See module docstring on _find_seed_db() for the lookup order. To
+    publish a new seed: run `python tools/prepare_mobile_seed.py`,
+    copy the resulting `data/mobile_seed.db` to `backend/data/mobile_seed.db`,
+    commit, push.
     """
-    if SEED_DB_PATH.is_file():
-        return FileResponse(
-            path=str(SEED_DB_PATH),
-            media_type="application/x-sqlite3",
-            filename="seed.db",
+    seed = _find_seed_db()
+    if seed is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Seed DB not found. Run tools/prepare_mobile_seed.py and "
+                   "commit data/mobile_seed.db to backend/data/mobile_seed.db.",
         )
-
-    public_base = os.environ.get("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if public_base:
-        import urllib.request
-        from fastapi.responses import StreamingResponse
-
-        upstream_url = f"{public_base}/catalog/seed.db"
-        try:
-            upstream = urllib.request.urlopen(upstream_url, timeout=30)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to fetch seed from R2: {exc}",
-            )
-
-        # Stream the body in chunks rather than loading the full ~10MB into
-        # memory before responding. CORS headers come from CORSMiddleware
-        # (allow_origins includes the apex SPA origin).
-        def iter_chunks():
-            try:
-                while True:
-                    chunk = upstream.read(64 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                upstream.close()
-
-        headers = {}
-        # Let browsers cache aggressively — the seed is content-addressed
-        # (callers refresh via /catalog/delta on top of it) so a stale seed
-        # is fine for a few minutes.
-        headers["Cache-Control"] = "public, max-age=300"
-        return StreamingResponse(
-            iter_chunks(),
-            media_type="application/x-sqlite3",
-            headers=headers,
-        )
-
-    raise HTTPException(
-        status_code=404,
-        detail="Seed DB unavailable: run tools/prepare_mobile_seed.py or set R2_PUBLIC_BASE_URL",
+    return FileResponse(
+        path=str(seed),
+        media_type="application/x-sqlite3",
+        filename="seed.db",
     )

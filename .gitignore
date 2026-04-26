@@ -6,10 +6,12 @@ __pycache__/
 # Node dependencies
 frontend/node_modules/
 
-# Local app data (do NOT commit)
-images/
-data/
-exports/
+# Local app data (do NOT commit). Path-anchored with leading slash so the
+# rule only matches the project-root copies. backend/data/mobile_seed.db
+# IS committed — it's the production seed bundled into the Railway deploy.
+/images/
+/data/
+/exports/
 
 # API keys and secrets (never commit)
 backend/.env
