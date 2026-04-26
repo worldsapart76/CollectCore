@@ -781,13 +781,18 @@ select {
 
 /* ── Responsive: TopNav mobile controls + filter drawer (≤768px) ─────────────── */
 
-/* Default (desktop): mobile-only chrome hidden; backdrops hidden. */
+/* Default (desktop): mobile-only chrome hidden; backdrops hidden.
+   `!important` is required because some `.mobile-only` elements set inline
+   `display: flex` via styles object (e.g. PhotocardLibraryPage's per-row
+   stepper); without !important the inline style wins and the control
+   leaks into the desktop layout. Mirrors the `.desktop-only { ... !important }`
+   rule in the mobile media query below. */
 .topnav-mobile-controls,
 .topnav-nav-backdrop,
 .topnav-nav-drawer,
 .filter-sidebar-backdrop,
 .mobile-only {
-  display: none;
+  display: none !important;
 }
 
 @media (max-width: 768px) {
@@ -982,12 +987,14 @@ select {
     overflow: hidden;
   }
 
-  /* Show/hide utility classes — flip the desktop default on mobile. */
+  /* Show/hide utility classes — flip the desktop default on mobile.
+     Both rules use !important so they always win against inline `display`
+     styles set on .mobile-only / .desktop-only elements. */
   .desktop-only {
     display: none !important;
   }
   .mobile-only {
-    display: flex;
+    display: flex !important;
   }
 
   /* Library pages that wrap FilterSidebarShell in an outer fixed-width div
