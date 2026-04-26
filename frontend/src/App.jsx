@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./components/layout/AppShell";
 import HomePage from "./pages/HomePage";
@@ -20,6 +21,14 @@ import BoardgamesIngestPage from "./pages/BoardgamesIngestPage";
 import BoardgamesLibraryPage from "./pages/BoardgamesLibraryPage";
 import TTRPGIngestPage from "./pages/TTRPGIngestPage";
 import TTRPGLibraryPage from "./pages/TTRPGLibraryPage";
+
+// Guest debug page is dev-only. The `import.meta.env.DEV ? ... : null`
+// constant-folds at build time, so in a production bundle Rollup eliminates
+// both the lazy() call and the dynamic import — meaning the sqlite-wasm
+// chunk never gets emitted into the admin dist.
+const GuestDebugPage = import.meta.env.DEV
+  ? lazy(() => import("./guest/GuestDebugPage"))
+  : null;
 
 // When only one module is configured (e.g. mobile build), skip the home page
 // and land directly on that module's primary path.
@@ -51,6 +60,17 @@ export default function App() {
         <Route path="/boardgames/library" element={<BoardgamesLibraryPage />} />
         <Route path="/ttrpg/add" element={<TTRPGIngestPage />} />
         <Route path="/ttrpg/library" element={<TTRPGLibraryPage />} />
+        {/* Guest webview debug — dev-only. Promoted/replaced when guest UI lands. */}
+        {import.meta.env.DEV && (
+          <Route
+            path="/_guest_debug"
+            element={
+              <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+                <GuestDebugPage />
+              </Suspense>
+            }
+          />
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

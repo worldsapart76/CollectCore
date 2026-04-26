@@ -47,18 +47,33 @@ const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, {
 }]))
 
 // Build modes:
-//   default ("npm run build")          → web bundle for Railway. Outputs to
-//     backend/frontend_dist/ which is committed to git so Railway picks it up
-//     on deploy and FastAPI serves it from the apex domain.
+//   default ("npm run build")            → admin web bundle for Railway.
+//     Outputs to backend/frontend_dist/, served by FastAPI at the apex domain.
+//   "npm run build:guest" (mode=guest)   → guest web bundle. Outputs to
+//     backend/frontend_dist_guest/. Loads .env.guest which sets
+//     VITE_IS_ADMIN=false so admin code paths tree-shake out at build time.
+//     Will be served at guest.collectcoreapp.com (Phase 6 of guest webview).
 //   "npm run build:mobile" (mode=mobile) → Capacitor APK bundle. Outputs to
 //     dist/ where `cap sync android` expects it; uses relative asset paths
 //     because the WebView loads the bundle from the device filesystem.
+function outDirFor(mode) {
+  if (mode === 'mobile') return 'dist'
+  if (mode === 'guest') return '../backend/frontend_dist_guest'
+  return '../backend/frontend_dist'
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   base: mode === 'mobile' ? './' : '/',
   build: {
-    outDir: mode === 'mobile' ? 'dist' : '../backend/frontend_dist',
+    outDir: outDirFor(mode),
     emptyOutDir: true,
+  },
+  // sqlite-wasm loads its .wasm via import.meta.url — Vite's pre-bundling
+  // breaks those relative paths. Excluding from optimizeDeps preserves the
+  // dynamic asset loading.
+  optimizeDeps: {
+    exclude: ['@sqlite.org/sqlite-wasm'],
   },
   server: {
     port: 5181,

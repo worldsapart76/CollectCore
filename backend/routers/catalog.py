@@ -26,7 +26,7 @@ from file_helpers import DATA_ROOT
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
-SEED_DB_PATH = DATA_ROOT / "mobile_seed.db"
+SEED_DB_PATH = DATA_ROOT / "data" / "mobile_seed.db"
 
 
 @router.get("/version")
@@ -144,14 +144,15 @@ def catalog_delta(
 @router.get("/seed.db")
 def catalog_seed_db():
     """
-    Return the current guest seed DB. In production, this redirects to R2 (where
-    the seed is uploaded by tools/prepare_mobile_seed.py --upload). In local dev,
-    serves the file from data/mobile_seed.db if present.
-    """
-    public_base = os.environ.get("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if public_base:
-        return RedirectResponse(f"{public_base}/catalog/seed.db", status_code=302)
+    Return the current guest seed DB.
 
+    - Local dev: serves data/mobile_seed.db directly (avoids the cross-origin
+      redirect that would otherwise break a fetch from localhost:5181 because
+      R2's public domain isn't CORS-configured for dev origins).
+    - Production (Railway): no local file present, so falls through to a 302
+      redirect to R2 where the seed has been uploaded by
+      tools/prepare_mobile_seed.py --upload.
+    """
     if SEED_DB_PATH.is_file():
         return FileResponse(
             path=str(SEED_DB_PATH),
@@ -159,7 +160,11 @@ def catalog_seed_db():
             filename="seed.db",
         )
 
+    public_base = os.environ.get("R2_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public_base:
+        return RedirectResponse(f"{public_base}/catalog/seed.db", status_code=302)
+
     raise HTTPException(
         status_code=404,
-        detail="Seed DB unavailable: set R2_PUBLIC_BASE_URL or run tools/prepare_mobile_seed.py",
+        detail="Seed DB unavailable: run tools/prepare_mobile_seed.py or set R2_PUBLIC_BASE_URL",
     )
