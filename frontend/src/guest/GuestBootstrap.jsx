@@ -27,7 +27,9 @@ import {
 import WelcomeModal from "./WelcomeModal";
 
 const WELCOME_KEY = "welcome_dismissed";
-const SEED_URL = "/catalog/seed.db";
+// Seed URL is owned by sqliteService — it knows to route through the
+// API host (api.collectcoreapp.com) where the CF Access bypass lives.
+// Don't pass an override here; the bootstrap should not second-guess it.
 
 // Boot phases — drive both the splash UI and the gating of children.
 const PHASE_INITIALIZING = "initializing";
@@ -59,7 +61,7 @@ export default function GuestBootstrap({ children }) {
 
         if (!hasPersistedCatalog()) {
           setPhase(PHASE_LOADING_SEED);
-          await loadSeedFromUrl(SEED_URL);
+          await loadSeedFromUrl();
           if (cancelled) return;
         }
 
@@ -157,6 +159,13 @@ function BootSplash({ message }) {
 }
 
 function BootError({ message }) {
+  // "Failed to fetch" is a network/CORS error, not a storage problem.
+  // Misleading users toward the storage/incognito hint here is what
+  // generated repeated false-trail debugging in early testing — instead
+  // diagnose by category so the suggested fix actually applies.
+  const isNetwork = /failed to fetch|networkerror|load failed/i.test(message || "");
+  const isStorage = /opfs|sahpool|access handle|persist|quota/i.test(message || "");
+
   return (
     <div
       style={{
@@ -168,12 +177,26 @@ function BootError({ message }) {
       }}
     >
       <h2 style={{ marginTop: 0 }}>Couldn't start CollectCore</h2>
-      <p style={{ color: "var(--text-muted)" }}>
-        Something went wrong while preparing your local catalog. Reloading the
-        page usually fixes it. If it keeps happening, your browser may be
-        blocking storage — try opening this site in a regular (not private /
-        incognito) window.
-      </p>
+      {isNetwork ? (
+        <p style={{ color: "var(--text-muted)" }}>
+          Couldn't reach the catalog server. Most often this clears up on
+          a reload. If it persists, the catalog API may be temporarily
+          down — check that <code>api.collectcoreapp.com</code> is
+          reachable, then try again.
+        </p>
+      ) : isStorage ? (
+        <p style={{ color: "var(--text-muted)" }}>
+          Your browser is blocking the local storage CollectCore needs.
+          Try closing other CollectCore tabs and reloading. If the
+          problem persists, restart the browser to release any stuck
+          storage handles.
+        </p>
+      ) : (
+        <p style={{ color: "var(--text-muted)" }}>
+          Something went wrong while preparing your local catalog.
+          Reloading the page usually fixes it.
+        </p>
+      )}
       <pre
         style={{
           background: "var(--code-bg, #f5f5f5)",

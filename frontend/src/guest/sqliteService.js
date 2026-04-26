@@ -7,6 +7,20 @@
 // All public APIs are async (the in-memory Phase 1a service exposed sync
 // query/isLoaded; switching to a worker forces them to async).
 
+// All catalog endpoints (/catalog/seed.db, /catalog/delta) live on
+// api.collectcoreapp.com — that's the host with the Cloudflare Access
+// bypass policy. Hitting them on the apex would resolve to the gated
+// host and fail with "Failed to fetch" (CF redirects to Google login
+// and the redirect response has no CORS headers, so the fetch errors
+// out before completing).
+//
+// Guest builds set VITE_API_BASE_URL=https://api.collectcoreapp.com in
+// .env.guest. Admin runs these adapters too in dev (via /_guest_debug)
+// where API_BASE is "" — same-origin against the local backend works.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const SEED_URL = `${API_BASE}/catalog/seed.db`;
+const DELTA_URL = (since) => `${API_BASE}/catalog/delta?since=${since}`;
+
 let _worker = null;
 let _nextId = 1;
 const _pending = new Map();
@@ -100,8 +114,13 @@ export function initSqlite() {
 /**
  * Fetch the catalog seed and import it into the SAHPool, replacing any
  * existing catalog.db. Survives page reload.
+ *
+ * URL defaults to api.collectcoreapp.com/catalog/seed.db (via API_BASE)
+ * because that host has the CF Access bypass policy — see SEED_URL note
+ * above. Caller can override for tests; production should always use
+ * the default.
  */
-export async function loadSeedFromUrl(url = "/catalog/seed.db") {
+export async function loadSeedFromUrl(url = SEED_URL) {
   await initSqlite();
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`Seed fetch failed: ${res.status}`);
@@ -187,7 +206,7 @@ const LAST_SYNCED_KEY = "last_synced_catalog_version";
  *
  * Returns `{ since, newVersion, itemsApplied, counts }`.
  */
-export async function syncCatalog({ apiBase = "" } = {}) {
+export async function syncCatalog() {
   await initSqlite();
   if (!_hasCatalog) {
     throw new Error("syncCatalog: no catalog loaded — call loadSeedFromUrl first");
@@ -207,8 +226,7 @@ export async function syncCatalog({ apiBase = "" } = {}) {
     since = rows[0]?.v ?? 0;
   }
 
-  const url = `${apiBase}/catalog/delta?since=${since}`;
-  const res = await fetch(url, { credentials: "include" });
+  const res = await fetch(DELTA_URL(since), { credentials: "include" });
   if (!res.ok) throw new Error(`Delta fetch failed: ${res.status}`);
   const payload = await res.json();
 
