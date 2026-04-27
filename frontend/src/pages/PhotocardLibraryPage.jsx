@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   listPhotocards,
   fetchPhotocardGroups,
@@ -92,27 +92,33 @@ export default function PhotocardLibraryPage() {
   // Detail modal
   const [detailCard, setDetailCard] = useState(null);
 
-  // Preserve `.app-main` scroll position across modal open/close. iOS Safari
-  // does not reliably retain the scroll container's offset while a fullscreen
-  // overlay is up, so we save it on open and restore it on close.
+  // Preserve `.app-main` scroll position across modal open/close.
+  //
+  // iOS Safari resets the inner scroll container to 0 when a position:fixed
+  // overlay covers the viewport. The save MUST happen synchronously inside
+  // the user-gesture event handler (see handleCardClick) — by the time a
+  // useEffect fires after commit/paint, iOS has already zeroed scrollTop
+  // and we'd save 0. The restore runs from useLayoutEffect when detailCard
+  // clears, plus a delayed rAF retry because iOS sometimes re-zeros after
+  // our first set as the overlay tears down.
   const savedScrollRef = useRef(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (detailCard) return;
     const main = document.querySelector(".app-main");
     if (!main) return;
-    if (detailCard) {
-      savedScrollRef.current = main.scrollTop;
-    } else {
-      const y = savedScrollRef.current;
-      if (y > 0) {
-        // Two rAFs: first lets React commit, second lets layout/paint settle
-        // before we set scrollTop (iOS sometimes ignores the first attempt).
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            main.scrollTop = y;
-          });
-        });
-      }
-    }
+    const y = savedScrollRef.current;
+    if (y <= 0) return;
+    main.scrollTop = y;
+    requestAnimationFrame(() => {
+      if (main.scrollTop !== y) main.scrollTop = y;
+    });
+    // Belt-and-suspenders: a final attempt after iOS has finished its
+    // post-overlay layout pass. 60ms is enough that the first two writes
+    // have rendered; if iOS still re-zeroed, this catches it.
+    const t = setTimeout(() => {
+      if (main.scrollTop !== y) main.scrollTop = y;
+    }, 60);
+    return () => clearTimeout(t);
   }, [detailCard]);
 
   // Pagination
@@ -392,6 +398,12 @@ export default function PhotocardLibraryPage() {
         return next;
       });
     } else {
+      // Capture the scroll position synchronously inside the user gesture.
+      // useEffect would fire too late: iOS Safari resets `.app-main`'s
+      // scrollTop to 0 during/before the overlay's first paint, so by the
+      // time a post-commit effect ran we'd be saving 0.
+      const main = document.querySelector(".app-main");
+      if (main) savedScrollRef.current = main.scrollTop;
       setDetailCard(card);
     }
   }
