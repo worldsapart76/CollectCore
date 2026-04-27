@@ -617,7 +617,7 @@ export default function PhotocardLibraryPage() {
               style={{ ...styles.controlBtn, ...styles.primaryBtn }}
               onClick={() => setShowBulkEdit(true)}
             >
-              {isAdmin ? "Bulk Edit" : "Bulk Add"}
+              {isAdmin ? "Bulk Edit" : "Bulk Update"}
             </button>
           )}
           <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
