@@ -114,10 +114,10 @@ the catalog publishing flow. All resolved.
 **Next steps (open):**
 - Phase 4b (guest-added cards) — schema + UX decisions documented
   but not built. Wait for actual user demand.
-- Tombstones in catalog delta — admin currently has no remove-from-
-  catalog flow. When that lands, delta needs a `tombstones` key
-  carrying catalog_item_id values to delete locally. Pair with PD1
-  (admin publish UI) per CLAUDE.md post-deployment roadmap.
+- ~~Tombstones in catalog delta~~ — **closed 2026-04-26.** Catalog is
+  monotonic by design (cards exist in the real world, so they exist
+  in the catalog forever). No remove-from-catalog flow will be built;
+  no tombstones needed.
 - Other modules' image-publish flow (currently photocards-only). The
   `tools/sync_admin_images.py` CLI handles non-photocard covers; an
   in-app button equivalent could ship the same way as

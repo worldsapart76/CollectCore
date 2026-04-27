@@ -13,6 +13,7 @@ import {
   mergeLookupRows,
   patchLookupRow,
   prepareBackup,
+  publishAdminImagesToR2,
   publishCatalogToR2,
   regenerateGuestSeed,
   restoreBackup,
@@ -70,6 +71,11 @@ export default function AdminPage() {
   const [publishStatus, setPublishStatus] = useState(null);
   const [publishInfo, setPublishInfo] = useState(null);
   const [publishError, setPublishError] = useState(null);
+
+  // ── Admin (non-photocard) cover image publish ────────────────────────────────
+  const [adminPublishStatus, setAdminPublishStatus] = useState(null);
+  const [adminPublishInfo, setAdminPublishInfo] = useState(null);
+  const [adminPublishError, setAdminPublishError] = useState(null);
   const restoreInputRef = useRef(null);
 
   // ── Lookup Cleanup ────────────────────────────────────────────────────────────
@@ -179,6 +185,18 @@ export default function AdminPage() {
     } catch (e) {
       setPublishError(e.message || "Publish failed.");
       setPublishStatus("error");
+    }
+  }
+
+  async function handlePublishAdminImages() {
+    setAdminPublishStatus("working"); setAdminPublishInfo(null); setAdminPublishError(null);
+    try {
+      const info = await publishAdminImagesToR2();
+      setAdminPublishInfo(info);
+      setAdminPublishStatus("done");
+    } catch (e) {
+      setAdminPublishError(e.message || "Publish failed.");
+      setAdminPublishStatus("error");
     }
   }
   async function handleRestoreConfirm() {
@@ -391,6 +409,54 @@ export default function AdminPage() {
               <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{publishError}</span>
             )}
           </div>
+
+          {/* Admin (non-photocard) cover image publish */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Publish Cover Images to R2</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            Same as above, but for the other 7 modules — books, graphic novels,
+            music, video, video games, board games, TTRPG. Sweeps any cover
+            image that isn't on R2 yet (local uploads, plus external URLs from
+            TMDB / Discogs / etc.) so every device renders the same image.
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>When to run this:</strong> after replacing or batch-adding
+            covers from your phone (or any non-desktop device). Already-on-R2
+            rows are skipped.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={handlePublishAdminImages}
+              disabled={adminPublishStatus === "working"}
+              style={{ padding: "5px 14px", cursor: adminPublishStatus === "working" ? "default" : "pointer" }}
+            >
+              {adminPublishStatus === "working" ? "Publishing…" : "Publish Cover Images"}
+            </button>
+            {adminPublishStatus === "done" && adminPublishInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                Uploaded {adminPublishInfo.total_uploaded} cover{adminPublishInfo.total_uploaded === 1 ? "" : "s"}.
+                {adminPublishInfo.total_skipped_hosted > 0 && ` ${adminPublishInfo.total_skipped_hosted} already on R2.`}
+                {adminPublishInfo.total_failed > 0 && (
+                  <span style={{ color: "#9b1c1c" }}> {adminPublishInfo.total_failed} failed.</span>
+                )}
+              </span>
+            )}
+            {adminPublishStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{adminPublishError}</span>
+            )}
+          </div>
+          {adminPublishStatus === "done" && adminPublishInfo && adminPublishInfo.total_failed > 0 && (
+            <ul style={{ marginTop: 8, color: "#555", fontSize: "0.85rem" }}>
+              {adminPublishInfo.modules
+                .filter(m => m.failed > 0)
+                .map(m => (
+                  <li key={m.module}>
+                    <strong>{m.module}:</strong> {m.failed} failed
+                    {m.errors?.length > 0 && ` (${m.errors.slice(0, 3).map(e => `${e.stage}${e.pk != null ? `#${e.pk}` : ""}`).join(", ")}${m.errors.length > 3 ? "…" : ""})`}
+                  </li>
+                ))}
+            </ul>
+          )}
 
           {/* Guest seed */}
           <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />

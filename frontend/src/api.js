@@ -694,6 +694,11 @@ export async function publishCatalogToR2() {
   return handleJsonResponse(res, "Catalog publish failed.");
 }
 
+export async function publishAdminImagesToR2() {
+  const res = await fetch(`${API}/admin/publish-admin-images`, { method: "POST" });
+  return handleJsonResponse(res, "Admin image publish failed.");
+}
+
 // --- Admin: Unused Lookup Cleanup ---
 
 export async function scanUnusedLookups() {

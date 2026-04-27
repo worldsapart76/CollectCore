@@ -478,6 +478,26 @@ def publish_catalog():
         raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
 
 
+@router.post("/admin/publish-admin-images")
+def publish_admin_images():
+    """
+    Sweeps non-photocard cover images (books, graphic novels, music, video,
+    video games, board games, TTRPG) to R2. Handles both local-path and
+    external-URL covers (the latter get downloaded, resized, re-uploaded).
+    Rewrites cover_image_url to the R2 URL on success.
+
+    No catalog_version bump — these modules don't participate in guest sync.
+    Run this after adding/replacing covers from any device (especially mobile)
+    so all admin clients render the same R2 URL.
+    """
+    from admin_image_publisher import publish_pending
+    try:
+        info = publish_pending()
+        return {"ok": True, **info}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
+
+
 # ---------- Frontend static files (production) ----------
 # Serve the pre-built React app so the frontend dev server is not needed.
 # The /assets mount and /vite.svg route must be registered before the catch-all
