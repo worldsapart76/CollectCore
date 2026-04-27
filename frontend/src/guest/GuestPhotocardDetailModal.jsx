@@ -30,6 +30,17 @@ const OWNED_CODE = "owned";
 const WANTED_CODE = "wanted";
 const CATALOG_CODE = "catalog";
 
+const navBtnStyle = {
+  padding: "1px 7px",
+  fontSize: 18,
+  lineHeight: 1,
+  cursor: "pointer",
+  border: "1px solid var(--border-input)",
+  borderRadius: "var(--radius-sm)",
+  background: "var(--bg-surface)",
+  color: "inherit",
+};
+
 function resolveImageUrl(path) {
   if (!path) return null;
   // Catalog images are absolute R2 URLs post-cutover (catalog/images/...).
@@ -41,21 +52,40 @@ function resolveImageUrl(path) {
 
 export default function GuestPhotocardDetailModal({
   card,
+  allCards,
   ownershipStatuses,
   onClose,
   onChanged,
 }) {
-  // Local mirror of card.copies so adds/updates/deletes reflect immediately
-  // without waiting for the parent's reload round-trip. Re-synced from
-  // props when the user navigates between cards (key on item_id).
-  const [copies, setCopies] = useState(() => initialCopies(card));
+  const effectiveAllCards = allCards ?? [card];
+  const [currentIndex, setCurrentIndex] = useState(() =>
+    Math.max(0, effectiveAllCards.findIndex((c) => c.item_id === card.item_id)),
+  );
+  // Re-derive each render so parent reloads (fresh copies after onChanged)
+  // flow through to the displayed card.
+  const currentCard = effectiveAllCards[currentIndex] ?? card;
+
+  // Local mirror of currentCard.copies so adds/updates/deletes reflect
+  // immediately without waiting for the parent's reload round-trip.
+  // Re-synced from props when the user navigates between cards.
+  const [copies, setCopies] = useState(() => initialCopies(currentCard));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setCopies(initialCopies(card));
+    setCopies(initialCopies(currentCard));
     setError("");
-  }, [card?.item_id]);
+  }, [currentCard?.item_id]);
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < effectiveAllCards.length - 1;
+  const showNav = effectiveAllCards.length > 1;
+
+  function handleNavigate(delta) {
+    const target = currentIndex + delta;
+    if (target < 0 || target >= effectiveAllCards.length) return;
+    setCurrentIndex(target);
+  }
 
   // Filter out Catalog from the picker — adding a Catalog row is a no-op
   // for the user (it's the synthetic default state). Keep all other
@@ -86,7 +116,7 @@ export default function GuestPhotocardDetailModal({
   }
 
   async function handleAdd(statusId) {
-    if (!card.catalog_item_id) {
+    if (!currentCard.catalog_item_id) {
       setError("Cannot add a copy — this card has no catalog ID.");
       return;
     }
@@ -98,7 +128,7 @@ export default function GuestPhotocardDetailModal({
     setError("");
     try {
       const copyId = await addGuestCardCopy({
-        catalogItemId: card.catalog_item_id,
+        catalogItemId: currentCard.catalog_item_id,
         ownershipStatusId: statusId,
       });
       const status = ownershipStatuses.find((s) => s.ownership_status_id === statusId);
@@ -172,8 +202,8 @@ export default function GuestPhotocardDetailModal({
         const remaining = prev.filter((c) => c.copy_id !== copy.copy_id);
         // If we deleted the last real copy, re-show the synthetic Catalog row
         // so the badge in the grid reverts and the picker resets.
-        if (remaining.length === 0 && card.catalog_item_id) {
-          return initialCopies({ ...card, copies: [] });
+        if (remaining.length === 0 && currentCard.catalog_item_id) {
+          return initialCopies({ ...currentCard, copies: [] });
         }
         return remaining;
       });
@@ -187,18 +217,57 @@ export default function GuestPhotocardDetailModal({
 
   const realCopies = copies.filter((c) => c.copy_id != null);
 
+  const titleNode = (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {showNav && (
+        <button
+          type="button"
+          onClick={() => handleNavigate(-1)}
+          disabled={!hasPrev || busy}
+          title="Previous card"
+          style={{ ...navBtnStyle, opacity: hasPrev ? 1 : 0.3 }}
+        >
+          ‹
+        </button>
+      )}
+      <span>{currentCard?.group_name || "Photocard"}</span>
+      {showNav && (
+        <span
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--text-muted)",
+            fontWeight: 400,
+          }}
+        >
+          {currentIndex + 1}/{effectiveAllCards.length}
+        </span>
+      )}
+      {showNav && (
+        <button
+          type="button"
+          onClick={() => handleNavigate(1)}
+          disabled={!hasNext || busy}
+          title="Next card"
+          style={{ ...navBtnStyle, opacity: hasNext ? 1 : 0.3 }}
+        >
+          ›
+        </button>
+      )}
+    </span>
+  );
+
   return (
     <Modal
-      isOpen={!!card}
+      isOpen={!!currentCard}
       onClose={onClose}
-      title={card?.group_name || "Photocard"}
+      title={titleNode}
       size="md"
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}>
         {/* Cover images */}
         <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-          <CardImage path={card?.front_image_path} alt="Front" />
-          {card?.back_image_path && <CardImage path={card.back_image_path} alt="Back" />}
+          <CardImage path={currentCard?.front_image_path} alt="Front" />
+          {currentCard?.back_image_path && <CardImage path={currentCard.back_image_path} alt="Back" />}
         </div>
 
         {/* Catalog metadata (read-only) */}
@@ -211,15 +280,15 @@ export default function GuestPhotocardDetailModal({
             fontSize: 13,
           }}
         >
-          <Field label="Group" value={card?.group_name} />
-          <Field label="Category" value={card?.category} />
-          {(card?.members?.length || 0) > 0 && (
-            <Field label="Member" value={card.members.join(", ")} />
+          <Field label="Group" value={currentCard?.group_name} />
+          <Field label="Category" value={currentCard?.category} />
+          {(currentCard?.members?.length || 0) > 0 && (
+            <Field label="Member" value={currentCard.members.join(", ")} />
           )}
-          {card?.source_origin && <Field label="Source" value={card.source_origin} />}
-          {card?.version && <Field label="Version" value={card.version} />}
-          {card?.is_special && <Field label="Type" value="Special" />}
-          {card?.notes && <Field label="Catalog notes" value={card.notes} />}
+          {currentCard?.source_origin && <Field label="Source" value={currentCard.source_origin} />}
+          {currentCard?.version && <Field label="Version" value={currentCard.version} />}
+          {currentCard?.is_special && <Field label="Type" value="Special" />}
+          {currentCard?.notes && <Field label="Catalog notes" value={currentCard.notes} />}
         </div>
 
         <hr style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)" }} />

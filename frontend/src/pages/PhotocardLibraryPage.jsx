@@ -87,6 +87,29 @@ export default function PhotocardLibraryPage() {
   // Detail modal
   const [detailCard, setDetailCard] = useState(null);
 
+  // Preserve `.app-main` scroll position across modal open/close. iOS Safari
+  // does not reliably retain the scroll container's offset while a fullscreen
+  // overlay is up, so we save it on open and restore it on close.
+  const savedScrollRef = useRef(0);
+  useEffect(() => {
+    const main = document.querySelector(".app-main");
+    if (!main) return;
+    if (detailCard) {
+      savedScrollRef.current = main.scrollTop;
+    } else {
+      const y = savedScrollRef.current;
+      if (y > 0) {
+        // Two rAFs: first lets React commit, second lets layout/paint settle
+        // before we set scrollTop (iOS sometimes ignores the first attempt).
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            main.scrollTop = y;
+          });
+        });
+      }
+    }
+  }, [detailCard]);
+
   // Pagination
   const [page, setPage] = useState(1);
 
