@@ -26,6 +26,11 @@ const GuestPhotocardDetailModal = import.meta.env.VITE_IS_ADMIN === "true"
   ? null
   : lazy(() => import("../guest/GuestPhotocardDetailModal"));
 
+// Guest-mode bulk-add modal. Same lazy + admin-build-elision treatment.
+const GuestPhotocardBulkAdd = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : lazy(() => import("../guest/GuestPhotocardBulkAdd"));
+
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
 // Stray Kids canonical member order — cards with multiple members sort to bottom
@@ -411,8 +416,8 @@ export default function PhotocardLibraryPage() {
   );
 
   // Register Sort + Select as TopNav icon buttons on mobile (page-actions context).
-  // Guest mode (per project_guest_ui_simplifications memory): hide Sort
-  // (filter is the right primitive at 10K+ scale) and Select (no bulk edit).
+  // Guest mode keeps Select (for bulk-add to wanted/owned via guest_card_copies)
+  // but hides Sort — filter is the right primitive at 10K+ scale.
   usePageActions(
     isAdmin
       ? [
@@ -440,7 +445,22 @@ export default function PhotocardLibraryPage() {
             },
           },
         ]
-      : [],
+      : [
+          {
+            id: "select",
+            iconName: "select",
+            kind: "toggle",
+            label: selectMode ? "Done" : "Select",
+            active: selectMode,
+            onClick: () => {
+              if (selectMode) {
+                exitSelectMode();
+              } else {
+                setSelectMode(true);
+              }
+            },
+          },
+        ],
     [sortMode, selectMode]
   );
 
@@ -561,9 +581,9 @@ export default function PhotocardLibraryPage() {
             {sortedCards.length} cards
             {selectMode && selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
           </span>
-          {/* Select / bulk-edit are admin-only — guest mode has no
-              destructive bulk operations against catalog data. */}
-          {isAdmin && !selectMode && (
+          {/* Select / bulk: admin edits catalog rows; guest adds copy rows
+              for each selected card via guest_card_copies (no catalog mutation). */}
+          {!selectMode && (
             <button
               className="desktop-only"
               style={styles.controlBtn}
@@ -576,7 +596,7 @@ export default function PhotocardLibraryPage() {
       </div>
 
       {/* Select-mode toolbar — own row so card count stays on the main controls bar */}
-      {isAdmin && selectMode && (
+      {selectMode && (
         <div style={styles.selectBar}>
           <button style={styles.controlBtn} onClick={handleSelectAll}>All ({sortedCards.length})</button>
           <button style={styles.controlBtn} onClick={handleClearSelection}>Clear</button>
@@ -585,7 +605,7 @@ export default function PhotocardLibraryPage() {
               style={{ ...styles.controlBtn, ...styles.primaryBtn }}
               onClick={() => setShowBulkEdit(true)}
             >
-              Bulk Edit
+              {isAdmin ? "Bulk Edit" : "Bulk Add"}
             </button>
           )}
           <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
@@ -625,7 +645,7 @@ export default function PhotocardLibraryPage() {
         </div>
       </div>
 
-      {/* Bulk edit modal — admin-only */}
+      {/* Bulk edit modal — admin path mutates catalog rows. */}
       {isAdmin && showBulkEdit && selectedCards.length > 0 && (
         <PhotocardBulkEdit
           selectedCards={selectedCards}
@@ -643,6 +663,25 @@ export default function PhotocardLibraryPage() {
             exitSelectMode();
           }}
         />
+      )}
+
+      {/* Bulk add modal — guest path inserts guest_card_copies rows. */}
+      {!isAdmin && showBulkEdit && selectedCards.length > 0 && GuestPhotocardBulkAdd && (
+        <Suspense fallback={null}>
+          <GuestPhotocardBulkAdd
+            selectedCards={selectedCards}
+            ownershipStatuses={ownershipStatuses}
+            onClose={() => setShowBulkEdit(false)}
+            onSaved={async (summary) => {
+              setShowBulkEdit(false);
+              exitSelectMode();
+              await reloadCards();
+              if (summary) {
+                window.alert(summary);
+              }
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Detail modal — admin path edits the catalog, guest path edits local
