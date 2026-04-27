@@ -219,19 +219,16 @@ up wholesale.
   `spa_host_routing` middleware in `main.py` routes by `Host` header so
   apex paths return `index.html` (avoiding API route collisions like
   `/photocards/library` matching the books detail route).
-- **Frontend (guest):** Separate React build via `npm run build:guest`,
-  outputs to `backend/frontend_dist_guest/` with `base='/guest/'` and
-  `assetsDir='guest-assets'` — bundle ships at
-  `collectcoreapp.com/guest/` with assets under `/guest/guest-assets/`.
-  Same `spa_host_routing` middleware in `backend/main.py` does
-  path-based routing — `/guest/*` GETs return the guest bundle's
-  `index.html`, everything else returns admin's. **Path-based mount,
-  not a subdomain** — Railway free tier is capped at 2 custom domains
-  (api + apex) and the design intentionally avoids needing a third.
-  Bundle is NOT yet committed to git or deployed — see
-  `docs/guest_deploy_runbook.md` for the deploy sequence (just one
-  step: add a Cloudflare Access bypass app for the `/guest` path).
-  Guest UI lives in `frontend/src/guest/` (GuestBootstrap, WelcomeModal,
+- **Frontend (guest):** **LIVE 2026-04-26** at
+  `https://collectcoreapp.com/guest/` (path-mounted on apex; no
+  subdomain — Railway free tier 2-custom-domain limit). Separate
+  React build via `npm run build:guest`, outputs to
+  `backend/frontend_dist_guest/` with `base='/guest/'` and
+  `assetsDir='guest-assets'`. `spa_host_routing` middleware in
+  `backend/main.py` does path-based routing — `/guest/*` GETs return
+  the guest bundle's `index.html`. Cloudflare Access has a third
+  bypass app for the `/guest` path. Guest UI lives in
+  `frontend/src/guest/` (GuestBootstrap, WelcomeModal,
   GuestPhotocardDetailModal, GuestMenuItems, guestData adapter,
   sqliteService + worker). Reuses admin's `PhotocardLibraryPage` with
   data-source branching and isAdmin-gated controls (Path A).
@@ -316,8 +313,23 @@ first visit, pull deltas thereafter. `catalog_item_id` uses the existing
 `Catalog` ownership status added to photocards only, hidden from admin UI via
 `VITE_IS_ADMIN` flag.
 
-**Admin catalog publish UI**: CLI-only for v1 (`tools/publish_catalog.py`).
-In-app publish flow is item PD1 in the post-deployment roadmap.
+**Admin catalog publish UI**: in-app as of 2026-04-26 — Admin → Backup
+& Restore tab has two batch operations:
+- **Publish Photocard Images** — sweeps any photocard attachment with a
+  local `file_path` to R2 (resize → upload → rewrite DB to R2 URL,
+  bumps catalog_version). Run after replacing or batch-adding images.
+  Backed by `backend/catalog_publisher.py` + `POST /admin/publish-catalog`.
+  Filter is `file_path NOT LIKE 'http%'` (NOT `storage_type='local'` —
+  the latter missed legacy "hosted-row-with-local-path" rows from a
+  former `_replace_image` bug).
+- **Regenerate Guest Seed** — rebuilds `backend/data/mobile_seed.db`
+  from the live admin DB. Periodic baseline refresh only (occasional
+  use). Backed by `backend/seed_builder.py` + `POST /admin/regenerate-seed`.
+  Most everyday catalog/lookup edits propagate via `/catalog/delta`,
+  not via the seed.
+
+`tools/publish_catalog.py` and `tools/prepare_mobile_seed.py` remain as
+CLI equivalents for offline/automation use.
 
 **Backend endpoints** (publicly accessible via Cloudflare Access bypass):
 - `GET /catalog/version` → `{max_version, card_count}`
@@ -332,7 +344,12 @@ In-app publish flow is item PD1 in the post-deployment roadmap.
   publish UI (PD1). A pure lookup edit (e.g. group rename) won't
   propagate until something bumps a related item's catalog_version —
   known limitation.
-- `GET /catalog/seed.db` → 302 redirect to R2 `catalog/seed.db`
+- `GET /catalog/seed.db` → FileResponse of `backend/data/mobile_seed.db`
+  (committed to repo) OR `DATA_ROOT/data/mobile_seed.db` (volume copy,
+  preferred when present — written by Regenerate Guest Seed). R2 redirect
+  approach was abandoned 2026-04-26 — R2 bucket-level CORS doesn't apply
+  to public custom-domain requests, and Cloudflare Transform Rules
+  proved fragile under cache churn.
 
 **Guest-side schema (`guest_` / `v_guest_` prefix = sync-untouchable):**
 - `guest_meta(key, value)` — KV store. Holds `last_synced_catalog_version`.

@@ -6,6 +6,128 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-04-26 (later) — Guest webview LIVE + admin publishing operations
+
+Guest webview is **live and end-to-end tested on real device** at
+`https://collectcoreapp.com/guest/`. Long, iterative session — first
+real-hardware test exposed several issues + an architectural gap in
+the catalog publishing flow. All resolved.
+
+**Guest deploy execution:**
+- Cloudflare Access bypass app added for `/guest` path (user dashboard).
+- Multiple CORS spirals chasing seed.db delivery: tried R2 bucket-level
+  CORS (doesn't apply to public custom-domain requests), Cloudflare
+  Transform Rule (intermittent duplicate ACAO header under cache churn,
+  then disappeared entirely), inline urllib proxy through API
+  (crashed Railway with 502s, urllib failing in some way that didn't
+  even produce a clean error).
+- **Settled on baking `backend/data/mobile_seed.db` into the repo.**
+  Backend serves via FileResponse (CORS via FastAPI's existing
+  CORSMiddleware, no R2 dependency at request time, no edge-config
+  dance). 4MB binary in git is acceptable. CLI tool
+  `tools/prepare_mobile_seed.py` still exists for offline dev use.
+- Path-anchored `/data/` in `.gitignore` (was `data/`) so
+  `backend/data/mobile_seed.db` isn't excluded by the same rule that
+  hides root-level dev DB.
+
+**Real-device test fixes (in order of discovery):**
+- Mobile chrome (hamburger / drawers / filter funnel) was completely
+  hidden. The four classes shared a `display: none !important` base
+  rule but their mobile-show rules in the @media block didn't have
+  `!important` — same asymmetry I missed earlier with `.mobile-only`.
+  Fixed all four.
+- `listPhotocards` now synthesizes a Catalog row (`copy_id: null`) for
+  any card the guest hasn't annotated. Mirrors what admin's seed does;
+  without it, ownership-status filtering on untouched cards didn't work.
+- Default-filter logic inverted: first-visit (zero real guest copies)
+  shows full catalog. Once user has any real copy, subsequent loads
+  default to excluding Catalog. Welcome copy rewritten by user to
+  explain the transition.
+- First-launch flow now waits for explicit user consent before
+  downloading the seed. Welcome modal renders in **mandatory mode**
+  (X / ESC / backdrop dismiss disabled) — only the "Get started"
+  button closes it. WelcomeModal gained a `dismissable` prop; default
+  true so Help re-show from hamburger stays dismissable. Dropped the
+  `welcome_dismissed` guest_meta flag — `hasPersistedCatalog()` is the
+  natural signal (avoids chicken-and-egg of reading guest_meta before
+  the DB is loaded, which threw "DB not loaded" in an earlier attempt).
+- Auto-refresh after background sync. `sqliteService.syncCatalog` now
+  dispatches a `collectcore:guest-catalog-updated` event after a
+  successful apply; `PhotocardLibraryPage` listens and re-fetches
+  in place. `GuestBootstrap` shows a slim "⟳ Checking for updates…"
+  banner while the background sync runs. Closes the race where the
+  library mounted and read stale data before sync finished.
+
+**Architectural additions — admin batch publishing operations:**
+- `POST /admin/regenerate-seed` + UI button on Backup tab
+  ([backend/seed_builder.py](backend/seed_builder.py)). Rebuilds the
+  bundled `mobile_seed.db` from the live admin DB on Railway. Periodic
+  baseline refresh (occasional use); not the primary path for
+  everyday changes.
+- `POST /admin/publish-catalog` + UI button on Backup tab
+  ([backend/catalog_publisher.py](backend/catalog_publisher.py)).
+  Sweeps any photocard attachment with a local `file_path` to R2
+  (resize → 600x924 JPEG q80 → upload → rewrite DB to R2 URL),
+  bumps catalog_version on touched items so guest delta sync picks
+  up the new URLs. Run after replacing or batch-adding photocard
+  images. Filter switched from `storage_type='local'` to
+  `file_path NOT LIKE 'http%'` for robustness.
+- `_replace_image` in [routers/ingest.py](backend/routers/ingest.py)
+  fixed: now resets `storage_type='local'` and clears `mime_type`
+  alongside the `file_path` rewrite. Was leaving hosted-row-with-
+  local-path frankensteins that bypassed publish detection.
+
+**Delta sync improvement:**
+- `/catalog/delta` now ships **full lookup tables** on every call
+  (lkup_collection_types, lkup_ownership_statuses,
+  xref_ownership_status_modules, lkup_top_level_categories,
+  lkup_photocard_groups, lkup_photocard_members,
+  lkup_photocard_source_origins). Previously only shipped lookup
+  rows referenced by changed items, which silently dropped lookup-
+  only edits like status visibility toggles or group renames. Worker
+  uses INSERT OR REPLACE for is_active-flagged tables;
+  `xref_ownership_status_modules` (no is_active flag — admin
+  "unchecks" by deleting the row) gets wipe-and-refill so removed
+  visibility propagates.
+- This makes Regenerate Guest Seed unnecessary for everyday changes.
+  It's now positioned as occasional baseline refresh only.
+
+**Current admin workflow for catalog updates:**
+1. Add/replace photocards via admin UI (phone or desktop).
+2. Click **Publish Photocard Images** in Admin → Backup tab.
+3. Guest's auto-sync on next page load picks up changes; banner shows
+   "Checking for updates…" then library refreshes in place.
+
+**Memory updated:**
+- `project_railway_deploy_time.md` — Railway incident resolved,
+  deploys back to ~30-90s.
+
+**Status:**
+
+| # | Phase | Status |
+|---|---|---|
+| 0-5 | All earlier guest phases | done |
+| 6 | Path-mounted guest at apex /guest/ | **LIVE 2026-04-26** |
+| 7 | Full guest UI + first-real-device fixes | **LIVE 2026-04-26** |
+| 4b | Guest-added cards | still deferred (no real-world signal yet) |
+
+**Next steps (open):**
+- Phase 4b (guest-added cards) — schema + UX decisions documented
+  but not built. Wait for actual user demand.
+- Tombstones in catalog delta — admin currently has no remove-from-
+  catalog flow. When that lands, delta needs a `tombstones` key
+  carrying catalog_item_id values to delete locally. Pair with PD1
+  (admin publish UI) per CLAUDE.md post-deployment roadmap.
+- Other modules' image-publish flow (currently photocards-only). The
+  `tools/sync_admin_images.py` CLI handles non-photocard covers; an
+  in-app button equivalent could ship the same way as
+  Publish Photocard Images if/when it becomes a friction point.
+- Optimization: admin bundle still includes the 7 non-photocard
+  module pages even in single-module mode for guest. Lazy-load by
+  module would slim the bundle further. Low priority.
+
+---
+
 ### 2026-04-26 (later) — Guest webview Phase 6 prep v2: pivot to path-based mount
 
 User hit Railway's 2-custom-domain limit (api.* + apex are both consumed).
