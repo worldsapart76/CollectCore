@@ -167,6 +167,23 @@ export default function PhotocardLibraryPage() {
     }
   }
 
+  // Auto-refresh after a guest catalog sync. GuestBootstrap fires
+  // syncCatalog() in the background on every page load, and the user
+  // can also manually trigger it from the hamburger menu — both paths
+  // dispatch `collectcore:guest-catalog-updated` from sqliteService when
+  // the worker has finished applying the delta. Listening here lets the
+  // library re-fetch in place without the user reloading the page,
+  // closing the race where the page mounts and reads stale data before
+  // the background sync finishes. Admin builds never dispatch this
+  // event, so the listener is a harmless no-op there.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e?.detail?.itemsApplied > 0) reloadCards();
+    };
+    window.addEventListener("collectcore:guest-catalog-updated", handler);
+    return () => window.removeEventListener("collectcore:guest-catalog-updated", handler);
+  }, []);
+
   // Member list for filter sidebar — sorted by canonical MEMBER_ORDER
   const filterMembers = useMemo(() => {
     const memberMap = new Map();

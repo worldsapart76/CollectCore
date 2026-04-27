@@ -58,6 +58,10 @@ export default function GuestBootstrap({ children }) {
   const [phase, setPhase] = useState(PHASE_INITIALIZING);
   const [error, setError] = useState("");
   const [storageMode, setStorageMode] = useState(null);
+  // Surfaced as a slim "Checking for updates…" banner so users know
+  // the displayed library may briefly be slightly out of date. Cleared
+  // when the background syncCatalog resolves (success or failure).
+  const [syncing, setSyncing] = useState(false);
   // Dev guard: React StrictMode mounts effects twice in development. The
   // worker's SAHPool install is single-tenant and gets unhappy with
   // concurrent attempts; rely on the service's internal `_initPromise`
@@ -77,10 +81,14 @@ export default function GuestBootstrap({ children }) {
 
         if (hasPersistedCatalog()) {
           // Returning visitor — catalog already in OPFS. Skip welcome,
-          // run silent sync to pick up lookup/item updates.
-          syncCatalog().catch((err) => {
-            console.warn("[guest] background syncCatalog failed", err);
-          });
+          // run silent sync to pick up lookup/item updates. Track the
+          // syncing state for the banner UI; sqliteService dispatches
+          // a `collectcore:guest-catalog-updated` event on success that
+          // PhotocardLibraryPage listens for to auto-refresh its data.
+          setSyncing(true);
+          syncCatalog()
+            .catch((err) => console.warn("[guest] background syncCatalog failed", err))
+            .finally(() => setSyncing(false));
           setPhase(PHASE_READY);
           return;
         }
@@ -152,6 +160,7 @@ export default function GuestBootstrap({ children }) {
   return (
     <>
       {storageMode === "memory" && <MemoryModeBanner />}
+      {syncing && <SyncBanner />}
       {children}
     </>
   );
@@ -248,6 +257,39 @@ function BootError({ message }) {
       >
         Reload
       </button>
+    </div>
+  );
+}
+
+function SyncBanner() {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "4px 12px",
+        background: "var(--bg-info, #e0f2fe)",
+        color: "var(--info-text, #0c4a6e)",
+        borderBottom: "1px solid var(--border, #cfe6f5)",
+        fontSize: 12,
+        textAlign: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 10,
+          height: 10,
+          border: "2px solid currentColor",
+          borderTopColor: "transparent",
+          borderRadius: "50%",
+          animation: "guest-boot-spin 0.8s linear infinite",
+        }}
+      />
+      Checking for updates…
     </div>
   );
 }

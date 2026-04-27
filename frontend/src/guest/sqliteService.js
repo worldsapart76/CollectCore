@@ -239,6 +239,25 @@ export async function syncCatalog() {
 
   const result = await call("applyCatalogDelta", payload);
   await setGuestMeta(LAST_SYNCED_KEY, String(payload.max_version));
+
+  // Notify any listening UI (e.g. PhotocardLibraryPage) that the local
+  // SQLite was just updated. Lets the page auto-refresh its in-memory
+  // card list without a manual reload — fixes the race where the page
+  // mounts and reads stale data BEFORE the background syncCatalog
+  // (fired from GuestBootstrap on every launch) finishes.
+  // Centralized here so every syncCatalog caller benefits without
+  // remembering to dispatch (manual Refresh from menu, future callers).
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("collectcore:guest-catalog-updated", {
+        detail: {
+          itemsApplied: result.itemsApplied,
+          newVersion: payload.max_version,
+        },
+      }),
+    );
+  }
+
   return {
     since,
     newVersion: payload.max_version,
