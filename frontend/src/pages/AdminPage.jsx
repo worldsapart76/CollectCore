@@ -339,10 +339,16 @@ export default function AdminPage() {
           <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
           <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Guest Webview Seed</h3>
           <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
-            Rebuilds the catalog snapshot served to guests at <code>/guest/</code>.
-            Run this after editing photocard catalog data, status visibility,
-            or any other lookup that affects what guests see. Existing guests
-            pick up the new snapshot the next time they load the app.
+            Rebuilds the starter catalog snapshot bundled with the deploy.
+            Brand-new guests download this on first visit; existing guests
+            don't need it (their app silently syncs new cards, image swaps,
+            and lookup updates from the live API on every launch).
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>When to run this:</strong> occasionally — every few weeks,
+            or after a large batch of catalog changes — so a fresh guest
+            doesn't have to apply thousands of updates on their first visit.
+            It is <em>not</em> required for everyday catalog edits.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button

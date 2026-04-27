@@ -101,10 +101,13 @@ def catalog_delta(
     PD1) a `tombstones` key will be added carrying catalog_item_id values to
     delete locally. Until then, items only ever get added/updated.
 
-    Lookup tables only ship rows referenced by the changed items. A pure
-    lookup edit (e.g. renaming a group with no item changes) won't propagate
-    until something forces those items to bump their catalog_version. Known
-    limitation; revisit if it becomes an actual user-visible problem.
+    Lookup tables (lkup_* + xref_ownership_status_modules) ship in FULL on
+    every delta call — they're tiny (a few KB total) and lookup edits like
+    "uncheck Formerly Owned for photocards" or "rename a group" don't bump
+    any item's catalog_version, so the alternative (only ship rows
+    referenced by changed items) silently lost lookup-only updates. The
+    worker upserts via INSERT OR REPLACE so wholesale shipment overwrites
+    cleanly. Cost is negligible; correctness is decisive.
     """
     max_version_row = db.execute(
         text(
@@ -117,6 +120,35 @@ def catalog_delta(
         {"pc": PHOTOCARD_COLLECTION_TYPE_ID},
     ).fetchone()
     max_version = max_version_row[0]
+
+    # Full lookup payload — always shipped, regardless of whether any items
+    # changed. See docstring for rationale.
+    full_lookups = {
+        "lkup_collection_types": _rows_as_dicts(db.execute(
+            text("SELECT * FROM lkup_collection_types")
+        )),
+        "lkup_ownership_statuses": _rows_as_dicts(db.execute(
+            text("SELECT * FROM lkup_ownership_statuses")
+        )),
+        "xref_ownership_status_modules": _rows_as_dicts(db.execute(
+            text("SELECT * FROM xref_ownership_status_modules")
+        )),
+        "lkup_top_level_categories": _rows_as_dicts(db.execute(
+            text(
+                "SELECT * FROM lkup_top_level_categories WHERE collection_type_id = :pc"
+            ),
+            {"pc": PHOTOCARD_COLLECTION_TYPE_ID},
+        )),
+        "lkup_photocard_groups": _rows_as_dicts(db.execute(
+            text("SELECT * FROM lkup_photocard_groups")
+        )),
+        "lkup_photocard_members": _rows_as_dicts(db.execute(
+            text("SELECT * FROM lkup_photocard_members")
+        )),
+        "lkup_photocard_source_origins": _rows_as_dicts(db.execute(
+            text("SELECT * FROM lkup_photocard_source_origins")
+        )),
+    }
 
     item_rows = _rows_as_dicts(db.execute(
         text(
@@ -141,10 +173,7 @@ def catalog_delta(
                 "tbl_photocard_details": [],
                 "xref_photocard_members": [],
                 "tbl_attachments": [],
-                "lkup_photocard_groups": [],
-                "lkup_photocard_source_origins": [],
-                "lkup_photocard_members": [],
-                "lkup_top_level_categories": [],
+                **full_lookups,
             },
         }
 
@@ -178,24 +207,6 @@ def catalog_delta(
         id_params,
     ))
 
-    # Lookup rows referenced by the changed items. Includes the union of all
-    # FKs the guest needs to insert these items without FK violations.
-    group_ids = sorted({r["group_id"] for r in detail_rows})
-    source_origin_ids = sorted({
-        r["source_origin_id"] for r in detail_rows if r["source_origin_id"] is not None
-    })
-    member_ids = sorted({r["member_id"] for r in xref_rows})
-    top_cat_ids = sorted({r["top_level_category_id"] for r in item_rows})
-
-    def _fetch_lkup(table: str, pk: str, ids: list[int]) -> list[dict]:
-        if not ids:
-            return []
-        ph = ",".join(f":v{i}" for i in range(len(ids)))
-        params = {f"v{i}": v for i, v in enumerate(ids)}
-        return _rows_as_dicts(db.execute(
-            text(f"SELECT * FROM {table} WHERE {pk} IN ({ph})"), params,
-        ))
-
     return {
         "since": since,
         "max_version": max_version,
@@ -204,16 +215,7 @@ def catalog_delta(
             "tbl_photocard_details": detail_rows,
             "xref_photocard_members": xref_rows,
             "tbl_attachments": att_rows,
-            "lkup_photocard_groups": _fetch_lkup("lkup_photocard_groups", "group_id", group_ids),
-            "lkup_photocard_source_origins": _fetch_lkup(
-                "lkup_photocard_source_origins", "source_origin_id", source_origin_ids,
-            ),
-            "lkup_photocard_members": _fetch_lkup(
-                "lkup_photocard_members", "member_id", member_ids,
-            ),
-            "lkup_top_level_categories": _fetch_lkup(
-                "lkup_top_level_categories", "top_level_category_id", top_cat_ids,
-            ),
+            **full_lookups,
         },
     }
 

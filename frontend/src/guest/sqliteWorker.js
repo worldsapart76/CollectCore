@@ -247,6 +247,8 @@ function applyCatalogDelta(payload) {
     xref_photocard_members: 0, tbl_attachments: 0,
     lkup_photocard_groups: 0, lkup_photocard_source_origins: 0,
     lkup_photocard_members: 0, lkup_top_level_categories: 0,
+    lkup_collection_types: 0, lkup_ownership_statuses: 0,
+    xref_ownership_status_modules: 0,
   };
 
   // INSERT OR REPLACE on a row whose PK matches an existing row deletes the
@@ -272,7 +274,23 @@ function applyCatalogDelta(payload) {
 
   _db.exec("SAVEPOINT catalog_delta");
   try {
-    // Lookups first — items + xrefs reference these via FK.
+    // Lookups first — items + xrefs reference these via FK. The endpoint
+    // ships these in FULL on every delta so lookup edits (status visibility
+    // toggles, group renames, etc.) propagate correctly.
+    counts.lkup_collection_types = upsert(
+      "lkup_collection_types", tables.lkup_collection_types || [],
+    );
+    counts.lkup_ownership_statuses = upsert(
+      "lkup_ownership_statuses", tables.lkup_ownership_statuses || [],
+    );
+    // xref_ownership_status_modules has no is_active flag — admin
+    // "unchecks" status visibility by DELETING the row. INSERT OR REPLACE
+    // alone never catches removed rows, so wipe-and-refill matches the
+    // server state exactly. Cost is trivial (~50 rows total).
+    _db.exec("DELETE FROM xref_ownership_status_modules");
+    counts.xref_ownership_status_modules = upsert(
+      "xref_ownership_status_modules", tables.xref_ownership_status_modules || [],
+    );
     counts.lkup_top_level_categories = upsert(
       "lkup_top_level_categories", tables.lkup_top_level_categories || [],
     );
