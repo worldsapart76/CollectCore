@@ -33,12 +33,16 @@ import {
   loadSeedFromUrl,
   hasPersistedCatalog,
   syncCatalog,
-  getGuestMeta,
-  setGuestMeta,
 } from "./sqliteService";
 import WelcomeModal from "./WelcomeModal";
 
-const WELCOME_KEY = "welcome_dismissed";
+// "Has the user been through welcome?" is the same question as "does OPFS
+// have a catalog?" — guest_meta would otherwise live IN that DB, so reading
+// a separate dismissal flag would require loading the DB before the welcome
+// modal can decide whether to show. hasPersistedCatalog() avoids the
+// chicken-and-egg. If the user clears storage, the catalog goes too, and
+// re-showing welcome is the right behavior.
+//
 // Seed URL is owned by sqliteService — it knows to route through the
 // API host (api.collectcoreapp.com) where the CF Access bypass lives.
 // Don't pass an override here; the bootstrap should not second-guess it.
@@ -81,17 +85,8 @@ export default function GuestBootstrap({ children }) {
           return;
         }
 
-        // First visit. Per user preference: do NOT auto-fetch the seed.
-        // Show the welcome modal first; download triggers from the CTA.
-        // Edge case: if welcome was already dismissed (e.g. user cleared
-        // OPFS but the flag somehow persisted — shouldn't happen since
-        // both live in OPFS, but be defensive), skip straight to download.
-        const dismissed = await getGuestMeta(WELCOME_KEY);
-        if (cancelled) return;
-        if (dismissed) {
-          await runSeedDownload(cancelled);
-          return;
-        }
+        // First visit (or user cleared storage). Show welcome and wait
+        // for the explicit CTA before downloading anything.
         setPhase(PHASE_AWAITING_CONSENT);
       } catch (err) {
         if (cancelled) return;
@@ -101,32 +96,13 @@ export default function GuestBootstrap({ children }) {
       }
     })();
 
-    async function runSeedDownload(isCancelled) {
-      setPhase(PHASE_LOADING_SEED);
-      await loadSeedFromUrl();
-      if (isCancelled) return;
-      // Background delta sync — bring lookup state current. Failures
-      // are non-fatal; user can refresh manually from the menu.
-      syncCatalog().catch((err) => {
-        console.warn("[guest] background syncCatalog failed", err);
-      });
-      setPhase(PHASE_READY);
-    }
-
     return () => { cancelled = true; };
   }, []);
 
   // Called from the welcome modal CTA in PHASE_AWAITING_CONSENT.
-  // Persists the welcome-dismissed flag, then triggers the seed download.
+  // Triggers the seed download; on success the catalog goes into OPFS,
+  // which suppresses the welcome on every subsequent launch.
   async function handleConsent() {
-    try {
-      // Set the dismissed flag BEFORE starting the download — if the
-      // download fails we still don't want to nag with the welcome
-      // again (the BootError UI is the right place to recover).
-      await setGuestMeta(WELCOME_KEY, new Date().toISOString());
-    } catch (err) {
-      console.warn("[guest] failed to persist welcome dismissal", err);
-    }
     setPhase(PHASE_LOADING_SEED);
     try {
       await loadSeedFromUrl();
