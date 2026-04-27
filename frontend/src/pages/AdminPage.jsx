@@ -13,6 +13,7 @@ import {
   mergeLookupRows,
   patchLookupRow,
   prepareBackup,
+  publishCatalogToR2,
   regenerateGuestSeed,
   restoreBackup,
   scanUnusedLookups,
@@ -64,6 +65,11 @@ export default function AdminPage() {
   const [seedStatus, setSeedStatus] = useState(null);
   const [seedInfo, setSeedInfo] = useState(null);
   const [seedError, setSeedError] = useState(null);
+
+  // ── Catalog image publish (Railway local → R2) ───────────────────────────────
+  const [publishStatus, setPublishStatus] = useState(null);
+  const [publishInfo, setPublishInfo] = useState(null);
+  const [publishError, setPublishError] = useState(null);
   const restoreInputRef = useRef(null);
 
   // ── Lookup Cleanup ────────────────────────────────────────────────────────────
@@ -161,6 +167,18 @@ export default function AdminPage() {
     } catch (e) {
       setSeedError(e.message || "Seed regeneration failed.");
       setSeedStatus("error");
+    }
+  }
+
+  async function handlePublishCatalog() {
+    setPublishStatus("working"); setPublishInfo(null); setPublishError(null);
+    try {
+      const info = await publishCatalogToR2();
+      setPublishInfo(info);
+      setPublishStatus("done");
+    } catch (e) {
+      setPublishError(e.message || "Publish failed.");
+      setPublishStatus("error");
     }
   }
   async function handleRestoreConfirm() {
@@ -333,6 +351,45 @@ export default function AdminPage() {
             {restoreStatus === "working" && <span style={{ color: "#444", fontSize: "0.9rem" }}>Restoring…</span>}
             {restoreStatus === "done" && <span style={{ color: "#166534", fontSize: "0.9rem", marginLeft: 10 }}>Restore complete. Reload the page to continue.</span>}
             {restoreStatus === "error" && <span style={{ color: "#9b1c1c", fontSize: "0.9rem", marginLeft: 10 }}>{restoreError}</span>}
+          </div>
+
+          {/* Catalog image publish */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Publish Photocard Images to R2</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            New or replaced photocard images are saved to Railway local
+            storage by default. Guests can't load them from there (they're
+            behind Cloudflare Access). This sweeps any unpublished images to
+            R2 (the public CDN), rewrites the database to point at the new
+            URLs, and bumps the catalog version so guests pick up the
+            change on their next sync.
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>When to run this:</strong> after replacing a photocard
+            image, or after batch-adding cards from your phone. Skipped
+            entirely for images already on R2.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={handlePublishCatalog}
+              disabled={publishStatus === "working"}
+              style={{ padding: "5px 14px", cursor: publishStatus === "working" ? "default" : "pointer" }}
+            >
+              {publishStatus === "working" ? "Publishing…" : "Publish Photocard Images"}
+            </button>
+            {publishStatus === "done" && publishInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                Uploaded {publishInfo.uploaded} image{publishInfo.uploaded === 1 ? "" : "s"}
+                {publishInfo.items_touched > 0 && ` across ${publishInfo.items_touched} card${publishInfo.items_touched === 1 ? "" : "s"}`}.
+                {publishInfo.skipped_hosted > 0 && ` ${publishInfo.skipped_hosted} already on R2.`}
+                {publishInfo.missing_files?.length > 0 && (
+                  <span style={{ color: "#9b1c1c" }}> {publishInfo.missing_files.length} file(s) missing on disk.</span>
+                )}
+              </span>
+            )}
+            {publishStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{publishError}</span>
+            )}
           </div>
 
           {/* Guest seed */}

@@ -458,6 +458,26 @@ def regenerate_seed():
         raise HTTPException(status_code=500, detail=f"Seed rebuild failed: {exc}")
 
 
+@router.post("/admin/publish-catalog")
+def publish_catalog():
+    """
+    Sweeps any photocard image with storage_type='local' to R2, rewriting
+    the DB row to storage_type='hosted' with the R2 URL. Triggers a
+    catalog_version bump on touched items so guests pick up the new URLs
+    via the next /catalog/delta sync.
+
+    Run this after replacing or adding photocard images via the admin UI
+    (those land on Railway local storage by default — guests can't reach
+    them there because Cloudflare Access gates /images on api.*).
+    """
+    from catalog_publisher import publish_pending
+    try:
+        info = publish_pending()
+        return {"ok": True, **info}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
+
+
 # ---------- Frontend static files (production) ----------
 # Serve the pre-built React app so the frontend dev server is not needed.
 # The /assets mount and /vite.svg route must be registered before the catch-all

@@ -689,6 +689,11 @@ export async function regenerateGuestSeed() {
   return handleJsonResponse(res, "Seed regeneration failed.");
 }
 
+export async function publishCatalogToR2() {
+  const res = await fetch(`${API}/admin/publish-catalog`, { method: "POST" });
+  return handleJsonResponse(res, "Catalog publish failed.");
+}
+
 // --- Admin: Unused Lookup Cleanup ---
 
 export async function scanUnusedLookups() {
