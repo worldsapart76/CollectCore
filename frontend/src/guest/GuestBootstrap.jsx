@@ -1,14 +1,26 @@
 // Phase 7a: guest webview boot sequence.
 //
-// Wraps the entire app for !isAdmin builds. Owns the first-launch flow:
+// Wraps the entire app for !isAdmin builds. Two distinct first-launch
+// paths depending on whether OPFS already has a catalog:
+//
+// First visit ever (no OPFS catalog):
 //   1. Init the SQLite worker (SAHPool VFS or memory fallback).
-//   2. If no catalog in OPFS, fetch /catalog/seed.db and import it.
-//   3. After the catalog is loaded, fire syncCatalog() in the background
-//      to pull any deltas since the seed shipped (Q14 — silent on launch,
-//      no manual button required for v1; failures are non-fatal).
-//   4. If the welcome flag isn't set in guest_meta, show the Welcome modal
-//      once. Mark dismissed afterwards.
-//   5. Render children.
+//   2. Show the Welcome modal IMMEDIATELY in mandatory mode (no X / ESC /
+//      backdrop dismiss — only the explicit CTA closes it). The seed is
+//      NOT downloaded yet — the user reads what they're about to get into
+//      and consents by clicking "Get started."
+//   3. On CTA click: download the seed, import to OPFS, mark welcome
+//      dismissed, run a background syncCatalog, render children.
+//
+// Subsequent visits (OPFS catalog present):
+//   1. Init worker.
+//   2. Skip welcome (already dismissed). Run silent background syncCatalog
+//      to pull lookup/item updates.
+//   3. Render children.
+//
+// Help link in the hamburger menu re-shows the welcome modal in
+// dismissable mode (X/ESC/backdrop work; CTA labelled "Got it" rather
+// than "Get started"). Doesn't trigger a download.
 //
 // Tree-shaking: this whole module + sqliteService + the worker are imported
 // behind `!isAdmin ? lazy(() => import(...)) : null` in App.jsx. Rollup
@@ -32,8 +44,9 @@ const WELCOME_KEY = "welcome_dismissed";
 // Don't pass an override here; the bootstrap should not second-guess it.
 
 // Boot phases — drive both the splash UI and the gating of children.
-const PHASE_INITIALIZING = "initializing";
-const PHASE_LOADING_SEED = "loading-seed";
+const PHASE_INITIALIZING = "initializing";        // worker spinning up
+const PHASE_AWAITING_CONSENT = "awaiting-consent"; // first visit, welcome shown, no seed yet
+const PHASE_LOADING_SEED = "loading-seed";        // user clicked CTA, fetching seed
 const PHASE_READY = "ready";
 const PHASE_ERROR = "error";
 
@@ -41,7 +54,6 @@ export default function GuestBootstrap({ children }) {
   const [phase, setPhase] = useState(PHASE_INITIALIZING);
   const [error, setError] = useState("");
   const [storageMode, setStorageMode] = useState(null);
-  const [showWelcome, setShowWelcome] = useState(false);
   // Dev guard: React StrictMode mounts effects twice in development. The
   // worker's SAHPool install is single-tenant and gets unhappy with
   // concurrent attempts; rely on the service's internal `_initPromise`
@@ -59,24 +71,28 @@ export default function GuestBootstrap({ children }) {
         if (cancelled) return;
         setStorageMode(initRes.storageMode || null);
 
-        if (!hasPersistedCatalog()) {
-          setPhase(PHASE_LOADING_SEED);
-          await loadSeedFromUrl();
-          if (cancelled) return;
+        if (hasPersistedCatalog()) {
+          // Returning visitor — catalog already in OPFS. Skip welcome,
+          // run silent sync to pick up lookup/item updates.
+          syncCatalog().catch((err) => {
+            console.warn("[guest] background syncCatalog failed", err);
+          });
+          setPhase(PHASE_READY);
+          return;
         }
 
-        // Background sync — silent per Q14. Don't block first paint on it.
-        // Errors are logged to console; the user can still browse the
-        // catalog they have. Phase 7d adds a manual refresh fallback.
-        syncCatalog().catch((err) => {
-          console.warn("[guest] background syncCatalog failed", err);
-        });
-
+        // First visit. Per user preference: do NOT auto-fetch the seed.
+        // Show the welcome modal first; download triggers from the CTA.
+        // Edge case: if welcome was already dismissed (e.g. user cleared
+        // OPFS but the flag somehow persisted — shouldn't happen since
+        // both live in OPFS, but be defensive), skip straight to download.
         const dismissed = await getGuestMeta(WELCOME_KEY);
         if (cancelled) return;
-        if (!dismissed) setShowWelcome(true);
-
-        setPhase(PHASE_READY);
+        if (dismissed) {
+          await runSeedDownload(cancelled);
+          return;
+        }
+        setPhase(PHASE_AWAITING_CONSENT);
       } catch (err) {
         if (cancelled) return;
         console.error("[guest] bootstrap failed", err);
@@ -85,16 +101,43 @@ export default function GuestBootstrap({ children }) {
       }
     })();
 
+    async function runSeedDownload(isCancelled) {
+      setPhase(PHASE_LOADING_SEED);
+      await loadSeedFromUrl();
+      if (isCancelled) return;
+      // Background delta sync — bring lookup state current. Failures
+      // are non-fatal; user can refresh manually from the menu.
+      syncCatalog().catch((err) => {
+        console.warn("[guest] background syncCatalog failed", err);
+      });
+      setPhase(PHASE_READY);
+    }
+
     return () => { cancelled = true; };
   }, []);
 
-  async function handleWelcomeClose() {
-    setShowWelcome(false);
+  // Called from the welcome modal CTA in PHASE_AWAITING_CONSENT.
+  // Persists the welcome-dismissed flag, then triggers the seed download.
+  async function handleConsent() {
     try {
+      // Set the dismissed flag BEFORE starting the download — if the
+      // download fails we still don't want to nag with the welcome
+      // again (the BootError UI is the right place to recover).
       await setGuestMeta(WELCOME_KEY, new Date().toISOString());
     } catch (err) {
-      // Non-fatal — worst case the modal shows again next launch.
       console.warn("[guest] failed to persist welcome dismissal", err);
+    }
+    setPhase(PHASE_LOADING_SEED);
+    try {
+      await loadSeedFromUrl();
+      syncCatalog().catch((err) => {
+        console.warn("[guest] background syncCatalog failed", err);
+      });
+      setPhase(PHASE_READY);
+    } catch (err) {
+      console.error("[guest] seed download failed", err);
+      setError(err?.message || String(err));
+      setPhase(PHASE_ERROR);
     }
   }
 
@@ -110,6 +153,22 @@ export default function GuestBootstrap({ children }) {
     );
   }
 
+  if (phase === PHASE_AWAITING_CONSENT) {
+    // Mandatory welcome: render OVER an empty backdrop (no children yet —
+    // there's no catalog to query). dismissable=false forces the explicit
+    // CTA click; ctaLabel "Get started" sets the right expectation.
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg, #fff)" }}>
+        <WelcomeModal
+          isOpen={true}
+          dismissable={false}
+          ctaLabel="Get started"
+          onClose={handleConsent}
+        />
+      </div>
+    );
+  }
+
   if (phase === PHASE_ERROR) {
     return <BootError message={error} />;
   }
@@ -118,7 +177,6 @@ export default function GuestBootstrap({ children }) {
     <>
       {storageMode === "memory" && <MemoryModeBanner />}
       {children}
-      <WelcomeModal isOpen={showWelcome} onClose={handleWelcomeClose} />
     </>
   );
 }

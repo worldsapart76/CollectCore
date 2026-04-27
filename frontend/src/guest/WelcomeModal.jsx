@@ -13,11 +13,23 @@
 
 import Modal from "../components/primitives/Modal";
 
-export default function WelcomeModal({ isOpen, onClose, ctaLabel = "Get started" }) {
+// `dismissable` defaults to true (Help re-show from the hamburger menu uses
+// this). First-launch passes `dismissable={false}` so X / ESC / backdrop
+// don't close — the user MUST click the CTA to acknowledge before the
+// seed download starts. We achieve "mandatory" by NOT passing onClose to
+// Modal (which suppresses ESC + backdrop + X) while still wiring the
+// footer button's onClick to the actual close handler.
+export default function WelcomeModal({
+  isOpen,
+  onClose,
+  ctaLabel = "Get started",
+  dismissable = true,
+}) {
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={dismissable ? onClose : null}
+      showClose={dismissable}
       title="Welcome to CollectCore"
       size="md"
       footer={
