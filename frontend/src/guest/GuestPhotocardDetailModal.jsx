@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import Modal from "../components/primitives/Modal";
+import { useSwipeNav } from "../hooks/useSwipeNav";
 import {
   addGuestCardCopy,
   updateGuestCardCopy,
@@ -86,6 +87,11 @@ export default function GuestPhotocardDetailModal({
     if (target < 0 || target >= effectiveAllCards.length) return;
     setCurrentIndex(target);
   }
+
+  const swipeHandlers = useSwipeNav({
+    onPrev: () => hasPrev && !busy && handleNavigate(-1),
+    onNext: () => hasNext && !busy && handleNavigate(1),
+  });
 
   // Filter out Catalog from the picker — adding a Catalog row is a no-op
   // for the user (it's the synthetic default state). Keep all other
@@ -263,7 +269,10 @@ export default function GuestPhotocardDetailModal({
       title={titleNode}
       size="md"
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}>
+      <div
+        {...swipeHandlers}
+        style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}
+      >
         {/* Cover images */}
         <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
           <CardImage path={currentCard?.front_image_path} alt="Front" />

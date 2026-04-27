@@ -13,6 +13,7 @@ import {
   deletePhotocardCopy,
 } from "../../api";
 import { API_BASE, getImageUrl } from "../../utils/imageUrl";
+import { useSwipeNav } from "../../hooks/useSwipeNav";
 
 function resolveCardSrc(path) {
   if (!path) return null;
@@ -307,9 +308,14 @@ export default function PhotocardDetailModal({
   const hasNext = currentIndex < effectiveAllCards.length - 1;
   const showNav = effectiveAllCards.length > 1;
 
+  const swipeHandlers = useSwipeNav({
+    onPrev: () => hasPrev && !saving && handleNavigate(-1),
+    onNext: () => hasNext && !saving && handleNavigate(1),
+  });
+
   return (
     <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && handleAutoClose()}>
-      <div style={styles.modal}>
+      <div style={styles.modal} {...swipeHandlers}>
         <div style={styles.modalHeader}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {showNav && (
