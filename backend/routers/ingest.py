@@ -457,8 +457,17 @@ def _replace_image(item_id: int, side: str, file: UploadFile, db):
         old_path = (DATA_ROOT / existing[0]).resolve()
         if old_path.is_relative_to(IMAGES_DIR.resolve()) and old_path.exists() and old_path != library_path:
             old_path.unlink()
+        # Reset storage_type to 'local' alongside the path rewrite. If the
+        # row was previously 'hosted' (image had been published to R2 once),
+        # forgetting to reset it leaves a hosted-row-with-local-path
+        # frankenstein that publish_pending() skips (it filters on
+        # storage_type='local'), so the replacement never reaches R2 and
+        # guests see a broken image.
         db.execute(
-            text("UPDATE tbl_attachments SET file_path = :fp WHERE item_id = :item_id AND attachment_type = :atype"),
+            text(
+                "UPDATE tbl_attachments SET file_path = :fp, storage_type = 'local', mime_type = NULL "
+                "WHERE item_id = :item_id AND attachment_type = :atype"
+            ),
             {"fp": f"images/library/{library_filename}", "item_id": item_id, "atype": attachment_type},
         )
     else:

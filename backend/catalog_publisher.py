@@ -132,6 +132,11 @@ def publish_pending(limit: Optional[int] = None) -> dict:
             (PHOTOCARDS_CODE,),
         ).fetchone()[0]
 
+        # Filter on file_path NOT starting with http — i.e. the row points at
+        # a local path. More robust than `storage_type='local'` because the
+        # _replace_image endpoint historically left storage_type='hosted'
+        # while overwriting file_path with a local path; this catches both
+        # those legacy frankenstein rows AND new local attachments.
         sql = """
             SELECT DISTINCT i.item_id
             FROM tbl_items i
@@ -140,7 +145,7 @@ def publish_pending(limit: Optional[int] = None) -> dict:
                   SELECT 1 FROM tbl_attachments a
                   WHERE a.item_id = i.item_id
                     AND a.attachment_type IN ('front', 'back')
-                    AND a.storage_type = 'local'
+                    AND a.file_path NOT LIKE 'http%'
               )
             ORDER BY i.item_id
         """
@@ -167,7 +172,9 @@ def publish_pending(limit: Optional[int] = None) -> dict:
 
             item_uploaded = 0
             for att_id, atype, file_path, storage_type in attachments:
-                if storage_type == "hosted":
+                # "Already on R2" is determined by the file_path itself, not
+                # the storage_type column — see SELECT-filter rationale above.
+                if file_path.startswith("http"):
                     skipped_total += 1
                     continue
 
