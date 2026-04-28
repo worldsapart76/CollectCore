@@ -288,8 +288,9 @@ export default function TopNav({ theme, toggleTheme }) {
           <span>CollectCore</span>
         </NavLink>
 
-        {/* Module switcher dropdown */}
-        {activeModule && (
+        {/* Module switcher dropdown — admin-only. Guest is single-module so the
+            dropdown is a dead-end control. */}
+        {isAdmin && activeModule && (
           <div className="module-switcher topnav-desktop-only" ref={dropdownRef} style={{ position: "relative" }}>
             <button
               className="module-switcher-btn"
@@ -316,8 +317,10 @@ export default function TopNav({ theme, toggleTheme }) {
           </div>
         )}
 
-        {/* Module-specific nav links */}
-        {activeModule && (
+        {/* Module-specific nav links — admin-only for now. Guest module links
+            (Inbox, Export) are admin-only flows; revisit when guest-side
+            equivalents land (e.g. guest export). */}
+        {isAdmin && activeModule && (
           <nav className="topnav-links topnav-desktop-only">
             {activeModule.links.map(link => (
               <NavLink key={link.to} to={link.to} className={navClass}>
@@ -329,9 +332,13 @@ export default function TopNav({ theme, toggleTheme }) {
       </div>
 
       <div className="topnav-right topnav-desktop-only">
-        <NavLink to="/admin" className={navClass}>
-          Admin
-        </NavLink>
+        {/* Admin link + Exit (legacy desktop-installer shutdown) are admin-only.
+            Mirrors the gating already applied in the mobile nav drawer below. */}
+        {isAdmin && (
+          <NavLink to="/admin" className={navClass}>
+            Admin
+          </NavLink>
+        )}
         <button
           type="button"
           className="theme-toggle-btn"
@@ -340,14 +347,16 @@ export default function TopNav({ theme, toggleTheme }) {
         >
           {theme === "dark" ? "☀" : "☾"}
         </button>
-        <button
-          type="button"
-          className="topnav-link"
-          onClick={handleExit}
-          style={{ background: "none", border: "none", cursor: "pointer", font: "inherit" }}
-        >
-          Exit
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            className="topnav-link"
+            onClick={handleExit}
+            style={{ background: "none", border: "none", cursor: "pointer", font: "inherit" }}
+          >
+            Exit
+          </button>
+        )}
       </div>
 
       {/* Mobile-only: page actions + filter on the right edge */}

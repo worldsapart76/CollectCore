@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
 import {
@@ -21,6 +21,14 @@ import {
   toggleStatusVisibility,
   updateSetting,
 } from "../api";
+
+// Guest replacement — backup/restore only, same handlers as the GuestMenuItems
+// drawer entry. Constant-folded import.meta.env.VITE_IS_ADMIN gate so the
+// admin bundle eliminates this lazy import (and the sqliteService graph it
+// pulls in) at build time.
+const GuestAdminPage = import.meta.env.VITE_IS_ADMIN === "true"
+  ? null
+  : lazy(() => import("../guest/GuestAdminPage"));
 
 const TAB_IDS = ["modules", "backup", "cleanup", "management", "visibility"];
 const TAB_LABELS = {
@@ -47,6 +55,20 @@ function tabStyle(active) {
 }
 
 export default function AdminPage() {
+  // Guest builds: render the guest backup/restore page and skip the admin
+  // tabs entirely. Constant-folded so the admin build eliminates this whole
+  // branch.
+  if (GuestAdminPage) {
+    return (
+      <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+        <GuestAdminPage />
+      </Suspense>
+    );
+  }
+  return <AdminPageImpl />;
+}
+
+function AdminPageImpl() {
   const [activeTab, setActiveTab] = useState("modules");
 
   // ── Modules ──────────────────────────────────────────────────────────────────
