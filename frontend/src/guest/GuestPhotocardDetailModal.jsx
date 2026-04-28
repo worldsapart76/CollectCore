@@ -345,6 +345,7 @@ export default function GuestPhotocardDetailModal({
                     borderRadius: 3,
                     border: "1px solid var(--border-input)",
                     background: disabled ? "var(--bg-disabled, #eee)" : "var(--bg-base)",
+                    color: "var(--text-primary)",
                     cursor: disabled ? "not-allowed" : "pointer",
                     opacity: disabled ? 0.6 : 1,
                   }}
@@ -499,6 +500,7 @@ function CopyRow({ copy, pickableStatuses, isDisabled, busy, onStatusChange, onN
           padding: "3px 8px",
           fontSize: 12,
           background: "var(--bg-base)",
+          color: "var(--text-primary)",
           border: "1px solid var(--border-input)",
           borderRadius: 3,
           cursor: busy ? "not-allowed" : "pointer",
