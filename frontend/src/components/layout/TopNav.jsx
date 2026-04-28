@@ -332,13 +332,13 @@ export default function TopNav({ theme, toggleTheme }) {
       </div>
 
       <div className="topnav-right topnav-desktop-only">
-        {/* Admin link + Exit (legacy desktop-installer shutdown) are admin-only.
-            Mirrors the gating already applied in the mobile nav drawer below. */}
-        {isAdmin && (
-          <NavLink to="/admin" className={navClass}>
-            Admin
-          </NavLink>
-        )}
+        {/* /admin renders AdminPage for admin and GuestAdminPage (Backup &
+            Restore) for guest. Label tracks the audience: "Admin" for the
+            full settings surface, "Backup" for the guest's single-purpose
+            page. Exit (legacy desktop-installer shutdown) stays admin-only. */}
+        <NavLink to="/admin" className={navClass}>
+          {isAdmin ? "Admin" : "Backup"}
+        </NavLink>
         <button
           type="button"
           className="theme-toggle-btn"
