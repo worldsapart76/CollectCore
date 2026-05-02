@@ -112,15 +112,6 @@ function AdminPageImpl() {
   const [visibilityLoading, setVisibilityLoading] = useState(false);
   const [visibilityError, setVisibilityError] = useState(null);
 
-  // ── One-time CSV importer (DELETABLE) — visible only when mounted ──
-  const [csvImportEnabled, setCsvImportEnabled] = useState(false);
-  useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}/csv-import/status`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(j => setCsvImportEnabled(!!j?.enabled))
-      .catch(() => {});
-  }, []);
-
   useEffect(() => {
     fetchSettings()
       .then(settings => {
@@ -521,23 +512,6 @@ function AdminPageImpl() {
               <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{seedError}</span>
             )}
           </div>
-
-          {csvImportEnabled && (
-            <>
-              <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>One-Time CSV Import</h3>
-              <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
-                Bulk-import Movies / TV / Video Games / Music from the four
-                CSVs in <code>docs/</code>. Visible only while the importer
-                is mounted (CSV_IMPORT_ENABLED=1). Run
-                <code> python tools/remove_csv_importer.py </code>
-                to remove the tool when done.
-              </p>
-              <a href="/admin/csv-import" style={{ padding: "5px 14px", background: "#0d9488", color: "#fff", textDecoration: "none", borderRadius: 4, display: "inline-block" }}>
-                Open CSV Importer
-              </a>
-            </>
-          )}
         </section>
       )}
 

@@ -140,13 +140,5 @@ app.include_router(admin.router)
 app.include_router(admin_lookups.router)
 app.include_router(catalog.router)
 
-# ---------- One-time CSV importer (DELETABLE) ----------
-# Mounted only when CSV_IMPORT_ENABLED=1. To remove the importer entirely:
-# `python tools/remove_csv_importer.py` and follow its instructions.
-if os.environ.get("CSV_IMPORT_ENABLED") == "1":
-    from routers import csv_import
-    app.include_router(csv_import.router)
-    logger.info("CSV importer mounted at /csv-import (CSV_IMPORT_ENABLED=1)")
-
 # ---------- Frontend SPA (must be last) ----------
 admin.register_frontend_static(app)

@@ -21,8 +21,6 @@ import BoardgamesIngestPage from "./pages/BoardgamesIngestPage";
 import BoardgamesLibraryPage from "./pages/BoardgamesLibraryPage";
 import TTRPGIngestPage from "./pages/TTRPGIngestPage";
 import TTRPGLibraryPage from "./pages/TTRPGLibraryPage";
-// One-time CSV importer (DELETABLE) — see backend/routers/csv_import.py
-import CsvImportPage from "./csvImport/CsvImportPage";
 
 // Guest debug page is dev-only. The `import.meta.env.DEV ? ... : null`
 // constant-folds at build time, so in a production bundle Rollup eliminates
@@ -59,7 +57,6 @@ export default function App() {
         <Route path="/library" element={<PhotocardLibraryPage />} />
         <Route path="/export" element={<ExportPage />} />
         <Route path="/admin" element={<AdminPage />} />
-        <Route path="/admin/csv-import" element={<CsvImportPage />} />
         <Route path="/books/add" element={<BooksIngestPage />} />
         <Route path="/books/library" element={<BooksLibraryPage />} />
         <Route path="/graphicnovels/add" element={<GraphicNovelsIngestPage />} />
