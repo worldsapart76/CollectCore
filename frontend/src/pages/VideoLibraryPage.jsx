@@ -715,19 +715,19 @@ export default function VideoLibraryPage() {
       );
     }
     if (sectionActive(filters.category)) {
-      result = result.filter(v => applySection(filters.category, String(v.top_level_category_id)));
+      result = result.filter(v => applySection(filters.category, [String(v.top_level_category_id)]));
     }
     if (sectionActive(filters.ownership)) {
-      result = result.filter(v => applySection(filters.ownership, String(v.ownership_status_id)));
+      result = result.filter(v => applySection(filters.ownership, [String(v.ownership_status_id)]));
     }
     if (sectionActive(filters.watchStatus)) {
-      result = result.filter(v => applySection(filters.watchStatus, String(v.reading_status_id)));
+      result = result.filter(v => applySection(filters.watchStatus, [v.reading_status_id != null ? String(v.reading_status_id) : ""]));
     }
     if (sectionActive(filters.director)) {
-      result = result.filter(v => (v.directors || []).some(d => applySection(filters.director, d)));
+      result = result.filter(v => applySection(filters.director, v.directors || []));
     }
     if (sectionActive(filters.genre)) {
-      result = result.filter(v => (v.genres || []).some(g => applySection(filters.genre, g)));
+      result = result.filter(v => applySection(filters.genre, v.genres || []));
     }
     return result;
   }, [items, filters]);
