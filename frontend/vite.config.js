@@ -30,11 +30,12 @@ const PROXY_PATHS = [
   '/images',
   '/shutdown',
   '/catalog',
+  '/csv-import',
 ]
 
 // Frontend sub-paths that share a prefix with backend routes.
 // These must NOT be proxied — Vite should serve index.html so React Router handles them.
-const FRONTEND_SUBPATHS = new Set(['/library', '/add'])
+const FRONTEND_SUBPATHS = new Set(['/library', '/add', '/csv-import'])
 
 const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, {
   target: BACKEND,
