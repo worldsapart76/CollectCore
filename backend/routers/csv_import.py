@@ -54,8 +54,12 @@ from schemas.videogames import GameCopyInput
 router = APIRouter(prefix="/csv-import", tags=["csv-import"])
 
 # ---------- Constants ----------
-APP_ROOT = Path(__file__).resolve().parents[2]
-DOCS = APP_ROOT / "docs"
+# CSVs ship inside backend/ so Railway's Root Directory=backend deploy
+# includes them. Falls back to docs/ at repo root for local dev convenience.
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+_BACKEND_CSV_DIR = _BACKEND_DIR / "csv_import_data"
+_REPO_DOCS_DIR = _BACKEND_DIR.parent / "docs"
+DOCS = _BACKEND_CSV_DIR if _BACKEND_CSV_DIR.exists() else _REPO_DOCS_DIR
 
 CSV_FILES = [
     {"name": "Movies-Owned.csv",        "module": "video",      "kind": "movie"},
