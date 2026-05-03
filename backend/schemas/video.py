@@ -16,6 +16,7 @@ class VideoSeasonEntry(BaseModel):
     format_type_id: Optional[int] = None
     ownership_status_id: Optional[int] = None
     notes: Optional[str] = None
+    copies: List[VideoCopyEntry] = []
 
 
 class VideoCreate(BaseModel):
@@ -28,6 +29,7 @@ class VideoCreate(BaseModel):
     description: Optional[str] = None
     cover_image_url: Optional[str] = None
     notes: Optional[str] = None
+    on_media_server: bool = False
     api_source: Optional[str] = None
     external_work_id: Optional[str] = None  # TMDB ID
     director_names: List[str] = []
@@ -47,6 +49,7 @@ class VideoUpdate(BaseModel):
     description: Optional[str] = None
     cover_image_url: Optional[str] = None
     notes: Optional[str] = None
+    on_media_server: Optional[bool] = None
     api_source: Optional[str] = None
     external_work_id: Optional[str] = None
     director_names: Optional[List[str]] = None
@@ -60,6 +63,7 @@ class VideoBulkUpdateFields(BaseModel):
     ownership_status_id: Optional[int] = None
     reading_status_id: Optional[int] = None
     top_level_category_id: Optional[int] = None
+    on_media_server: Optional[bool] = None
 
 
 class VideoBulkUpdatePayload(BaseModel):

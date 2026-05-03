@@ -18,6 +18,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   CoverThumb,
   FormField,
   Grid,
@@ -147,7 +148,7 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
 function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
   function addSeason() {
     const nextNum = seasons.length > 0 ? Math.max(...seasons.map(s => s.season_number)) + 1 : 1;
-    onChange([...seasons, { season_number: nextNum, episode_count: null, format_type_id: null, ownership_status_id: null, notes: "" }]);
+    onChange([...seasons, { season_number: nextNum, episode_count: null, notes: "", copies: [] }]);
   }
   function updateSeason(idx, field, val) {
     onChange(seasons.map((s, i) => i === idx ? { ...s, [field]: val } : s));
@@ -159,26 +160,35 @@ function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
   return (
     <Stack gap={3}>
       {seasons.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
-          <FormField label="Season #">
-            <Input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} min={1} />
-          </FormField>
-          <FormField label="Episodes">
-            <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
-          </FormField>
-          <FormField label="Format">
-            <Select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
-              <option value="">— Format —</option>
-              {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Ownership">
-            <Select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
-              <option value="">— Status —</option>
-              {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
-            </Select>
-          </FormField>
-          <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
+        <div key={i} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", background: "var(--bg-base)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 100px auto", gap: "var(--space-3)", alignItems: "end", marginBottom: "var(--space-3)" }}>
+            <FormField label="Season #">
+              <Input
+                type="number"
+                value={s.season_number ?? ""}
+                onChange={e => updateSeason(i, "season_number", e.target.value === "" ? "" : parseInt(e.target.value, 10))}
+                onBlur={e => {
+                  const n = parseInt(e.target.value, 10);
+                  if (!Number.isFinite(n) || n < 1) {
+                    const used = seasons.filter((_, j) => j !== i).map(x => x.season_number).filter(Number.isFinite);
+                    updateSeason(i, "season_number", used.length > 0 ? Math.max(...used) + 1 : 1);
+                  }
+                }}
+                min={1}
+              />
+            </FormField>
+            <FormField label="Episodes">
+              <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
+            </FormField>
+            <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", justifySelf: "end", marginBottom: "var(--space-2)" }} />
+          </div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "var(--space-2)" }}>Copies / Formats</div>
+          <CopiesEditor
+            copies={s.copies || []}
+            onChange={v => updateSeason(i, "copies", v)}
+            formatTypes={formatTypes}
+            ownershipStatuses={ownershipStatuses}
+          />
         </div>
       ))}
       <Button variant="secondary" size="sm" onClick={addSeason} style={{ alignSelf: "flex-start" }}>+ Add Season</Button>
@@ -330,6 +340,7 @@ const BLANK = {
   description: "",
   cover_image_url: "",
   notes: "",
+  on_media_server: false,
   director_names: [""],
   cast_names: [""],
   genres: [],
@@ -384,27 +395,35 @@ export default function VideoIngestPage() {
   function set(field, val) { setForm(f => ({ ...f, [field]: val })); }
 
   function handleTmdbSelect(detail) {
-    setForm(f => ({
-      ...f,
-      title: detail.title || f.title,
-      release_date: detail.release_date || f.release_date,
-      runtime_minutes: detail.runtime_minutes ? String(detail.runtime_minutes) : f.runtime_minutes,
-      description: detail.overview || f.description,
-      cover_image_url: detail.cover_image_url || f.cover_image_url,
-      director_names: detail.directors?.length ? detail.directors : f.director_names,
-      cast_names: detail.cast?.length ? detail.cast : f.cast_names,
-      api_source: "tmdb",
-      external_work_id: String(detail.tmdb_id),
-      seasons: isTV && detail.seasons?.length
-        ? detail.seasons.map(s => ({
-            season_number: s.season_number,
-            episode_count: s.episode_count || null,
-            format_type_id: null,
-            ownership_status_id: null,
-            notes: "",
-          }))
-        : f.seasons,
-    }));
+    const isTvDetail = detail.media_type === "tv";
+    const tvCategory = categories.find(c => c.category_name === TV_CATEGORY);
+    setForm(f => {
+      const switchToTv = isTvDetail && tvCategory && String(tvCategory.top_level_category_id) !== String(f.top_level_category_id);
+      const targetCategoryId = switchToTv ? String(tvCategory.top_level_category_id) : f.top_level_category_id;
+      const targetIsTv = isTvDetail || (categories.find(c => String(c.top_level_category_id) === String(targetCategoryId))?.category_name === TV_CATEGORY);
+      return {
+        ...f,
+        top_level_category_id: targetCategoryId,
+        copies: switchToTv ? [] : f.copies,
+        title: detail.title || f.title,
+        release_date: detail.release_date || f.release_date,
+        runtime_minutes: detail.runtime_minutes ? String(detail.runtime_minutes) : f.runtime_minutes,
+        description: detail.overview || f.description,
+        cover_image_url: detail.cover_image_url || f.cover_image_url,
+        director_names: detail.directors?.length ? detail.directors : f.director_names,
+        cast_names: detail.cast?.length ? detail.cast : f.cast_names,
+        api_source: "tmdb",
+        external_work_id: String(detail.tmdb_id),
+        seasons: targetIsTv && detail.seasons?.length
+          ? detail.seasons.map(s => ({
+              season_number: s.season_number,
+              episode_count: s.episode_count || null,
+              notes: "",
+              copies: [],
+            }))
+          : f.seasons,
+      };
+    });
   }
 
   async function handleSubmit(e) {
@@ -412,6 +431,10 @@ export default function VideoIngestPage() {
     if (!form.title.trim()) { setError("Title is required."); return; }
     if (!form.top_level_category_id) { setError("Content type is required."); return; }
     if (!form.ownership_status_id) { setError("Ownership status is required."); return; }
+    if (isTV && form.seasons.some(s => !Number.isFinite(s.season_number) || s.season_number < 1)) {
+      setError("Every season needs a number (1 or greater).");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -427,6 +450,7 @@ export default function VideoIngestPage() {
         description: form.description || null,
         cover_image_url: form.cover_image_url || null,
         notes: form.notes || null,
+        on_media_server: !!form.on_media_server,
         api_source: form.api_source || null,
         external_work_id: form.external_work_id || null,
         director_names: form.director_names.map(n => n.trim()).filter(Boolean),
@@ -500,6 +524,12 @@ export default function VideoIngestPage() {
                   </Select>
                 </FormField>
               </Grid>
+
+              <Checkbox
+                label="Added to media server"
+                checked={!!form.on_media_server}
+                onChange={e => set("on_media_server", e.target.checked)}
+              />
 
               <FormField label="Cover Image URL">
                 <Row gap={3} align="start">

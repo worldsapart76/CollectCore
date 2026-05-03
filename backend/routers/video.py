@@ -84,7 +84,7 @@ def _insert_video_copies(db, item_id: int, copies: list):
 
 def _insert_video_seasons(db, item_id: int, seasons: list):
     for s in seasons:
-        db.execute(
+        result = db.execute(
             text("""
                 INSERT INTO tbl_video_seasons
                     (item_id, season_number, episode_count, format_type_id, ownership_status_id, notes)
@@ -99,6 +99,20 @@ def _insert_video_seasons(db, item_id: int, seasons: list):
                 "notes": s.notes or None,
             },
         )
+        season_id = result.lastrowid
+        for c in (s.copies or []):
+            db.execute(
+                text("""
+                    INSERT INTO tbl_video_season_copies (season_id, format_type_id, ownership_status_id, notes)
+                    VALUES (:sid, :fmt, :own, :notes)
+                """),
+                {
+                    "sid": season_id,
+                    "fmt": c.format_type_id,
+                    "own": c.ownership_status_id,
+                    "notes": c.notes or None,
+                },
+            )
 
 
 def _get_video_detail(db, item_id: int):
@@ -122,7 +136,8 @@ def _get_video_detail(db, item_id: int):
                 vd.runtime_minutes,
                 vd.cover_image_url,
                 vd.api_source,
-                vd.external_work_id
+                vd.external_work_id,
+                vd.on_media_server
             FROM tbl_items i
             JOIN tbl_video_details vd ON i.item_id = vd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
@@ -195,6 +210,30 @@ def _get_video_detail(db, item_id: int):
         {"item_id": item_id},
     ).fetchall()
 
+    season_copies = db.execute(
+        text("""
+            SELECT sc.copy_id, sc.season_id, sc.format_type_id, ft.format_name,
+                   sc.ownership_status_id, os.status_name AS ownership_status, sc.notes
+            FROM tbl_video_season_copies sc
+            JOIN tbl_video_seasons s ON sc.season_id = s.season_id
+            LEFT JOIN lkup_video_format_types ft ON sc.format_type_id = ft.format_type_id
+            LEFT JOIN lkup_ownership_statuses os ON sc.ownership_status_id = os.ownership_status_id
+            WHERE s.item_id = :item_id
+            ORDER BY sc.copy_id
+        """),
+        {"item_id": item_id},
+    ).fetchall()
+    season_copies_by_season: dict = {}
+    for sc in season_copies:
+        season_copies_by_season.setdefault(sc[1], []).append({
+            "copy_id": sc[0],
+            "format_type_id": sc[2],
+            "format_name": sc[3],
+            "ownership_status_id": sc[4],
+            "ownership_status": sc[5],
+            "notes": sc[6],
+        })
+
     return {
         "item_id": row[0],
         "ownership_status_id": row[1],
@@ -214,6 +253,7 @@ def _get_video_detail(db, item_id: int):
         "cover_image_url": row[15],
         "api_source": row[16],
         "external_work_id": row[17],
+        "on_media_server": bool(row[18]),
         "director_names": [d[1] for d in directors],
         "cast_names": [c[1] for c in cast],
         "genres": [
@@ -246,6 +286,7 @@ def _get_video_detail(db, item_id: int):
                 "ownership_status_id": s[5],
                 "ownership_status": s[6],
                 "notes": s[7],
+                "copies": season_copies_by_season.get(s[0], []),
             }
             for s in seasons
         ],
@@ -478,6 +519,7 @@ def list_video(
                 vd.release_date,
                 vd.runtime_minutes,
                 vd.cover_image_url,
+                vd.on_media_server,
                 (
                     SELECT GROUP_CONCAT(d.director_name, ', ')
                     FROM xref_video_directors xd
@@ -498,7 +540,40 @@ def list_video(
                     WHERE c.item_id = i.item_id
                 ) AS copy_formats,
                 (SELECT COUNT(*) FROM tbl_video_seasons s WHERE s.item_id = i.item_id) AS season_count,
-                (SELECT COUNT(*) FROM tbl_video_copies c WHERE c.item_id = i.item_id) AS copy_count
+                (SELECT COUNT(*) FROM tbl_video_copies c WHERE c.item_id = i.item_id) AS copy_count,
+                (
+                    SELECT GROUP_CONCAT(oid, ',') FROM (
+                        SELECT s.ownership_status_id AS oid
+                        FROM tbl_video_seasons s
+                        WHERE s.item_id = i.item_id AND s.ownership_status_id IS NOT NULL
+                        UNION
+                        SELECT sc.ownership_status_id AS oid
+                        FROM tbl_video_season_copies sc
+                        JOIN tbl_video_seasons s2 ON sc.season_id = s2.season_id
+                        WHERE s2.item_id = i.item_id AND sc.ownership_status_id IS NOT NULL
+                    )
+                ) AS season_ownership_ids,
+                (
+                    SELECT GROUP_CONCAT(c.ownership_status_id, ',')
+                    FROM tbl_video_copies c
+                    WHERE c.item_id = i.item_id AND c.ownership_status_id IS NOT NULL
+                ) AS copy_ownership_ids,
+                (
+                    SELECT GROUP_CONCAT(fid, ',') FROM (
+                        SELECT c.format_type_id AS fid
+                        FROM tbl_video_copies c
+                        WHERE c.item_id = i.item_id AND c.format_type_id IS NOT NULL
+                        UNION
+                        SELECT s.format_type_id AS fid
+                        FROM tbl_video_seasons s
+                        WHERE s.item_id = i.item_id AND s.format_type_id IS NOT NULL
+                        UNION
+                        SELECT sc.format_type_id AS fid
+                        FROM tbl_video_season_copies sc
+                        JOIN tbl_video_seasons s3 ON sc.season_id = s3.season_id
+                        WHERE s3.item_id = i.item_id AND sc.format_type_id IS NOT NULL
+                    )
+                ) AS all_format_ids
             FROM tbl_items i
             JOIN tbl_video_details vd ON i.item_id = vd.item_id
             JOIN lkup_ownership_statuses os ON i.ownership_status_id = os.ownership_status_id
@@ -525,11 +600,15 @@ def list_video(
             "release_date": r[10],
             "runtime_minutes": r[11],
             "cover_image_url": r[12],
-            "directors": r[13].split(", ") if r[13] else [],
-            "genres": r[14].split(", ") if r[14] else [],
-            "copy_formats": list(dict.fromkeys(r[15].split(", "))) if r[15] else [],
-            "season_count": r[16],
-            "copy_count": r[17],
+            "on_media_server": bool(r[13]),
+            "directors": r[14].split(", ") if r[14] else [],
+            "genres": r[15].split(", ") if r[15] else [],
+            "copy_formats": list(dict.fromkeys(r[16].split(", "))) if r[16] else [],
+            "season_count": r[17],
+            "copy_count": r[18],
+            "season_ownership_status_ids": [int(x) for x in r[19].split(",")] if r[19] else [],
+            "copy_ownership_status_ids": [int(x) for x in r[20].split(",")] if r[20] else [],
+            "all_format_type_ids": [int(x) for x in r[21].split(",")] if r[21] else [],
         }
         for r in rows
     ]
@@ -568,8 +647,8 @@ def create_video(payload: VideoCreate, db=Depends(get_db)):
             text("""
                 INSERT INTO tbl_video_details
                     (item_id, title, title_sort, description, release_date, runtime_minutes,
-                     cover_image_url, api_source, external_work_id)
-                VALUES (:iid, :title, :sort, :desc, :date, :runtime, :cover, :api_src, :ext_id)
+                     cover_image_url, api_source, external_work_id, on_media_server)
+                VALUES (:iid, :title, :sort, :desc, :date, :runtime, :cover, :api_src, :ext_id, :ms)
             """),
             {
                 "iid": item_id,
@@ -581,6 +660,7 @@ def create_video(payload: VideoCreate, db=Depends(get_db)):
                 "cover": resolve_cover_url(payload.cover_image_url, "video", item_id),
                 "api_src": payload.api_source,
                 "ext_id": payload.external_work_id,
+                "ms": 1 if payload.on_media_server else 0,
             },
         )
 
@@ -652,6 +732,9 @@ def update_video(item_id: int, payload: VideoUpdate, db=Depends(get_db)):
         if payload.external_work_id is not None:
             detail_updates.append("external_work_id = :ext_id")
             detail_params["ext_id"] = payload.external_work_id
+        if payload.on_media_server is not None:
+            detail_updates.append("on_media_server = :ms")
+            detail_params["ms"] = 1 if payload.on_media_server else 0
         if detail_updates:
             db.execute(
                 text(f"UPDATE tbl_video_details SET {', '.join(detail_updates)} WHERE item_id = :id"),
@@ -773,6 +856,12 @@ def bulk_update_video(payload: VideoBulkUpdatePayload, db=Depends(get_db)):
                 db.execute(
                     text(f"UPDATE tbl_items SET {', '.join(updates)} WHERE item_id = :id"),
                     params,
+                )
+
+            if payload.fields.on_media_server is not None:
+                db.execute(
+                    text("UPDATE tbl_video_details SET on_media_server = :ms WHERE item_id = :id"),
+                    {"id": item_id, "ms": 1 if payload.fields.on_media_server else 0},
                 )
 
         db.commit()

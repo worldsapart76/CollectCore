@@ -70,6 +70,42 @@ def _run_migrations(conn) -> None:
             if cur.rowcount > 0:
                 logger.info("R2 host rewrite: %s.%s -> %d rows", tbl, col, cur.rowcount)
 
+    # Migration: tbl_video_details.on_media_server (boolean flag)
+    if "tbl_video_details" in tables:
+        cols = {r[1] for r in raw.execute("PRAGMA table_info(tbl_video_details)").fetchall()}
+        if "on_media_server" not in cols:
+            raw.execute("ALTER TABLE tbl_video_details ADD COLUMN on_media_server INTEGER NOT NULL DEFAULT 0")
+            logger.info("Migration: added tbl_video_details.on_media_server")
+
+    # Migration: tbl_video_season_copies (per-season multi-format copies)
+    if "tbl_video_seasons" in tables and "tbl_video_season_copies" not in tables:
+        raw.execute("""
+            CREATE TABLE tbl_video_season_copies (
+                copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                season_id           INTEGER NOT NULL,
+                format_type_id      INTEGER,
+                ownership_status_id INTEGER,
+                notes               TEXT,
+                FOREIGN KEY (season_id) REFERENCES tbl_video_seasons(season_id) ON DELETE CASCADE,
+                FOREIGN KEY (format_type_id) REFERENCES lkup_video_format_types(format_type_id),
+                FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+            )
+        """)
+        raw.execute(
+            "CREATE INDEX idx_video_season_copies_season ON tbl_video_season_copies(season_id)"
+        )
+        # Backfill: one copy row per pre-existing season that had inline format/ownership/notes set.
+        # Skips seasons with no useful data and is naturally idempotent because the table is empty.
+        raw.execute("""
+            INSERT INTO tbl_video_season_copies (season_id, format_type_id, ownership_status_id, notes)
+            SELECT season_id, format_type_id, ownership_status_id, notes
+            FROM tbl_video_seasons
+            WHERE format_type_id IS NOT NULL
+               OR ownership_status_id IS NOT NULL
+               OR (notes IS NOT NULL AND TRIM(notes) <> '')
+        """)
+        logger.info("Migration: created tbl_video_season_copies and backfilled from tbl_video_seasons")
+
 
 def _seed_status_visibility_xref(conn) -> None:
     """Idempotent maintenance for status-visibility xref tables.

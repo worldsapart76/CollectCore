@@ -68,7 +68,7 @@ function OwnershipBadge({ statusName }) {
 
 // ─── Filter sidebar ───────────────────────────────────────────────────────────
 
-function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, filters, onSectionChange, onClearAll }) {
+function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, formatTypes, filters, onSectionChange, onClearAll }) {
   const allDirectors = useMemo(() => {
     const seen = new Set();
     const result = [];
@@ -86,17 +86,18 @@ function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, fil
   const hasFilters = filters.search.trim() ||
     sectionActive(filters.ownership) || sectionActive(filters.watchStatus) ||
     sectionActive(filters.category) || sectionActive(filters.director) ||
-    sectionActive(filters.genre);
+    sectionActive(filters.genre) || sectionActive(filters.format) ||
+    sectionActive(filters.mediaServer);
 
   return (
-    <FilterSidebarShell onClearAll={hasFilters ? onClearAll : null}>
+    <FilterSidebarShell hasFilters={!!hasFilters} onClearAll={onClearAll}>
       <div style={{ marginBottom: "var(--space-5)" }}>
         <label style={{ display: "block", fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "var(--space-1)" }}>Search</label>
         <Input
           size="sm"
           value={filters.search}
           onChange={e => onSectionChange("search", e.target.value)}
-          placeholder="Title, director…"
+          placeholder="Title, director, notes…"
         />
       </div>
       <TriStateFilterSection
@@ -117,6 +118,18 @@ function VideoFilters({ items, ownershipStatuses, watchStatuses, categories, fil
         items={watchStatuses.map(s => ({ id: String(s.read_status_id), label: s.status_name }))}
         section={filters.watchStatus}
         onChange={s => onSectionChange("watchStatus", s)}
+      />
+      <TriStateFilterSection
+        title="Format"
+        items={formatTypes.map(f => ({ id: String(f.format_type_id), label: f.format_name }))}
+        section={filters.format}
+        onChange={s => onSectionChange("format", s)}
+      />
+      <TriStateFilterSection
+        title="Media Server"
+        items={[{ id: "1", label: "On server" }, { id: "0", label: "Not on server" }]}
+        section={filters.mediaServer}
+        onChange={s => onSectionChange("mediaServer", s)}
       />
       <SearchableTriStateSection
         title="Director"
@@ -229,33 +242,42 @@ function CopiesEditor({ copies, onChange, formatTypes, ownershipStatuses }) {
 function SeasonsEditor({ seasons, onChange, formatTypes, ownershipStatuses }) {
   function addSeason() {
     const nextNum = seasons.length > 0 ? Math.max(...seasons.map(s => s.season_number)) + 1 : 1;
-    onChange([...seasons, { season_number: nextNum, episode_count: null, format_type_id: null, ownership_status_id: null, notes: "" }]);
+    onChange([...seasons, { season_number: nextNum, episode_count: null, notes: "", copies: [] }]);
   }
   function updateSeason(idx, field, val) { onChange(seasons.map((s, i) => i === idx ? { ...s, [field]: val } : s)); }
   function removeSeason(idx) { onChange(seasons.filter((_, i) => i !== idx)); }
   return (
     <Stack gap={3}>
       {seasons.map((s, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 1fr auto", gap: "var(--space-3)", alignItems: "end" }}>
-          <FormField label="Season">
-            <Input type="number" value={s.season_number} onChange={e => updateSeason(i, "season_number", parseInt(e.target.value) || 1)} min={1} />
-          </FormField>
-          <FormField label="Episodes">
-            <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
-          </FormField>
-          <FormField label="Format">
-            <Select value={s.format_type_id || ""} onChange={e => updateSeason(i, "format_type_id", e.target.value ? parseInt(e.target.value) : null)}>
-              <option value="">— Format —</option>
-              {formatTypes.map(f => <option key={f.format_type_id} value={f.format_type_id}>{f.format_name}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Ownership">
-            <Select value={s.ownership_status_id || ""} onChange={e => updateSeason(i, "ownership_status_id", e.target.value ? parseInt(e.target.value) : null)}>
-              <option value="">— Status —</option>
-              {ownershipStatuses.map(st => <option key={st.ownership_status_id} value={st.ownership_status_id}>{st.status_name}</option>)}
-            </Select>
-          </FormField>
-          <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", marginBottom: "var(--space-2)" }} />
+        <div key={i} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "var(--space-3)", background: "var(--bg-base)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 100px auto", gap: "var(--space-3)", alignItems: "end", marginBottom: "var(--space-3)" }}>
+            <FormField label="Season">
+              <Input
+                type="number"
+                value={s.season_number ?? ""}
+                onChange={e => updateSeason(i, "season_number", e.target.value === "" ? "" : parseInt(e.target.value, 10))}
+                onBlur={e => {
+                  const n = parseInt(e.target.value, 10);
+                  if (!Number.isFinite(n) || n < 1) {
+                    const used = seasons.filter((_, j) => j !== i).map(x => x.season_number).filter(Number.isFinite);
+                    updateSeason(i, "season_number", used.length > 0 ? Math.max(...used) + 1 : 1);
+                  }
+                }}
+                min={1}
+              />
+            </FormField>
+            <FormField label="Episodes">
+              <Input type="number" value={s.episode_count || ""} onChange={e => updateSeason(i, "episode_count", e.target.value ? parseInt(e.target.value) : null)} placeholder="—" min={1} />
+            </FormField>
+            <RemoveButton onClick={() => removeSeason(i)} style={{ alignSelf: "center", justifySelf: "end", marginBottom: "var(--space-2)" }} />
+          </div>
+          <div style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "var(--space-2)" }}>Copies / Formats</div>
+          <CopiesEditor
+            copies={s.copies || []}
+            onChange={v => updateSeason(i, "copies", v)}
+            formatTypes={formatTypes}
+            ownershipStatuses={ownershipStatuses}
+          />
         </div>
       ))}
       <Button variant="secondary" size="sm" onClick={addSeason} style={{ alignSelf: "flex-start" }}>+ Add Season</Button>
@@ -334,11 +356,18 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
         description: detail.description || "",
         cover_image_url: detail.cover_image_url || "",
         notes: detail.notes || "",
+        on_media_server: !!detail.on_media_server,
         director_names: detail.director_names?.length ? detail.director_names : [""],
         cast_names: detail.cast_names?.length ? detail.cast_names : [""],
         genres: detail.genres || [],
         copies: detail.copies || [],
-        seasons: detail.seasons || [],
+        seasons: (detail.seasons || []).map(s => ({
+          season_id: s.season_id,
+          season_number: s.season_number,
+          episode_count: s.episode_count,
+          notes: s.notes || "",
+          copies: s.copies || [],
+        })),
       });
     }).catch(() => setError("Failed to load details."));
   }, [item.item_id]);
@@ -350,6 +379,10 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
 
   async function handleSave() {
     if (!form.title.trim()) { setError("Title is required."); return; }
+    if (isTV && form.seasons.some(s => !Number.isFinite(s.season_number) || s.season_number < 1)) {
+      setError("Every season needs a number (1 or greater).");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -363,6 +396,7 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
         description: form.description || null,
         cover_image_url: form.cover_image_url || null,
         notes: form.notes || null,
+        on_media_server: !!form.on_media_server,
         director_names: form.director_names.map(n => n.trim()).filter(Boolean),
         cast_names: form.cast_names.map(n => n.trim()).filter(Boolean),
         genres: form.genres,
@@ -468,6 +502,12 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
               </Select>
             </FormField>
           </Grid>
+
+          <Checkbox
+            label="Added to media server"
+            checked={!!form.on_media_server}
+            onChange={e => set("on_media_server", e.target.checked)}
+          />
 
           <FormField label="Cover Image URL">
             <Row gap={3} align="start">
@@ -613,6 +653,8 @@ const EMPTY_FILTERS = {
   category: emptySection(),
   ownership: emptySection(),
   watchStatus: emptySection(),
+  format: emptySection(),
+  mediaServer: emptySection(),
   director: emptySection(),
   genre: emptySection(),
 };
@@ -711,17 +753,29 @@ export default function VideoLibraryPage() {
     if (q) {
       result = result.filter(v =>
         v.title.toLowerCase().includes(q) ||
-        (v.directors || []).some(d => d.toLowerCase().includes(q))
+        (v.directors || []).some(d => d.toLowerCase().includes(q)) ||
+        (v.notes || "").toLowerCase().includes(q)
       );
     }
     if (sectionActive(filters.category)) {
       result = result.filter(v => applySection(filters.category, [String(v.top_level_category_id)]));
     }
     if (sectionActive(filters.ownership)) {
-      result = result.filter(v => applySection(filters.ownership, [String(v.ownership_status_id)]));
+      result = result.filter(v => {
+        const ids = [String(v.ownership_status_id)];
+        for (const id of v.season_ownership_status_ids || []) ids.push(String(id));
+        for (const id of v.copy_ownership_status_ids || []) ids.push(String(id));
+        return applySection(filters.ownership, ids);
+      });
     }
     if (sectionActive(filters.watchStatus)) {
       result = result.filter(v => applySection(filters.watchStatus, [v.reading_status_id != null ? String(v.reading_status_id) : ""]));
+    }
+    if (sectionActive(filters.format)) {
+      result = result.filter(v => applySection(filters.format, (v.all_format_type_ids || []).map(String)));
+    }
+    if (sectionActive(filters.mediaServer)) {
+      result = result.filter(v => applySection(filters.mediaServer, [v.on_media_server ? "1" : "0"]));
     }
     if (sectionActive(filters.director)) {
       result = result.filter(v => applySection(filters.director, v.directors || []));
@@ -840,13 +894,14 @@ export default function VideoLibraryPage() {
           ownershipStatuses={ownershipStatuses}
           watchStatuses={watchStatuses}
           categories={categories}
+          formatTypes={formatTypes}
           filters={filters}
           onSectionChange={handleSectionChange}
           onClearAll={clearAll}
         />
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", padding: 0 }}>
-          {loading ? (
+          {loading && items.length === 0 ? (
             <div style={{ padding: "var(--space-8)", color: "var(--text-secondary)" }}>Loading…</div>
           ) : sorted.length === 0 ? (
             <div style={{ padding: "var(--space-8)", color: "var(--text-secondary)" }}>No items found.</div>

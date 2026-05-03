@@ -1340,6 +1340,7 @@ CREATE TABLE IF NOT EXISTS tbl_video_details (
     cover_image_url   TEXT,
     api_source        TEXT,
     external_work_id  TEXT,
+    on_media_server   INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (item_id) REFERENCES tbl_items(item_id) ON DELETE CASCADE
 );
 
@@ -1363,6 +1364,19 @@ CREATE TABLE IF NOT EXISTS tbl_video_seasons (
     ownership_status_id INTEGER,
     notes               TEXT,
     FOREIGN KEY (item_id) REFERENCES tbl_video_details(item_id) ON DELETE CASCADE,
+    FOREIGN KEY (format_type_id) REFERENCES lkup_video_format_types(format_type_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+-- Per-season copies (mirror of tbl_video_copies, keyed to a season).
+-- Lets a TV season hold multiple format/ownership rows (e.g. own S1 on both DVD and Blu-ray).
+CREATE TABLE IF NOT EXISTS tbl_video_season_copies (
+    copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id           INTEGER NOT NULL,
+    format_type_id      INTEGER,
+    ownership_status_id INTEGER,
+    notes               TEXT,
+    FOREIGN KEY (season_id) REFERENCES tbl_video_seasons(season_id) ON DELETE CASCADE,
     FOREIGN KEY (format_type_id) REFERENCES lkup_video_format_types(format_type_id),
     FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
 );
@@ -1408,6 +1422,7 @@ WHERE sub_genre_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_video_details_title ON tbl_video_details(title);
 CREATE INDEX IF NOT EXISTS idx_video_copies_item ON tbl_video_copies(item_id);
 CREATE INDEX IF NOT EXISTS idx_video_seasons_item ON tbl_video_seasons(item_id);
+CREATE INDEX IF NOT EXISTS idx_video_season_copies_season ON tbl_video_season_copies(season_id);
 
 -- Video seed data
 INSERT OR IGNORE INTO lkup_video_format_types (format_name, sort_order) VALUES ('Blu-ray',   1);
