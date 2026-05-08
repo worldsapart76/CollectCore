@@ -55,6 +55,82 @@ import {
 
 const TV_CATEGORY = "TV Series";
 
+const COLUMN_ORDER_KEY = "video.columnOrder";
+
+const COLUMN_DEFS = [
+  {
+    colKey: "title",
+    label: "Title",
+    sortKey: "title",
+    defaultWidth: 220,
+    style: { padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+    render: (v) => v.title,
+  },
+  {
+    colKey: "type",
+    label: "Type",
+    sortKey: "type",
+    defaultWidth: 90,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+    render: (v) => v.video_type,
+  },
+  {
+    colKey: "year",
+    label: "Year",
+    sortKey: "year",
+    defaultWidth: 70,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap" },
+    render: (v) => (v.release_date ? v.release_date.slice(0, 4) : "—"),
+  },
+  {
+    colKey: "director",
+    label: "Director(s)",
+    sortKey: null,
+    defaultWidth: 150,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+    render: (v) => v.directors?.join(", ") || "—",
+  },
+  {
+    colKey: "watch",
+    label: "Watch Status",
+    sortKey: "watch",
+    defaultWidth: 110,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+    render: (v) => v.watch_status || "—",
+  },
+  {
+    colKey: "ownership",
+    label: "Ownership",
+    sortKey: "ownership",
+    defaultWidth: 100,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+    render: (v) => v.ownership_status,
+  },
+  {
+    colKey: "formats",
+    label: "Copies / Seasons",
+    sortKey: null,
+    defaultWidth: 140,
+    style: { padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+    render: (v, ctx) => ctx.formatSummary(v),
+  },
+];
+
+const DEFAULT_COLUMN_ORDER = COLUMN_DEFS.map(c => c.colKey);
+
+function readColumnOrder() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLUMN_ORDER_KEY));
+    if (!Array.isArray(raw)) return DEFAULT_COLUMN_ORDER;
+    const known = new Set(DEFAULT_COLUMN_ORDER);
+    const seen = new Set();
+    const out = [];
+    for (const k of raw) if (known.has(k) && !seen.has(k)) { out.push(k); seen.add(k); }
+    for (const k of DEFAULT_COLUMN_ORDER) if (!seen.has(k)) out.push(k);
+    return out;
+  } catch { return DEFAULT_COLUMN_ORDER; }
+}
+
 function OwnershipBadge({ statusName }) {
   if (!statusName) return null;
   const initial = statusName[0].toUpperCase();
@@ -554,6 +630,54 @@ function VideoDetailModal({ item, categories, formatTypes, allGenres, ownershipS
   );
 }
 
+// ─── Column reorder modal ────────────────────────────────────────────────────
+
+function ColumnReorderModal({ columnOrder, setColumnOrder, onClose }) {
+  const byKey = useMemo(() => Object.fromEntries(COLUMN_DEFS.map(c => [c.colKey, c])), []);
+
+  function move(idx, delta) {
+    const next = [...columnOrder];
+    const target = idx + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setColumnOrder(next);
+  }
+
+  function reset() { setColumnOrder(DEFAULT_COLUMN_ORDER); }
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title="Reorder columns"
+      footer={
+        <Row justify="between" gap={4} style={{ width: "100%" }}>
+          <Button variant="secondary" onClick={reset}>Reset to default</Button>
+          <Button variant="primary" onClick={onClose}>Done</Button>
+        </Row>
+      }
+    >
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", marginBottom: "var(--space-3)" }}>
+        Use ▲ ▼ to reorder. Saved automatically.
+      </div>
+      <Stack gap={2}>
+        {columnOrder.map((key, i) => {
+          const col = byKey[key];
+          if (!col) return null;
+          return (
+            <Row key={key} gap={3} align="center" style={{ padding: "var(--space-2) var(--space-3)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--bg-base)" }}>
+              <span style={{ flex: 1, fontWeight: 500 }}>{col.label}</span>
+              <Button variant="secondary" size="sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">▲</Button>
+              <Button variant="secondary" size="sm" onClick={() => move(i, 1)} disabled={i === columnOrder.length - 1} aria-label="Move down">▼</Button>
+            </Row>
+          );
+        })}
+      </Stack>
+    </Modal>
+  );
+}
+
 // ─── Bulk edit modal ──────────────────────────────────────────────────────────
 
 function BulkField({ label, enabled, onToggle, children }) {
@@ -686,10 +810,20 @@ export default function VideoLibraryPage() {
   const [sortField, setSortField] = useState("title");
   const [sortDir, setSortDir] = useState("asc");
 
-  const [colWidths, setColWidths] = useState({
-    title: 220, type: 90, year: 70, director: 150, watch: 110, ownership: 100, formats: 140,
-  });
+  const [colWidths, setColWidths] = useState(() =>
+    Object.fromEntries(COLUMN_DEFS.map(c => [c.colKey, c.defaultWidth]))
+  );
   const colResizingRef = useRef(false);
+
+  const [columnOrder, setColumnOrder] = useState(readColumnOrder);
+  useEffect(() => {
+    try { localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(columnOrder)); } catch {}
+  }, [columnOrder]);
+  const orderedColumns = useMemo(() => {
+    const byKey = Object.fromEntries(COLUMN_DEFS.map(c => [c.colKey, c]));
+    return columnOrder.map(k => byKey[k]).filter(Boolean);
+  }, [columnOrder]);
+  const [columnsModalOpen, setColumnsModalOpen] = useState(false);
 
   const makeResizeHandler = useCallback((col) => (e) => {
     e.preventDefault();
@@ -865,7 +999,10 @@ export default function VideoLibraryPage() {
             options={[{ value: "table", label: "Table" }, { value: "grid", label: "Grid" }]}
             value={viewMode} onChange={setViewMode} />
           {viewMode === "table" && (
-            <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+            <>
+              <ToggleButton active={showThumbnails} onClick={() => setShowThumbnails(p => !p)}>Thumbnails</ToggleButton>
+              <Button variant="secondary" size="sm" onClick={() => setColumnsModalOpen(true)}>Columns</Button>
+            </>
           )}
           {viewMode === "grid" && (
             <>
@@ -936,13 +1073,9 @@ export default function VideoLibraryPage() {
               <colgroup>
                 <col style={{ width: 28 }} />
                 {showThumbnails && <col style={{ width: 50 }} />}
-                <col style={{ width: colWidths.title }} />
-                <col style={{ width: colWidths.type }} />
-                <col style={{ width: colWidths.year }} />
-                <col style={{ width: colWidths.director }} />
-                <col style={{ width: colWidths.watch }} />
-                <col style={{ width: colWidths.ownership }} />
-                <col style={{ width: colWidths.formats }} />
+                {orderedColumns.map(c => (
+                  <col key={c.colKey} style={{ width: colWidths[c.colKey] }} />
+                ))}
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                 <tr style={{ background: "var(--bg-sidebar)", borderBottom: "1px solid var(--border)" }}>
@@ -950,30 +1083,22 @@ export default function VideoLibraryPage() {
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ margin: 0, cursor: "pointer" }} />
                   </th>
                   {showThumbnails && <th style={{ padding: "5px 6px", borderRight: "1px solid var(--border)" }} />}
-                  {[
-                    { key: "title", label: "Title", colKey: "title" },
-                    { key: "type", label: "Type", colKey: "type" },
-                    { key: "year", label: "Year", colKey: "year" },
-                    { key: null, label: "Director(s)", colKey: "director" },
-                    { key: "watch", label: "Watch Status", colKey: "watch" },
-                    { key: "ownership", label: "Ownership", colKey: "ownership" },
-                    { key: null, label: "Copies / Seasons", colKey: "formats" },
-                  ].map(({ key, label, colKey }) => (
+                  {orderedColumns.map(({ sortKey, label, colKey }) => (
                     <th
-                      key={label}
-                      onClick={key ? () => { if (!colResizingRef.current) handleHeaderSort(key); } : undefined}
+                      key={colKey}
+                      onClick={sortKey ? () => { if (!colResizingRef.current) handleHeaderSort(sortKey); } : undefined}
                       style={{
                         padding: "5px 8px",
                         textAlign: "left",
                         position: "relative",
                         userSelect: "none",
-                        cursor: key ? "pointer" : "default",
+                        cursor: sortKey ? "pointer" : "default",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         borderRight: "1px solid var(--border)",
                       }}
                     >
-                      {label}{key ? sortIndicator(key) : ""}
+                      {label}{sortKey ? sortIndicator(sortKey) : ""}
                       <div
                         onMouseDown={makeResizeHandler(colKey)}
                         style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 1 }}
@@ -1003,13 +1128,9 @@ export default function VideoLibraryPage() {
                             : <div style={{ width: 42, height: 60, background: "var(--bg-surface)", borderRadius: "var(--radius-sm)" }} />}
                         </td>
                       )}
-                      <td style={{ padding: "3px 8px", fontWeight: 500, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.title}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.video_type}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{v.release_date ? v.release_date.slice(0, 4) : "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{v.directors?.join(", ") || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.watch_status || "—"}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.ownership_status}</td>
-                      <td style={{ padding: "3px 8px", fontSize: "var(--text-sm)", color: "var(--text-secondary)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{formatSummary(v)}</td>
+                      {orderedColumns.map(col => (
+                        <td key={col.colKey} style={col.style}>{col.render(v, { formatSummary })}</td>
+                      ))}
                     </tr>
                   );
                 })}
@@ -1045,6 +1166,14 @@ export default function VideoLibraryPage() {
           onClose={() => setBulkEditOpen(false)}
           onSaved={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
           onDeleted={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
+        />
+      )}
+
+      {columnsModalOpen && (
+        <ColumnReorderModal
+          columnOrder={columnOrder}
+          setColumnOrder={setColumnOrder}
+          onClose={() => setColumnsModalOpen(false)}
         />
       )}
     </div>
