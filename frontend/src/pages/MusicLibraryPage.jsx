@@ -372,7 +372,8 @@ function EditionsEditor({ editions, formatTypes, ownershipStatuses, onChange }) 
 // ─── Grid item ────────────────────────────────────────────────────────────────
 
 const MusicGridItem = memo(function MusicGridItem({ release, isSelected, onToggleSelect, onClick, gridSize, showCaptions }) {
-  const { w, h } = GRID_SIZES[gridSize];
+  const w = GRID_SIZES[gridSize].w;
+  const h = w;
   return (
     <div className="cc-mobile-grid-cell" onClick={(e) => { if (e.target.type !== "checkbox") onClick(); }} style={{
       position: "relative", cursor: "pointer", width: w, flexShrink: 0,
