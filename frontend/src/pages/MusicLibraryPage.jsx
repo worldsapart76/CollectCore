@@ -843,8 +843,8 @@ export default function MusicLibraryPage() {
     return sortDir === "asc" ? " ▲" : " ▼";
   }
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     Promise.all([
       listMusicReleases(),
       fetchOwnershipStatuses(COLLECTION_TYPE_IDS.music),
@@ -857,7 +857,7 @@ export default function MusicLibraryPage() {
       setReleaseTypes(types);
       setFormatTypes(fmts);
       setAllGenres(genres);
-      setLoading(false);
+      if (!silent) setLoading(false);
     });
   }, []);
 
@@ -1130,7 +1130,7 @@ export default function MusicLibraryPage() {
           formatTypes={formatTypes}
           allGenres={allGenres}
           onClose={() => setEditingId(null)}
-          onSaved={() => { setEditingId(null); load(); }}
+          onSaved={() => { setEditingId(null); load(true); }}
           onDeleted={id => {
             setEditingId(null);
             setReleases(prev => prev.filter(r => r.item_id !== id));
@@ -1145,8 +1145,8 @@ export default function MusicLibraryPage() {
           ownershipStatuses={ownershipStatuses}
           releaseTypes={releaseTypes}
           onClose={() => setBulkEditOpen(false)}
-          onSaved={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
-          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); load(); }}
+          onSaved={async () => { setBulkEditOpen(false); clearSelection(); load(true); }}
+          onDeleted={async () => { setBulkEditOpen(false); clearSelection(); load(true); }}
         />
       )}
     </div>
