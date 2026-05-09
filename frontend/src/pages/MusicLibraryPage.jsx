@@ -744,6 +744,43 @@ function emptyFilters() {
   };
 }
 
+const FILTERS_STORAGE_KEY = "music.filters";
+const SORT_STORAGE_KEY = "music.sort";
+const DEFAULT_SORT = { field: "artist", dir: "asc" };
+const VALID_SORT_FIELDS = new Set(["title", "artist", "type", "date", "ownership"]);
+
+function isValidSection(s) {
+  return s && typeof s === "object"
+    && Array.isArray(s.include) && Array.isArray(s.exclude)
+    && (s.mode === "or" || s.mode === "and");
+}
+
+function readFilters() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FILTERS_STORAGE_KEY));
+    if (!raw || typeof raw !== "object") return emptyFilters();
+    const def = emptyFilters();
+    return {
+      search: typeof raw.search === "string" ? raw.search : def.search,
+      ownership: isValidSection(raw.ownership) ? raw.ownership : def.ownership,
+      releaseType: isValidSection(raw.releaseType) ? raw.releaseType : def.releaseType,
+      format: isValidSection(raw.format) ? raw.format : def.format,
+      genre: isValidSection(raw.genre) ? raw.genre : def.genre,
+      artist: isValidSection(raw.artist) ? raw.artist : def.artist,
+    };
+  } catch { return emptyFilters(); }
+}
+
+function readSort() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY));
+    if (!raw || typeof raw !== "object") return DEFAULT_SORT;
+    const field = VALID_SORT_FIELDS.has(raw.field) ? raw.field : DEFAULT_SORT.field;
+    const dir = raw.dir === "desc" ? "desc" : "asc";
+    return { field, dir };
+  } catch { return DEFAULT_SORT; }
+}
+
 export default function MusicLibraryPage() {
   const [releases, setReleases] = useState([]);
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
@@ -751,7 +788,10 @@ export default function MusicLibraryPage() {
   const [formatTypes, setFormatTypes] = useState([]);
   const [allGenres, setAllGenres] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState(emptyFilters);
+  const [filters, setFilters] = useState(readFilters);
+  useEffect(() => {
+    try { localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch {}
+  }, [filters]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -764,8 +804,11 @@ export default function MusicLibraryPage() {
   const sentinelRef = useRef(null);
   const [showCaptions, setShowCaptions] = useState(true);
 
-  const [sortField, setSortField] = useState("title");
-  const [sortDir, setSortDir] = useState("asc");
+  const [sortField, setSortField] = useState(() => readSort().field);
+  const [sortDir, setSortDir] = useState(() => readSort().dir);
+  useEffect(() => {
+    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: sortField, dir: sortDir })); } catch {}
+  }, [sortField, sortDir]);
 
   const [colWidths, setColWidths] = useState({
     title: 220, artist: 160, type: 100, date: 70, editions: 150, genre: 150, ownership: 110,
