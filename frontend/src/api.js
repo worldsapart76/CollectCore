@@ -945,6 +945,11 @@ export async function discogsFetchMaster(masterId) {
   return handleJsonResponse(res, "Failed to fetch Discogs master");
 }
 
+export async function discogsFetchRelease(releaseId) {
+  const res = await fetch(`${API}/music/discogs-release/${encodeURIComponent(releaseId)}`);
+  return handleJsonResponse(res, "Failed to fetch Discogs release");
+}
+
 // --- Video ---
 
 export async function fetchVideoCategories() {

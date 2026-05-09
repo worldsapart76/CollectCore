@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createMusicRelease,
   discogsFetchMaster,
+  discogsFetchRelease,
   discogsSearchMusic,
   fetchMusicFormatTypes,
   fetchMusicGenres,
@@ -365,7 +366,9 @@ export default function MusicIngestPage() {
     setDiscogsLoading(true);
     setDiscogsError("");
     try {
-      const detail = await discogsFetchMaster(result.discogs_id);
+      const detail = result.result_type === "release"
+        ? await discogsFetchRelease(result.discogs_id)
+        : await discogsFetchMaster(result.discogs_id);
       const newCover = detail.cover_image_url || null;
       setForm(f => ({
         ...f,
@@ -482,7 +485,7 @@ export default function MusicIngestPage() {
               <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
                 {discogsResults.map(r => (
                   <div
-                    key={r.discogs_id}
+                    key={`${r.result_type}-${r.discogs_id}`}
                     onClick={() => handleDiscogsSelect(r)}
                     style={{
                       display: "flex", gap: "var(--space-4)",

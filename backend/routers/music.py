@@ -345,61 +345,22 @@ def search_music_artists(q: Optional[str] = None, db=Depends(get_db)):
 
 # ---------- Discogs lookup endpoints ----------
 
-@router.get("/discogs-search")
-def discogs_search_music(q: str):
-    """Search Discogs master releases. Returns lightweight list for release picker."""
-    if not q or not q.strip():
-        return []
-    if not DISCOGS_CONSUMER_KEY:
-        raise HTTPException(status_code=503, detail="Discogs API not configured")
-    encoded = urllib.parse.quote(q.strip())
-    url = f"https://api.discogs.com/database/search?q={encoded}&type=master&per_page=15"
-    try:
-        data = _discogs_request(url)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Discogs search failed: {exc}")
-
-    results = []
-    for r in data.get("results", []):
-        raw_title = r.get("title", "")
-        # Discogs formats master titles as "Artist - Album"; split if present
-        if " - " in raw_title:
-            parts = raw_title.split(" - ", 1)
-            artist_guess = [parts[0].strip()]
-            title_clean = parts[1].strip()
-        else:
-            artist_guess = []
-            title_clean = raw_title
-
-        results.append({
-            "discogs_id": r.get("master_id") or r.get("id"),
-            "title": title_clean,
-            "artists": artist_guess,
-            "year": r.get("year"),
-            "thumb_url": r.get("thumb"),
-            "cover_image_url": r.get("cover_image"),
-        })
-    return results
+def _split_discogs_search_title(raw: str):
+    """Discogs search results format titles as 'Artist - Album'. Split if present."""
+    if " - " in raw:
+        parts = raw.split(" - ", 1)
+        return [parts[0].strip()], parts[1].strip()
+    return [], raw
 
 
-@router.get("/discogs-master/{master_id}")
-def discogs_master_detail(master_id: int):
-    """Fetch full detail for a Discogs master release (title, artists, tracklist, cover)."""
-    if not DISCOGS_CONSUMER_KEY:
-        raise HTTPException(status_code=503, detail="Discogs API not configured")
-    try:
-        data = _discogs_request(f"https://api.discogs.com/masters/{master_id}")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Discogs fetch failed: {exc}")
-
-    # Artists — skip "Various" and clean disambiguation suffixes
+def _format_discogs_detail(data: dict) -> dict:
+    """Normalize a Discogs master or release detail payload to the shape the picker consumes."""
     artists = [
         _clean_discogs_artist(a.get("name", ""))
         for a in data.get("artists", [])
         if a.get("name") and a.get("name") not in ("Various", "Various Artists")
     ]
 
-    # Cover image — prefer primary, fall back to first
     cover = None
     images = data.get("images", [])
     primary = next((img for img in images if img.get("type") == "primary"), None)
@@ -408,7 +369,6 @@ def discogs_master_detail(master_id: int):
     elif images:
         cover = images[0].get("uri") or images[0].get("uri150")
 
-    # Tracklist — skip heading entries
     tracklist = []
     for t in data.get("tracklist", []):
         if t.get("type_") == "heading":
@@ -431,6 +391,85 @@ def discogs_master_detail(master_id: int):
         "cover_image_url": cover,
         "tracklist": tracklist,
     }
+
+
+@router.get("/discogs-search")
+def discogs_search_music(q: str):
+    """Search Discogs for masters plus any orphan releases (releases with no parent master)."""
+    if not q or not q.strip():
+        return []
+    if not DISCOGS_CONSUMER_KEY:
+        raise HTTPException(status_code=503, detail="Discogs API not configured")
+    encoded = urllib.parse.quote(q.strip())
+
+    try:
+        master_data = _discogs_request(
+            f"https://api.discogs.com/database/search?q={encoded}&type=master&per_page=15"
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discogs search failed: {exc}")
+
+    # Releases without a master_id wouldn't otherwise surface — query them too and merge.
+    try:
+        release_data = _discogs_request(
+            f"https://api.discogs.com/database/search?q={encoded}&type=release&per_page=25"
+        )
+    except Exception:
+        release_data = {"results": []}
+
+    results = []
+    for r in master_data.get("results", []):
+        artists, title = _split_discogs_search_title(r.get("title", ""))
+        results.append({
+            "result_type": "master",
+            "discogs_id": r.get("master_id") or r.get("id"),
+            "title": title,
+            "artists": artists,
+            "year": r.get("year"),
+            "thumb_url": r.get("thumb"),
+            "cover_image_url": r.get("cover_image"),
+        })
+
+    for r in release_data.get("results", []):
+        # Skip releases already rolled up to a master — that master represents them.
+        if r.get("master_id"):
+            continue
+        artists, title = _split_discogs_search_title(r.get("title", ""))
+        results.append({
+            "result_type": "release",
+            "discogs_id": r.get("id"),
+            "title": title,
+            "artists": artists,
+            "year": r.get("year"),
+            "thumb_url": r.get("thumb"),
+            "cover_image_url": r.get("cover_image"),
+        })
+
+    return results
+
+
+@router.get("/discogs-master/{master_id}")
+def discogs_master_detail(master_id: int):
+    """Fetch full detail for a Discogs master release (title, artists, tracklist, cover)."""
+    if not DISCOGS_CONSUMER_KEY:
+        raise HTTPException(status_code=503, detail="Discogs API not configured")
+    try:
+        data = _discogs_request(f"https://api.discogs.com/masters/{master_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discogs fetch failed: {exc}")
+    return _format_discogs_detail(data)
+
+
+@router.get("/discogs-release/{release_id}")
+def discogs_release_detail(release_id: int):
+    """Fetch full detail for a Discogs release (used for orphan releases with no parent master)."""
+    if not DISCOGS_CONSUMER_KEY:
+        raise HTTPException(status_code=503, detail="Discogs API not configured")
+    try:
+        data = _discogs_request(f"https://api.discogs.com/releases/{release_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discogs fetch failed: {exc}")
+    return _format_discogs_detail(data)
 
 
 # ---------- CRUD endpoints ----------
