@@ -1,35 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchTradeData, fetchTradeOwnership, probeAdminMode } from "../api";
+import { fetchTradeData, fetchTradeOwnership } from "../api";
+import { useMediaQuery, useMobileCardsPerRow, MOBILE_BREAKPOINT, MobilePerRowStepper } from "../components/library/mobileGrid";
 
 // Public-facing trade page. Three viewer modes:
-//   admin  → /admin/me 200s, fetch /admin/trade-ownership for badges
-//   guest  → OPFS has guest_card_copies, query locally
-//   unauth → no badges, plain styled grid
+//   admin  → fetchTradeOwnership succeeds → use the returned map
+//   guest  → admin call fails (CF Access redirect) but OPFS has guest_card_copies
+//   unauth → both probes fail → render without badges
 //
-// Lazy-loads the guest sqlite path on demand so admin viewers (most common
-// case in production) don't pull the sqlite-wasm chunk into the active
-// session. The chunk is still emitted into the admin bundle so unauth
-// viewers can use it, but it stays inert until the probe falls through.
+// We don't have a separate /admin/me probe — the failure of fetchTradeOwnership
+// IS the "you're not admin" signal, and rolling the two together saves one
+// fetch + one console CORS error per non-admin viewer.
 
 const BADGE_LABELS = {
-  owned:      "You own this card.",
-  wanted:     "This card is on your wanted list.",
-  in_catalog: "You do not own this card but it is not on your wanted list.",
+  owned:          "You own this card.",
+  wanted:         "This card is on your wanted list.",
+  in_catalog:     "You do not own this card but it is not on your wanted list.",
   not_in_catalog: "Not yet in your catalog.",
 };
 
 const BADGE_TONES = {
-  owned: { bg: "#16a34a", fg: "#fff" },
-  wanted: { bg: "#2563eb", fg: "#fff" },
-  in_catalog: { bg: "#6b7280", fg: "#fff" },
-  not_in_catalog: { bg: "#a16207", fg: "#fff" },
+  owned:          { bg: "#16a34a", fg: "#fff", label: "Owned" },
+  wanted:         { bg: "#2563eb", fg: "#fff", label: "Wanted" },
+  in_catalog:     { bg: "#6b7280", fg: "#fff", label: "Don't own" },
+  not_in_catalog: { bg: "#a16207", fg: "#fff", label: "Not in catalog" },
 };
 
+const TRADE_PER_ROW_KEY = "trade.mobileCardsPerRow";
+
 async function probeGuestOwnership(catalogItemIds) {
-  // Lazy import — only fetched when admin probe fails. Falls through to
-  // null on any error (no OPFS, no catalog loaded, query failure) so the
-  // page renders without badges instead of erroring.
+  // Lazy import — only fetched when the admin probe falls through. Returns
+  // null on any failure so the page degrades to unauth mode silently.
   let svc;
   try {
     svc = await import("../guest/sqliteService");
@@ -44,7 +45,6 @@ async function probeGuestOwnership(catalogItemIds) {
   }
   try {
     const placeholders = catalogItemIds.map(() => "?").join(",");
-    // Owned/wanted from guest's own copies.
     const copyRows = await svc.query(
       `SELECT gc.catalog_item_id,
               MAX(CASE WHEN os.status_code = 'owned'  THEN 1 ELSE 0 END) AS is_owned,
@@ -55,8 +55,6 @@ async function probeGuestOwnership(catalogItemIds) {
        GROUP BY gc.catalog_item_id`,
       catalogItemIds,
     );
-    // Catalog presence — even without a copy row, if the card is in the
-    // guest's local catalog mirror we want to badge "in catalog, no copy".
     const catalogRows = await svc.query(
       `SELECT catalog_item_id FROM tbl_items
        WHERE catalog_item_id IN (${placeholders})`,
@@ -78,9 +76,12 @@ async function probeGuestOwnership(catalogItemIds) {
 export default function TradePage() {
   const { slug } = useParams();
   const [trade, setTrade] = useState(null);
-  const [ownership, setOwnership] = useState(null);  // null = unauth, {} = checked but empty
-  const [viewerMode, setViewerMode] = useState("loading");  // 'loading' | 'admin' | 'guest' | 'unauth' | 'error'
+  const [ownership, setOwnership] = useState(null);
+  const [viewerMode, setViewerMode] = useState("loading");
   const [error, setError] = useState("");
+
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const [mobileCardsPerRow, setMobileCardsPerRow] = useMobileCardsPerRow(TRADE_PER_ROW_KEY);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,25 +97,19 @@ export default function TradePage() {
           return;
         }
 
-        // 1. Admin probe.
-        const isAdminViewer = await probeAdminMode();
-        if (cancelled) return;
-        if (isAdminViewer) {
-          try {
-            const map = await fetchTradeOwnership(cardIds);
-            if (cancelled) return;
-            setOwnership(map);
-            setViewerMode("admin");
-            return;
-          } catch {
-            // Treat lookup failure as no badges rather than erroring the page.
-            setViewerMode("admin");
-            setOwnership({});
-            return;
-          }
+        // Try admin path. Success → admin viewer with badge map.
+        try {
+          const map = await fetchTradeOwnership(cardIds);
+          if (cancelled) return;
+          setOwnership(map);
+          setViewerMode("admin");
+          return;
+        } catch {
+          // CF Access redirect, network error, or 401 — fall through.
         }
+        if (cancelled) return;
 
-        // 2. Guest probe via OPFS.
+        // Guest path via OPFS.
         const guestMap = await probeGuestOwnership(cardIds);
         if (cancelled) return;
         if (guestMap && Object.keys(guestMap).length > 0) {
@@ -123,7 +118,6 @@ export default function TradePage() {
           return;
         }
 
-        // 3. Unauthenticated viewer — render without badges.
         setViewerMode("unauth");
       } catch (e) {
         if (cancelled) return;
@@ -137,12 +131,7 @@ export default function TradePage() {
 
   const badgeFor = useMemo(() => {
     if (!ownership || viewerMode === "unauth" || viewerMode === "loading") return () => null;
-    return (catalog_item_id) => {
-      const status = ownership[catalog_item_id];
-      if (status) return status;
-      // Card present in trade but absent from viewer's library.
-      return "not_in_catalog";
-    };
+    return (catalog_item_id) => ownership[catalog_item_id] || "not_in_catalog";
   }, [ownership, viewerMode]);
 
   if (viewerMode === "loading") {
@@ -165,6 +154,20 @@ export default function TradePage() {
     ? new Date(trade.created_at).toLocaleDateString()
     : null;
 
+  const gridStyle = isMobile
+    ? { ...styles.grid, gridTemplateColumns: `repeat(${mobileCardsPerRow}, 1fr)`, gap: 8 }
+    : { ...styles.grid, gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" };
+
+  // Flatten cards into one cell per visible side. Front always; back as a
+  // separate cell when present so it sits next to the front in the same
+  // grid row (matching the 4-col PDF layout the trade page replaces).
+  const cells = [];
+  for (const card of cards) {
+    const status = badgeFor(card.catalog_item_id);
+    cells.push({ card, side: "front", status });
+    if (card.back_url) cells.push({ card, side: "back", status: null });
+  }
+
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -182,39 +185,40 @@ export default function TradePage() {
         {viewerMode === "guest" && (
           <div style={styles.viewerBadge}>Viewing as guest — badges reflect your local CollectCore data.</div>
         )}
+        {isMobile && (
+          <div style={styles.mobileControls}>
+            <MobilePerRowStepper value={mobileCardsPerRow} onChange={setMobileCardsPerRow} />
+          </div>
+        )}
       </header>
 
-      <div style={styles.grid}>
-        {cards.map((card) => {
-          const status = badgeFor(card.catalog_item_id);
+      <div style={gridStyle}>
+        {cells.map(({ card, side, status }, i) => {
+          const url = side === "front" ? card.front_url : card.back_url;
+          const tone = status ? BADGE_TONES[status] : null;
+          const captionLines = (card.caption || []).slice();
+          if (side === "back" && captionLines.length > 0) {
+            captionLines[captionLines.length - 1] = captionLines[captionLines.length - 1] + " [back]";
+          }
           return (
-            <figure key={card.catalog_item_id} style={styles.cell}>
+            <figure key={`${card.catalog_item_id}-${side}-${i}`} style={styles.cell}>
               <div style={styles.imageWrap}>
-                <img src={card.front_url} alt="" loading="lazy" style={styles.image} />
-                {status && (
-                  <span style={{
-                    ...styles.badge,
-                    background: BADGE_TONES[status].bg,
-                    color: BADGE_TONES[status].fg,
-                  }} title={BADGE_LABELS[status]}>
-                    {status === "owned"          ? "Owned"
-                     : status === "wanted"        ? "Wanted"
-                     : status === "in_catalog"    ? "Don't own"
-                     : "Not in catalog"}
+                <img src={url} alt="" loading="lazy" style={styles.image} />
+                {tone && (
+                  <span
+                    style={{ ...styles.badge, background: tone.bg, color: tone.fg }}
+                    title={BADGE_LABELS[status]}
+                  >
+                    {tone.label}
                   </span>
                 )}
               </div>
-              {card.caption && card.caption.length > 0 && (
+              {captionLines.length > 0 && (
                 <figcaption style={styles.caption}>
-                  {card.caption.map((line, i) => (
-                    <div key={i} style={styles.captionLine}>{line}</div>
+                  {captionLines.map((line, idx) => (
+                    <div key={idx} style={styles.captionLine}>{line}</div>
                   ))}
                 </figcaption>
-              )}
-              {card.back_url && (
-                <div style={styles.imageWrap}>
-                  <img src={card.back_url} alt="" loading="lazy" style={styles.image} />
-                </div>
               )}
             </figure>
           );
@@ -259,9 +263,13 @@ const styles = {
     color: "#6b7280",
     fontStyle: "italic",
   },
+  mobileControls: {
+    marginTop: 12,
+    display: "flex",
+    justifyContent: "flex-end",
+  },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
     gap: 16,
   },
   cell: { margin: 0 },

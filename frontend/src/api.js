@@ -1246,13 +1246,3 @@ export async function fetchTradeOwnership(catalogItemIds) {
   return handleJsonResponse(res, "Failed to fetch ownership map");
 }
 
-export async function probeAdminMode() {
-  // Returns true if /admin/me responds 200 (CF Access let us through).
-  // Used by the trade page to detect viewer mode.
-  try {
-    const res = await fetch(`${API}/admin/me`);
-    return res.ok;
-  } catch {
-    return false;
-  }
-}

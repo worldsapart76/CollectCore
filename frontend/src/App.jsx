@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/layout/AppShell";
 import HomePage from "./pages/HomePage";
 import { activeModules } from "./modules";
@@ -50,7 +50,31 @@ const GuestBootstrap = import.meta.env.VITE_IS_ADMIN === "true"
 // and land directly on that module's primary path.
 const singleModulePath = activeModules.length === 1 ? activeModules[0].primaryPath : null;
 
-export default function App() {
+function AppRoot() {
+  const { pathname } = useLocation();
+  // The trade view is a public page for anonymous link recipients. Skip
+  // AppShell (TopNav fetches /settings → CF Access blocks unauth users →
+  // CORS noise + broken nav links) and GuestBootstrap (welcome modal +
+  // catalog sync are wrong UX for a one-off trade-page viewer). The page
+  // does its own viewer-mode detection.
+  const onTrade = pathname.startsWith("/trade/");
+
+  if (onTrade) {
+    return (
+      <Routes>
+        <Route
+          path="/trade/:slug"
+          element={
+            <Suspense fallback={<div style={{ padding: 24 }}>Loading trade…</div>}>
+              <TradePage />
+            </Suspense>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
+
   const inner = (
     <AppShell>
       <Routes>
@@ -61,14 +85,6 @@ export default function App() {
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/library" element={<PhotocardLibraryPage />} />
         <Route path="/trades" element={<TradesPage />} />
-        <Route
-          path="/trade/:slug"
-          element={
-            <Suspense fallback={<div style={{ padding: 24 }}>Loading trade…</div>}>
-              <TradePage />
-            </Suspense>
-          }
-        />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/books/add" element={<BooksIngestPage />} />
         <Route path="/books/library" element={<BooksLibraryPage />} />
@@ -108,4 +124,8 @@ export default function App() {
     );
   }
   return inner;
+}
+
+export default function App() {
+  return <AppRoot />;
 }
