@@ -424,9 +424,12 @@ export default function PhotocardLibraryPage() {
     setShowBulkEdit(false);
   }
 
+  // Filter against `sortedCards` (not `cards`) so downstream consumers —
+  // notably TradeCreateModal, where order is user-visible — get the user's
+  // chosen sort instead of the raw fetch order.
   const selectedCards = useMemo(
-    () => cards.filter((c) => selectedIds.has(String(c.item_id))),
-    [cards, selectedIds]
+    () => sortedCards.filter((c) => selectedIds.has(String(c.item_id))),
+    [sortedCards, selectedIds]
   );
 
   // Register Sort + Select as TopNav icon buttons on mobile (page-actions context).
