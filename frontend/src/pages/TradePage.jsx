@@ -1,6 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchTradeData, fetchTradeOwnership } from "../api";
+import { fetchTradeData } from "../api";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+// Probe admin viewer mode by hitting the gated /admin/trade-ownership
+// endpoint. When the viewer isn't signed into Cloudflare Access, CF
+// returns a 302 to its login page on a different origin — a normal
+// fetch follows the redirect and the browser then logs a CORS error
+// because the login response has no Access-Control-Allow-Origin header.
+// `redirect: 'manual'` short-circuits before the redirect is followed,
+// so the browser doesn't try to read the cross-origin response and
+// doesn't emit the CORS message. Admin viewers (cookie present) get
+// a normal 200 response that flows through unchanged.
+async function tryAdminOwnership(catalogItemIds) {
+  try {
+    const ids = catalogItemIds.join(",");
+    const url = `${API_BASE}/admin/trade-ownership?ids=${encodeURIComponent(ids)}`;
+    const res = await fetch(url, { credentials: "include", redirect: "manual" });
+    if (res.type === "opaqueredirect" || res.status === 0 || !res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 import { useMediaQuery, useMobileCardsPerRow, MOBILE_BREAKPOINT, MobilePerRowStepper } from "../components/library/mobileGrid";
 
 // Public-facing trade page. Three viewer modes:
@@ -98,16 +121,13 @@ export default function TradePage() {
         }
 
         // Try admin path. Success → admin viewer with badge map.
-        try {
-          const map = await fetchTradeOwnership(cardIds);
-          if (cancelled) return;
-          setOwnership(map);
+        const adminMap = await tryAdminOwnership(cardIds);
+        if (cancelled) return;
+        if (adminMap) {
+          setOwnership(adminMap);
           setViewerMode("admin");
           return;
-        } catch {
-          // CF Access redirect, network error, or 401 — fall through.
         }
-        if (cancelled) return;
 
         // Guest path via OPFS.
         const guestMap = await probeGuestOwnership(cardIds);
