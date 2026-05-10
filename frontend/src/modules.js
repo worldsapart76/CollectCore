@@ -7,7 +7,7 @@ export const MODULE_DEFS = {
     links: [
       { label: 'Inbox',   to: '/inbox' },
       { label: 'Library', to: '/library' },
-      { label: 'Export',  to: '/export' },
+      { label: 'Trades',  to: '/trades' },
     ],
   },
   books: {
@@ -101,6 +101,6 @@ export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/video')) return 'video';
   if (pathname.startsWith('/boardgames')) return 'boardgames';
   if (pathname.startsWith('/ttrpg')) return 'ttrpg';
-  if (['/inbox', '/library', '/export'].some(p => pathname.startsWith(p))) return 'photocards';
+  if (['/inbox', '/library', '/trades', '/trade'].some(p => pathname.startsWith(p))) return 'photocards';
   return null;
 }

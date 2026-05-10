@@ -1212,21 +1212,47 @@ export async function bulkDeleteTtrpg(itemIds) {
   return handleJsonResponse(res, "Failed to bulk delete TTRPG");
 }
 
-// --- Export ---
+// --- Trades ---
 
-export async function exportPhotocards({ itemIds, includeCaptions, includeBacks }) {
-  const res = await fetch(`${API}/export/photocards`, {
+export async function createTrade(body) {
+  const res = await fetch(`${API}/trade`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      item_ids: itemIds,
-      include_captions: includeCaptions,
-      include_backs: includeBacks,
-    }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(errorText || "Export failed.");
+  return handleJsonResponse(res, "Failed to create trade");
+}
+
+export async function fetchTradeData(slug) {
+  const res = await fetch(`${API}/trade/data/${encodeURIComponent(slug)}`);
+  return handleJsonResponse(res, "Failed to fetch trade");
+}
+
+export async function listAdminTrades() {
+  const res = await fetch(`${API}/admin/trades`);
+  return handleJsonResponse(res, "Failed to list trades");
+}
+
+export async function deleteAdminTrade(slug) {
+  const res = await fetch(`${API}/admin/trade/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete trade");
+}
+
+export async function fetchTradeOwnership(catalogItemIds) {
+  const ids = catalogItemIds.join(",");
+  const res = await fetch(`${API}/admin/trade-ownership?ids=${encodeURIComponent(ids)}`);
+  return handleJsonResponse(res, "Failed to fetch ownership map");
+}
+
+export async function probeAdminMode() {
+  // Returns true if /admin/me responds 200 (CF Access let us through).
+  // Used by the trade page to detect viewer mode.
+  try {
+    const res = await fetch(`${API}/admin/me`);
+    return res.ok;
+  } catch {
+    return false;
   }
-  return res.blob();
 }

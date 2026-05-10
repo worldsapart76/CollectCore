@@ -1,4 +1,4 @@
-import{q as o}from"./sqliteService-DeeRJMva.js";async function E(){const e=await o(`
+import{query as o}from"./sqliteService-CG4EfVzL.js";async function E(){const e=await o(`
     SELECT
       i.item_id,
       i.catalog_item_id,

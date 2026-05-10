@@ -186,7 +186,7 @@ def publish_item(
 
     attachments = conn.execute(
         """
-        SELECT attachment_id, attachment_type, file_path, storage_type
+        SELECT attachment_id, attachment_type, file_path, storage_type, image_version
         FROM tbl_attachments
         WHERE item_id = ? AND attachment_type IN ('front', 'back')
         ORDER BY attachment_type
@@ -196,9 +196,10 @@ def publish_item(
 
     uploaded = 0
     skipped = 0
-    for att_id, atype, file_path, storage_type in attachments:
+    for att_id, atype, file_path, storage_type, image_version in attachments:
         side = "f" if atype == "front" else "b"
-        key = f"{CATALOG_PREFIX}/{catalog_item_id}_{side}.jpg"
+        # Versioned key — see catalog_publisher.py for the cache-bust rationale.
+        key = f"{CATALOG_PREFIX}/{catalog_item_id}_{side}_v{image_version}.jpg"
         hosted_url = f"{public_base.rstrip('/')}/{key}"
 
         if storage_type == "hosted":

@@ -6,7 +6,6 @@ import { activeModules } from "./modules";
 import InboxPage from "./pages/InboxPage";
 import PhotocardLibraryPage from "./pages/PhotocardLibraryPage";
 import AdminPage from "./pages/AdminPage";
-import ExportPage from "./pages/ExportPage";
 import BooksIngestPage from "./pages/BooksIngestPage";
 import BooksLibraryPage from "./pages/BooksLibraryPage";
 import GraphicNovelsIngestPage from "./pages/GraphicNovelsIngestPage";
@@ -21,6 +20,12 @@ import BoardgamesIngestPage from "./pages/BoardgamesIngestPage";
 import BoardgamesLibraryPage from "./pages/BoardgamesLibraryPage";
 import TTRPGIngestPage from "./pages/TTRPGIngestPage";
 import TTRPGLibraryPage from "./pages/TTRPGLibraryPage";
+import TradesPage from "./pages/TradesPage";
+
+// Trade page is route-split — its viewer-mode logic may lazy-load the
+// guest sqlite-wasm chunk for OPFS lookup, which we don't want pulled into
+// the main admin bundle on initial load.
+const TradePage = lazy(() => import("./pages/TradePage"));
 
 // Guest debug page is dev-only. The `import.meta.env.DEV ? ... : null`
 // constant-folds at build time, so in a production bundle Rollup eliminates
@@ -55,7 +60,15 @@ export default function App() {
         />
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/library" element={<PhotocardLibraryPage />} />
-        <Route path="/export" element={<ExportPage />} />
+        <Route path="/trades" element={<TradesPage />} />
+        <Route
+          path="/trade/:slug"
+          element={
+            <Suspense fallback={<div style={{ padding: 24 }}>Loading trade…</div>}>
+              <TradePage />
+            </Suspense>
+          }
+        />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/books/add" element={<BooksIngestPage />} />
         <Route path="/books/library" element={<BooksLibraryPage />} />

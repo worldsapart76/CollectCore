@@ -6,6 +6,132 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-05-09 (US CDT) — Photocard trading v2 (Parts 1-4 shipped)
+
+Full trade-page architecture landed. Plan at
+`C:\Users\world\.claude\plans\photocard-trading-v2.md`. Supersedes the
+old Phase 8 / PD2 design (downloadable HTML + import) which was tagged
+historical-only — server-hosted URLs deliver the "open the link, see
+your badges" UX that file:// origin couldn't.
+
+**Part 1 — Image republish + cache busting.** New
+`tbl_attachments.image_version` column + versioned R2 keys
+(`{cat_id}_{f|b}_v{N}.jpg`). The replace-image flow bumps the version
+and orphan-tracks the previous URL into `tbl_r2_orphans` with a 7-day
+deletion window so in-flight trade pages and stale guest catalogs keep
+working. Startup sweeper deletes expired orphan keys from R2 (404-
+tolerant). Same versioning propagated to `tools/publish_catalog.py`.
+
+**Part 2 — PDF export retired.** Removed `ExportPage.jsx`,
+`POST /export/photocards`, `_generate_pdf`, `backend/export_pdf.py`
+(orphan), `reportlab` from requirements. `Export` link gone from the
+photocard nav.
+
+**Part 3 — Trade backend.** New `tbl_trades` table + `routers/trades.py`:
+`POST /trade` (admin or guest), `GET /trade/data/<slug>` (public, lazy-
+expire on read), `GET /admin/trades`, `DELETE /admin/trade/<slug>`,
+`GET /admin/me` (viewer-mode probe), `GET /admin/trade-ownership` (admin
+badge lookup). Guest trades auto-expire after 30 days. CF Access bypass
+documented as Step 6 in `docs/guest_deploy_runbook.md` —
+`/trade/*` and `/assets/*` must be added to a fourth bypass app at
+deploy time (the `/assets/*` exposure is the cost of putting the trade
+page in the admin SPA bundle to keep architecture simple).
+
+**Part 4 — Trade frontend.** New `TradeCreateModal` opens from library
+multi-select (admin and guest both); modal prefills From / To / Notes
+from saved defaults. New `TradePage` at `/trade/:slug` with three viewer
+modes: admin (probe → `/admin/trade-ownership` badges), guest (lazy-load
+sqliteService, query OPFS `guest_card_copies`), unauth (no badges). New
+`TradesPage` at `/trades` lists active trades and edits the From/To/
+Notes defaults; admin reads from server, guest reads from
+`guest_meta.my_trades` JSON list. Defaults persisted in
+`tbl_app_settings` (admin) or `guest_meta` (guest).
+
+**Verified locally:** backend boots clean, both bundles build, all
+endpoints round-trip correctly with real photocard data, defaults
+persist via `/settings`.
+
+**Deploy-time clicks:**
+1. Push (this commit).
+2. Cloudflare Zero Trust → Add fourth Access application: bypass for
+   `collectcoreapp.com/trade`, `collectcoreapp.com/assets`,
+   `api.collectcoreapp.com/trade`. See
+   `docs/guest_deploy_runbook.md` Step 6.
+3. Smoke test: replace a card front, run Publish Photocard Images,
+   confirm new R2 URL has `_v2`. Multi-select cards, Generate Trade
+   Page, open URL incognito → unauth grid renders.
+
+**Next steps (open):**
+- Roll out CF Access bypass for `/trade/*` + `/assets/*` (manual click).
+- Real-device smoke test once CF Access is configured.
+- Phase 4b (guest-added cards) — still deferred.
+
+---
+
+### 2026-04-27 (US CDT) — Admin cover-image publish button + tombstones closed
+
+Short session, two outcomes — one item closed, one shipped.
+
+**Tombstones in /catalog/delta — closed permanently.** User confirmed
+the photocard catalog is monotonic by design (cards exist in the real
+world, so they exist in the catalog forever). No remove-from-catalog
+admin flow will ever be built; tombstones are not deferred, they're
+not needed. Removed from session-notes open list. Saved as
+`project_catalog_is_monotonic.md` in memory so it doesn't resurface.
+
+**`POST /admin/publish-admin-images` + UI button shipped** (commit
+`46de2dd`). Parallel to Publish Photocard Images but for the 7
+non-photocard modules. Implementation:
+- New backend module
+  [backend/admin_image_publisher.py](backend/admin_image_publisher.py)
+  with `publish_pending()` mirroring `catalog_publisher.py`'s shape.
+  Iterates the same MODULES mapping as `tools/sync_admin_images.py`
+  (books → tbl_book_copies.copy_id; the other 6 modules →
+  tbl_*_details.item_id). Per row: skip if URL already on R2 prefix,
+  else fetch (local path or external URL via urllib), resize to
+  1200px long-edge JPEG q85, upload to
+  `admin/images/{prefix}/{prefix}_{pk:06d}.jpg`, rewrite
+  `cover_image_url`. Per-module summary in response. No
+  catalog_version bump — these modules don't participate in guest
+  sync.
+- Endpoint at
+  [backend/routers/admin.py](backend/routers/admin.py) immediately
+  after `/admin/publish-catalog`.
+- API client `publishAdminImagesToR2()` in
+  [frontend/src/api.js](frontend/src/api.js).
+- UI section on Admin → Backup tab between Publish Photocard Images
+  and Guest Webview Seed.
+  [frontend/src/pages/AdminPage.jsx](frontend/src/pages/AdminPage.jsx).
+  Surfaces total uploaded / skipped-hosted / failed plus a per-module
+  failure list (stage + pk) when anything fails.
+- Missing tables (dev DBs without all modules migrated) are caught
+  with `sqlite3.OperationalError` and recorded as `table_missing`,
+  not fatal.
+- Removes the desktop-only friction of running
+  `tools/sync_admin_images.py` after adding/replacing covers from a
+  phone or other non-desktop device. CLI script remains for
+  offline/automation.
+
+**Verification:** admin build clean (629KB main, no regressions). Python
+syntax-checked. Pushed to origin/main; Railway auto-deploy.
+
+**Status / open items:**
+
+| # | Item | Status |
+|---|---|---|
+| Tombstones in /catalog/delta | **closed 2026-04-27** | catalog is monotonic |
+| Phase 4b — guest-added cards | deferred | wait for real-world demand |
+| Bundle slimming (lazy-load admin module pages) | deferred | low priority |
+
+**Next steps (open):**
+- Phase 4b (guest-added cards) — schema + UX decisions documented
+  but not built. Wait for actual user demand.
+- Bundle optimization: admin bundle still includes the 7 non-photocard
+  module pages even in single-module mode for guest. Lazy-load by
+  module would slim the bundle further. Low priority.
+
+---
+
 ### 2026-04-26 (later) — Guest webview LIVE + admin publishing operations
 
 Guest webview is **live and end-to-end tested on real device** at
@@ -111,20 +237,7 @@ the catalog publishing flow. All resolved.
 | 7 | Full guest UI + first-real-device fixes | **LIVE 2026-04-26** |
 | 4b | Guest-added cards | still deferred (no real-world signal yet) |
 
-**Next steps (open):**
-- Phase 4b (guest-added cards) — schema + UX decisions documented
-  but not built. Wait for actual user demand.
-- ~~Tombstones in catalog delta~~ — **closed 2026-04-26.** Catalog is
-  monotonic by design (cards exist in the real world, so they exist
-  in the catalog forever). No remove-from-catalog flow will be built;
-  no tombstones needed.
-- Other modules' image-publish flow (currently photocards-only). The
-  `tools/sync_admin_images.py` CLI handles non-photocard covers; an
-  in-app button equivalent could ship the same way as
-  Publish Photocard Images if/when it becomes a friction point.
-- Optimization: admin bundle still includes the 7 non-photocard
-  module pages even in single-module mode for guest. Lazy-load by
-  module would slim the bundle further. Low priority.
+**Next steps (open):** (superseded — see 2026-04-27 entry above)
 
 ---
 

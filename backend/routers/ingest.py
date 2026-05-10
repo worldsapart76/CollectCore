@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 from typing import List, Optional
@@ -454,7 +455,22 @@ def _replace_image(item_id: int, side: str, file: UploadFile, db):
         shutil.copyfileobj(file.file, out)
 
     if existing:
-        old_path = (DATA_ROOT / existing[0]).resolve()
+        old_file_path = existing[0]
+        # If the row was previously hosted on R2, schedule the old object for
+        # cleanup in 7 days. Trade pages and stale guest catalogs may still
+        # reference it during that window; after that the sweeper deletes it.
+        if old_file_path.startswith("http"):
+            public_base = os.environ.get("R2_PUBLIC_BASE_URL", "").rstrip("/")
+            if public_base and old_file_path.startswith(public_base + "/"):
+                old_key = old_file_path[len(public_base) + 1:]
+                db.execute(
+                    text(
+                        "INSERT OR IGNORE INTO tbl_r2_orphans (key, scheduled_delete_at) "
+                        "VALUES (:k, datetime('now', '+7 days'))"
+                    ),
+                    {"k": old_key},
+                )
+        old_path = (DATA_ROOT / old_file_path).resolve()
         if old_path.is_relative_to(IMAGES_DIR.resolve()) and old_path.exists() and old_path != library_path:
             old_path.unlink()
         # Reset storage_type to 'local' alongside the path rewrite. If the
@@ -463,9 +479,13 @@ def _replace_image(item_id: int, side: str, file: UploadFile, db):
         # frankenstein that publish_pending() skips (it filters on
         # storage_type='local'), so the replacement never reaches R2 and
         # guests see a broken image.
+        # Bump image_version so the next publish lands at a NEW R2 key —
+        # otherwise Cloudflare/browsers keep serving the previous
+        # immutable-cached object at the same URL.
         db.execute(
             text(
-                "UPDATE tbl_attachments SET file_path = :fp, storage_type = 'local', mime_type = NULL "
+                "UPDATE tbl_attachments SET file_path = :fp, storage_type = 'local', "
+                "mime_type = NULL, image_version = image_version + 1 "
                 "WHERE item_id = :item_id AND attachment_type = :atype"
             ),
             {"fp": f"images/library/{library_filename}", "item_id": item_id, "atype": attachment_type},

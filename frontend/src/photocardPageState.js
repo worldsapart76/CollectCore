@@ -35,9 +35,3 @@ export const libraryState = {
   mobileCardsPerRow: readMobileCardsPerRow(),
 };
 
-export const exportState = {
-  filters: null,    // null = use DEFAULT_FILTERS on first mount
-  sortMode: "default",
-  includeCaptions: true,
-  includeBacks: false,
-};

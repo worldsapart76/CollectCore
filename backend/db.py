@@ -70,6 +70,13 @@ def _run_migrations(conn) -> None:
             if cur.rowcount > 0:
                 logger.info("R2 host rewrite: %s.%s -> %d rows", tbl, col, cur.rowcount)
 
+    # Migration: tbl_attachments.image_version (cache-bust suffix for R2 keys)
+    if "tbl_attachments" in tables:
+        cols = {r[1] for r in raw.execute("PRAGMA table_info(tbl_attachments)").fetchall()}
+        if "image_version" not in cols:
+            raw.execute("ALTER TABLE tbl_attachments ADD COLUMN image_version INTEGER NOT NULL DEFAULT 1")
+            logger.info("Migration: added tbl_attachments.image_version")
+
     # Migration: tbl_video_details.on_media_server (boolean flag)
     if "tbl_video_details" in tables:
         cols = {r[1] for r in raw.execute("PRAGMA table_info(tbl_video_details)").fetchall()}

@@ -10,9 +10,16 @@ production path.
 
 Per attachment with storage_type='local':
   1. Resize to 600x924 JPEG q80 in memory
-  2. Upload to R2 at catalog/images/{catalog_item_id}_{f|b}.jpg
+  2. Upload to R2 at catalog/images/{catalog_item_id}_{f|b}_v{image_version}.jpg
   3. Rewrite tbl_attachments: storage_type='hosted', file_path=<R2 URL>,
      mime_type='image/jpeg'
+
+Versioned keys cache-bust replacements: when the user replaces an image via
+the library modal, _replace_image bumps tbl_attachments.image_version and
+orphan-tracks the previous R2 URL in tbl_r2_orphans (7-day deletion window
+so in-flight trade pages and stale guest catalogs keep working). The next
+publish run lands at the new versioned key. See sweep_r2_orphans() for the
+delete-after-7-days half of this story.
 
 After all uploads complete, bumps catalog_version (global MAX + 1) on every
 touched item so guests pick up the new R2 URLs via the next /catalog/delta.
@@ -162,7 +169,7 @@ def publish_pending(limit: Optional[int] = None) -> dict:
             catalog_item_id = _assign_catalog_item_id(conn, item_id, photocards_id)
             attachments = conn.execute(
                 """
-                SELECT attachment_id, attachment_type, file_path, storage_type
+                SELECT attachment_id, attachment_type, file_path, storage_type, image_version
                 FROM tbl_attachments
                 WHERE item_id = ? AND attachment_type IN ('front', 'back')
                 ORDER BY attachment_type
@@ -171,7 +178,7 @@ def publish_pending(limit: Optional[int] = None) -> dict:
             ).fetchall()
 
             item_uploaded = 0
-            for att_id, atype, file_path, storage_type in attachments:
+            for att_id, atype, file_path, storage_type, image_version in attachments:
                 # "Already on R2" is determined by the file_path itself, not
                 # the storage_type column — see SELECT-filter rationale above.
                 if file_path.startswith("http"):
@@ -192,7 +199,10 @@ def publish_pending(limit: Optional[int] = None) -> dict:
                 body = _resize_to_jpeg(raw)
 
                 side = "f" if atype == "front" else "b"
-                key = f"{CATALOG_PREFIX}/{catalog_item_id}_{side}.jpg"
+                # Versioned key: cache busts when the image is replaced. The
+                # replace flow bumps image_version and orphan-tracks the old
+                # R2 URL for sweeping; first-time publishes start at _v1.
+                key = f"{CATALOG_PREFIX}/{catalog_item_id}_{side}_v{image_version}.jpg"
                 hosted_url = f"{public_base}/{key}"
 
                 s3.put_object(
@@ -241,3 +251,55 @@ def publish_pending(limit: Optional[int] = None) -> dict:
         "missing_files": missing_files,
         "new_catalog_version": new_version,
     }
+
+
+def sweep_r2_orphans() -> dict:
+    """
+    Delete any tbl_r2_orphans rows whose scheduled_delete_at has passed,
+    along with the corresponding R2 object. Idempotent and 404-tolerant
+    (the R2 object may already have been deleted by a previous sweep that
+    crashed mid-run, or never existed if a replace happened twice in
+    quick succession).
+
+    Called from main.py at startup and (eventually) from a daily cron.
+    No-op when R2 env vars are absent (e.g. local dev without R2 creds).
+    """
+    if not os.environ.get("R2_PUBLIC_BASE_URL"):
+        logger.info("sweep_r2_orphans: R2 env vars unset — skipping")
+        return {"deleted": 0, "skipped_no_r2": True}
+
+    bucket = _require_env("R2_BUCKET")
+    s3 = _make_r2_client()
+
+    conn = sqlite3.connect(str(DB_PATH))
+    deleted = 0
+    failed = []
+    try:
+        # tbl_r2_orphans may not exist yet on databases where init_db hasn't
+        # picked up the new schema. Tolerate that and exit quietly.
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tbl_r2_orphans'"
+        ).fetchall()}
+        if "tbl_r2_orphans" not in tables:
+            return {"deleted": 0, "skipped_no_table": True}
+
+        rows = conn.execute(
+            "SELECT key FROM tbl_r2_orphans WHERE scheduled_delete_at <= datetime('now')"
+        ).fetchall()
+        for (key,) in rows:
+            try:
+                s3.delete_object(Bucket=bucket, Key=key)
+                deleted += 1
+            except Exception as exc:
+                # Log + skip — do not roll back the row, retry next sweep.
+                logger.warning("sweep_r2_orphans: failed to delete %s: %s", key, exc)
+                failed.append(key)
+                continue
+            conn.execute("DELETE FROM tbl_r2_orphans WHERE key = ?", (key,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    if deleted or failed:
+        logger.info("sweep_r2_orphans: deleted=%d failed=%d", deleted, len(failed))
+    return {"deleted": deleted, "failed": failed}

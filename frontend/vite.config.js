@@ -23,7 +23,7 @@ const PROXY_PATHS = [
   '/video',
   '/boardgames',
   '/ttrpg',
-  '/export',
+  '/trade',
   '/admin',
   '/settings',
   '/upload-cover',
@@ -42,6 +42,15 @@ const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, {
     const path = req.url.split('?')[0]
     for (const sub of FRONTEND_SUBPATHS) {
       if (path.endsWith(sub)) return '/index.html'
+    }
+    // Trade SPA routes vs backend trade API:
+    //   GET  /trades         → SPA management page
+    //   GET  /trade/<slug>   → SPA view page
+    //   POST /trade          → backend
+    //   GET  /trade/data/*   → backend
+    if (path === '/trades') return '/index.html'
+    if (path.startsWith('/trade/') && !path.startsWith('/trade/data/') && req.method === 'GET') {
+      return '/index.html'
     }
   },
 }]))

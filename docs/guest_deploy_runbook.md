@@ -117,6 +117,52 @@ In an incognito window:
 
 ---
 
+## Step 6 — Cloudflare Access bypass for /trade/* (Trading v2)
+
+> **Only required when the trade-page architecture
+> (`plans/photocard-trading-v2.md`) ships.** Independent of the guest
+> webview rollout above; can be done before, after, or in parallel.
+
+The trade page (`collectcoreapp.com/trade/<slug>`) and the public
+trade-data API (`api.collectcoreapp.com/trade` + `/trade/data/<slug>`)
+must be reachable without login so trade recipients — including
+non-CollectCore users — can view shared lists. Admin-only management
+endpoints (`/admin/trades`, `/admin/trade/<slug>` DELETE) stay behind
+the default gated policy.
+
+Because the trade page lives in the **admin SPA bundle** (no separate
+build), the admin asset path also needs bypassing — otherwise the HTML
+loads but the JS chunks 401 and the page renders blank for unauth viewers.
+
+Add a fourth Self-hosted Application (mirrors Step 3):
+
+1. Cloudflare Zero Trust dashboard → Access → Applications → Add an
+   application → Self-hosted.
+2. Configure with **two domain entries** (use the "Add domain" button
+   inside the application config):
+   - `collectcoreapp.com/trade`
+   - `collectcoreapp.com/assets` (admin SPA chunks; required for the
+     trade page to render for unauthenticated viewers)
+   - `api.collectcoreapp.com/trade`
+3. Policies → Add a policy → **Bypass**, **Include: Everyone**.
+4. Save.
+
+**Caveat:** exposing `/assets/*` makes the admin SPA bundle publicly
+downloadable. The bundle contains no secrets and the admin API host
+remains gated, so a curious viewer can read JSX but cannot read your
+data. Documented as an accepted trade-off in
+`plans/photocard-trading-v2.md`.
+
+Verify in an incognito window:
+- `https://collectcoreapp.com/trade/<known-slug>` → loads HTML + JS,
+  shows the trade page (no login prompt).
+- `https://api.collectcoreapp.com/trade/data/<known-slug>` → returns
+  JSON.
+- `https://collectcoreapp.com/admin/trades` → still bounces to Google
+  login (admin management remains gated).
+
+---
+
 ## Rollback
 
 If something breaks and you need to take guest offline immediately:

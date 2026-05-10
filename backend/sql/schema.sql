@@ -98,10 +98,39 @@ CREATE TABLE IF NOT EXISTS tbl_attachments (
     storage_type    TEXT NOT NULL DEFAULT 'local',
     mime_type       TEXT,
     display_order   INTEGER NOT NULL DEFAULT 1,
+    image_version   INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (item_id) REFERENCES tbl_items(item_id)
 );
+
+-- Tracks R2 keys whose attachment row has moved on to a newer version.
+-- The publisher inserts a row here whenever it overwrites a URL with a
+-- versioned successor; a startup sweeper deletes any row past its
+-- scheduled_delete_at and removes the corresponding R2 object.
+CREATE TABLE IF NOT EXISTS tbl_r2_orphans (
+    key                   TEXT PRIMARY KEY,
+    scheduled_delete_at   TEXT NOT NULL
+);
+
+-- Photocard trade pages — server-hosted shareable URLs at /trade/<slug>.
+-- Created by admin (no expiry) or guest (30-day expiry). payload_json bakes
+-- in the card image URLs + captions so the trade renders standalone; viewers
+-- who happen to be logged-in admin or guest get ownership badges layered on
+-- via a separate library lookup at view time.
+CREATE TABLE IF NOT EXISTS tbl_trades (
+    slug              TEXT PRIMARY KEY,
+    created_by        TEXT NOT NULL,
+    from_name         TEXT NOT NULL,
+    to_name           TEXT,
+    notes             TEXT,
+    include_backs     INTEGER NOT NULL DEFAULT 0,
+    payload_json      TEXT NOT NULL,
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tbl_trades_expires
+    ON tbl_trades(expires_at) WHERE expires_at IS NOT NULL;
 
 
 -- ============================================================

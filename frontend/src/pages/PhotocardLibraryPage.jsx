@@ -10,6 +10,7 @@ import PhotocardFilters from "../components/photocard/PhotocardFilters";
 import PhotocardGrid from "../components/photocard/PhotocardGrid";
 import PhotocardDetailModal from "../components/photocard/PhotocardDetailModal";
 import PhotocardBulkEdit from "../components/photocard/PhotocardBulkEdit";
+import TradeCreateModal from "../components/photocard/TradeCreateModal";
 import {
   emptySection,
   sectionActive,
@@ -84,10 +85,11 @@ export default function PhotocardLibraryPage() {
   const [pageSize, setPageSize] = useState(libraryState.pageSize);
   const [mobileCardsPerRow, setMobileCardsPerRow] = useState(libraryState.mobileCardsPerRow);
 
-  // Selection / bulk edit
+  // Selection / bulk edit / trade
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [showTradeCreate, setShowTradeCreate] = useState(false);
 
   // Detail modal
   const [detailCard, setDetailCard] = useState(null);
@@ -620,6 +622,14 @@ export default function PhotocardLibraryPage() {
               {isAdmin ? "Bulk Edit" : "Bulk Update"}
             </button>
           )}
+          {selectedIds.size > 0 && (
+            <button
+              style={styles.controlBtn}
+              onClick={() => setShowTradeCreate(true)}
+            >
+              Generate Trade Page
+            </button>
+          )}
           <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
         </div>
       )}
@@ -722,6 +732,18 @@ export default function PhotocardLibraryPage() {
             onChanged={reloadCards}
           />
         </Suspense>
+      )}
+
+      {/* Trade-page creation — same modal for admin and guest. */}
+      {showTradeCreate && selectedCards.length > 0 && (
+        <TradeCreateModal
+          selectedCards={selectedCards}
+          onClose={() => setShowTradeCreate(false)}
+          onCreated={() => {
+            // Leave the modal open so the user can copy the URL; once they
+            // close it, exit select mode so the toolbar resets cleanly.
+          }}
+        />
       )}
     </div>
   );

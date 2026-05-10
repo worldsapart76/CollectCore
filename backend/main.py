@@ -103,6 +103,20 @@ async def spa_host_routing(request: Request, call_next):
 # ---------- DB init ----------
 init_db()
 
+# ---------- Startup: sweep expired R2 orphan keys ----------
+# Runs in a background thread so a slow R2 call never blocks app boot. Quietly
+# no-ops when R2 env vars or the orphans table aren't present (local dev, fresh DB).
+@app.on_event("startup")
+def _kick_r2_orphan_sweep() -> None:
+    import threading
+    from catalog_publisher import sweep_r2_orphans
+    def _run():
+        try:
+            sweep_r2_orphans()
+        except Exception as exc:
+            logger.warning("R2 orphan sweep failed: %s", exc)
+    threading.Thread(target=_run, daemon=True, name="r2-orphan-sweep").start()
+
 # ---------- Static files ----------
 if IMAGES_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
@@ -123,6 +137,7 @@ from routers import (
     admin,
     admin_lookups,
     catalog,
+    trades,
 )
 
 app.include_router(shared.router)
@@ -139,6 +154,7 @@ app.include_router(export.router)
 app.include_router(admin.router)
 app.include_router(admin_lookups.router)
 app.include_router(catalog.router)
+app.include_router(trades.router)
 
 # ---------- Frontend SPA (must be last) ----------
 admin.register_frontend_static(app)
