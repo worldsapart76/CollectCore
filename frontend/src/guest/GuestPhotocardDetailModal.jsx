@@ -297,7 +297,6 @@ export default function GuestPhotocardDetailModal({
           {currentCard?.source_origin && <Field label="Source" value={currentCard.source_origin} />}
           {currentCard?.version && <Field label="Version" value={currentCard.version} />}
           {currentCard?.is_special && <Field label="Type" value="Special" />}
-          {currentCard?.notes && <Field label="Catalog notes" value={currentCard.notes} />}
         </div>
 
         <hr style={{ width: "100%", border: "none", borderTop: "1px solid var(--border)" }} />
