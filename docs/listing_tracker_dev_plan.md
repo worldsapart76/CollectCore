@@ -17,16 +17,19 @@ begins. They have value independent of the listing tracker.
 - Migrate existing photocard ownership data into the new structure
 - Update photocard CRUD endpoints and UI to use the new sub-table
 
-### 0B: Standardized wanted query
-- Create per-module SQL views (`view_wanted_books`, `view_wanted_graphicnovels`,
-  `view_wanted_photocards`, `view_wanted_videogames`, etc.)
-- Each view returns: `collection_type_id`, `item_id`, `copy_id`, `ownership_status_id`,
-  `target_price`, `display_label`
-- Create master `view_wanted_all` as UNION ALL of all module views
-- Backend utility: `get_wanted_items(collection_type_id=None)` endpoint for
-  the listing tracker and future wanted dashboard
+### 0B: ~~Standardized wanted query~~ — REMOVED 2026-05-15
+Dropped. It existed only to power a wanted-validation gate that has been
+removed (any item is trackable regardless of ownership status — see design
+plan → No ownership gate). No `view_wanted_*` views, no
+`get_wanted_items()` endpoint, no master `view_wanted_all`.
 
-### Milestone: all current modules expose wanted items through a single query interface.
+The only residual need — a per-module **display-label** resolver (photocards:
+group + member(s) + source_origin + version, scoped by `collection_type_id`;
+never `title`) — is built in **Phase 4** where it is consumed, not as a
+prerequisite. It must be strictly additive (must not retrofit
+`/admin/trade-ownership`, `_attach_copies`, or the catalog/seed builders).
+
+### Milestone: Phase 0A (photocard copies) is done; Phase 0 has no remaining blocking work. Phase 1 can begin.
 
 ---
 
@@ -43,13 +46,16 @@ begins. They have value independent of the listing tracker.
   `item_id` (listing lookups), `next_scheduled_check_at` (scheduler)
 
 ### 1B: Listing CRUD endpoints
-- `POST /listings/track` — create a tracked listing (validates item has wanted
-  status via `view_wanted_all`)
+- `POST /listings/track` — create a tracked listing for any `item_id` +
+  `collection_type_id` (+ optional `copy_id`). **No ownership-status
+  validation** (gate removed 2026-05-15) — any item is trackable
 - `GET /listings/` — list all tracked listings with filters (collection_type,
   marketplace, priority, status, is_active)
 - `GET /listings/{id}` — single listing detail with snapshot history
 - `PUT /listings/{id}` — update target price, priority, notes, copy assignment
-- `DELETE /listings/{id}` — remove tracking (soft delete or hard delete TBD)
+- `DELETE /listings/{id}` — **soft delete** (sets `deleted_at`, hides from
+  default view, retains row + snapshots). Resolved 2026-05-15; no hard-purge
+  path. See design plan → Retention & Deletion.
 - `GET /listings/by-item/{item_id}` — all listings for a given item
 
 ### 1C: Price history endpoints
@@ -65,6 +71,16 @@ begins. They have value independent of the listing tracker.
 ## Phase 2: Parser Integration
 
 **Goal:** Port POC parsers into CollectCore, extract listing data from real URLs.
+
+> **Runtime (resolved 2026-05-15):** Playwright + Chromium run on Railway,
+> built via a backend **Dockerfile** (replaces the current Procfile/Nixpacks
+> build). No pre-spike — Railway viability is validated during this phase's
+> real-URL testing. If datacenter-IP blocking or memory limits make Railway
+> unworkable, fall back to the split deployment (scraper worker on the home
+> network posting to Railway) per design plan → Cloud Hosting Decisions. Build
+> the parser layer and refresh API behind a clean interface so that fallback
+> needs no data-model change. Thumbnails upload to R2 (`listings/` prefix),
+> not local disk.
 
 ### 2A: Parser framework
 - Create `backend/parsers/` module structure
@@ -88,11 +104,13 @@ begins. They have value independent of the listing tracker.
 - Status mapping: `on_sale` → active, `trading`/`sold_out` → sold_out
 - Thumbnail: `photos[0].imageUrl`
 
-### 2D: Thumbnail caching
-- On successful parse: download thumbnail to `images/listings/{listing_id}_thumb.{ext}`
-- Store local path in `tbl_tracked_listings.thumbnail_path`
-- Re-download only when source URL changes between snapshots
-- Serve via existing static file serving
+### 2D: Thumbnail caching (R2)
+- On successful parse: download the source thumbnail, upload to R2 at
+  `listings/{listing_id}_thumb.{ext}` via the existing R2 client
+- Store the full R2 URL in `tbl_tracked_listings.thumbnail_path`
+- Re-upload only when the source URL changes between snapshots
+- Served via `images.collectcoreapp.com` (no app static-file serving;
+  Railway local FS is ephemeral). See design plan → Thumbnail Handling.
 
 ### 2E: Parse-on-add
 - When a listing is created via `POST /listings/track`, immediately run the
@@ -145,11 +163,17 @@ begins. They have value independent of the listing tracker.
 **Goal:** Dedicated screen for reviewing and managing all tracked listings.
 
 ### 4A: Main table view
-- Table columns: thumbnail, title, module, marketplace, current price,
-  lowest 30-day price, lowest ever price, target price, estimated total,
-  priority, status, date added, last checked, next scheduled
+- Table columns: thumbnail, title, **open (↗ link to `listing_url`)**, module,
+  marketplace, current price, lowest 30-day price, lowest ever price, target
+  price, estimated total, priority, status, date added, last checked, next
+  scheduled
 - Sortable by any column
-- Row selection for bulk actions (refresh, delete, priority change)
+- **Group-by-card toggle** — collapse listings under their parent item so all
+  of a card's tracked URLs sit together
+- Row selection for bulk actions (refresh, delete, priority change, **"Open
+  all" / "Copy all URLs"** for the selected rows)
+- This screen is the "all my tracked URLs in one place" report; closed/sold
+  listings remain visible (dimmed, filterable) as the historical archive
 
 ### 4B: Filters
 - Filter sidebar (matching existing library pattern): module, marketplace,
@@ -178,10 +202,11 @@ begins. They have value independent of the listing tracker.
 **Goal:** Listings are accessible from the item they belong to, and creation is seamless.
 
 ### 5A: "Add price tracking" button
-- Visible on item detail view when item has ≥1 wanted copy/edition
-  (checked via `view_wanted_all`)
+- Visible on **every** item detail view (no ownership precondition — gate
+  removed 2026-05-15)
 - Opens a small form: URL input + auto-detected marketplace
-- Optional: copy picker dropdown (pre-populated with wanted copies)
+- Optional: copy picker dropdown (all of that item's copies/editions, from
+  the data the detail page already loaded — not a wanted-filtered list)
 - Optional: target price, priority, notes
 - On submit: calls `POST /listings/track` → parse-on-add → redirect to
   listing tracker or show inline confirmation
@@ -191,11 +216,13 @@ begins. They have value independent of the listing tracker.
   (e.g., "3 listings tracked — 1 below target")
 - Link to listing tracker filtered to that item
 
-### 5C: Wanted items without listings
-- On listing tracker screen: optional view showing wanted items that have
-  NO tracked listings yet (discovery aid)
+### 5C: Coverage view (discovery aid)
+- On listing tracker screen: optional view of items that have NO tracked
+  listings yet. Scope defaults to all items; user-filterable by module /
+  ownership status if they want to narrow it (the app does not pre-restrict
+  to "wanted")
 
-### Milestone: users can start tracking from any wanted item and see listing status in context.
+### Milestone: users can start tracking from any item and see listing status in context.
 
 ---
 
@@ -244,36 +271,104 @@ marketplaces were validated.
 
 ---
 
+## Phase 8: Guest-Visible Price Data (photocard-only, via `/pcs/` tier)
+
+**Goal:** Photocard price summaries are optionally visible to authenticated
+guests on the new `/pcs/` tier. Gated OFF by default.
+
+Reference: design plan → Guest-Visible Price Data.
+
+> **Retargeted 2026-05-15.** Original 8C/8D (extend `/catalog/delta` +
+> `seed_builder.py`; add a `guest_catalog_listings` mirror + section into the
+> old `frontend/src/guest/` tier) is **withdrawn** — the `/guest/` WASM tier
+> is being deprecated and that infra is deleted at its sunset
+> (`C:\Users\world\.claude\plans\guest-cloud-accounts.md` P8). No new
+> functionality goes into `/guest/`. Phase 8 now targets the authenticated
+> server-read `/pcs/` tier instead.
+
+**Hard dependency:** the `/pcs/` tier must be built first (guest-cloud-accounts
+plan — currently a draft, not started). Also requires real price data (after
+Phase 3). The admin-side tracker (Phases 1–7) does **not** depend on this and
+is unaffected.
+
+### 8A: Schema
+- `tbl_tracked_listings.deleted_at` only (already added in Phase 1B for
+  soft-delete). **No `catalog_version`** — the delta-cursor mechanism is gone;
+  the `/pcs/` tier reads live server-side.
+
+### 8B: Publish gate
+- Global admin setting `catalog_publish_listings` (default `0`), surfaced
+  wherever the admin manages photocard/guest publishing
+- All-or-nothing; no per-listing/per-card selection
+
+### 8C: `/pcs/`-tier read
+- Add a `/me/*`-namespace read (or extend the `/pcs/` photocard read) that
+  LEFT JOINs the lean listing summary (`source_marketplace`, `listing_url`,
+  `current_price`, `currency`, `lowest_price_ever`, `status`,
+  `last_checked_at`, `thumbnail_path`) from `tbl_tracked_listings` to the
+  photocard via `tbl_items.catalog_item_id`, **photocard-only**, **only when
+  the toggle is on**
+- No raw `listing_snapshots` ever exposed (admin-side only)
+- Strictly additive to the **new** tier: touches no `/guest/` code, no
+  `/catalog/*` endpoint, no `seed_builder.py`
+
+### 8D: `/pcs/` UI (read-only)
+- Read-only listings section on the `/pcs/` photocard detail view; no guest
+  writes ever
+- Optional later: a read-only `/pcs/` tracker page
+
+### Milestone: with the toggle on, `/pcs/` guests see current price / lowest-ever / marketplace URL per photocard; with it off (default) the `/pcs/` read omits it and all tracking stays admin-side. Nothing is added to the deprecated `/guest/` tier.
+
+---
+
 ## Dependency Graph
 
 ```
-Phase 0A (photocard copies) ──┐
-                               ├── Phase 0B (wanted query) ── Phase 1 ── Phase 2 ── Phase 3
-All other module sub-tables ──┘                                  │
+Phase 0A (photocard copies) ✅ DONE ── Phase 1 ── Phase 2 ── Phase 3
+   (Phase 0B removed — no longer a prerequisite)                 │
                                                                  │
-                                                          Phase 4 + Phase 5 (parallel, after Phase 3)
+                                          Phase 4 + Phase 5 (parallel, after Phase 3)
                                                                  │
-                                                              Phase 6
-                                                                 │
-                                                             Phase 7+
+                                                   Phase 6 │ Phase 7+ │ Phase 8
 ```
 
-- Phase 0A and 0B are sequential (wanted query depends on copy sub-tables)
+- **Phase 0 has no open blocking work.** Phase 0A (photocard copies) shipped;
+  Phase 0B (the wanted query) was removed 2026-05-15 with the ownership gate.
+  **Phase 1 (schema & core backend) is the first open work item.**
 - Phases 1 → 2 → 3 are sequential (each builds on the previous)
 - Phases 4 and 5 can be built in parallel after Phase 3
 - Phase 6 can be added at any point after Phase 1 but makes most sense after
   Phase 4 (when the UI exists to display it)
 - Phase 7+ is independent per marketplace, after Phase 3
+- Phase 8 (guest-visible price data) is after Phase 3 **and** depends on the
+  `/pcs/` tier being built (guest-cloud-accounts plan — not started); targets
+  `/pcs/`, never the deprecated `/guest/`; independent of Phases 4–7
 
 ---
 
-## Deployment Notes
+## Deployment Notes (Railway — updated 2026-05-15)
 
-- **Playwright + Chromium** must be available in the runtime environment.
-  On Unraid: include in container build. Local dev: `pip install playwright &&
-  playwright install chromium`.
+- **Playwright + Chromium on Railway:** the backend build moves from
+  Procfile/Nixpacks to a **Dockerfile** so Chromium's system deps are present
+  (Playwright base image, or python base + `playwright install --with-deps
+  chromium`). Local dev: `pip install playwright && playwright install
+  chromium`. No pre-spike — see Phase 2 note and design plan → Cloud Hosting
+  Decisions. Split-deployment fallback is the documented contingency if
+  Railway datacenter IPs are blocked.
+- **Scheduler:** in-process periodic sweep (hourly tick) inside the FastAPI
+  app, driven by `next_scheduled_check_at` in SQLite — no separate worker
+  service, resilient to Railway redeploys/restarts.
 - **brotli** Python package required for Neokyo HTTP decompression.
-- Add `/listings` to `PROXY_PATHS` in `frontend/vite.config.js` (standard
-  new-module checklist item).
-- Thumbnail directory `images/listings/` is automatically included in backup
-  (same parent as `images/library/`).
+- Add `/listings` (and `/fee-profiles`) to `PROXY_PATHS` in
+  `frontend/vite.config.js` (standard new-module checklist item, local Vite
+  dev only).
+- **Thumbnails:** uploaded to Cloudflare R2 under the `listings/` prefix (not
+  local disk — Railway FS is ephemeral). DB tables are auto-captured by the
+  SQLite hot-copy backup; thumbnails are independently durable on R2 and not
+  in the backup ZIP (self-heal on next refresh).
+- **Frontend release** follows the standard flow: `cd frontend && npm run
+  build` → commit `backend/frontend_dist/` → push → Railway auto-deploys
+  (~5-6 min).
+- After deploy, run the standard new-module backup checklist (CLAUDE.md →
+  Backup & Restore): no backup code changes needed since all listing tables
+  ride the SQLite hot-copy automatically.

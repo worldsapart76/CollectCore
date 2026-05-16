@@ -6,6 +6,68 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-05-15 (US CDT) — Listing tracker plan: cloud-hosting resolved + wanted-gate removed
+
+No code. Planning session — the listing tracker's tabled "Open Question:
+Cloud Hosting Impact" (raised 2026-04-21, pre-Railway-cutover) was evaluated
+against current hosting reality and resolved. Updated
+`docs/listing_tracker_design_plan_v3.md`, `docs/listing_tracker_dev_plan.md`,
+and the CLAUDE.md pointer.
+
+**Decisions (user-confirmed):**
+- **Scraper on Railway, no pre-spike.** Playwright + Chromium via a backend
+  Dockerfile (replaces Procfile/Nixpacks). Accepted rework risk; split-to-home
+  scraper is the documented contingency if datacenter IPs get blocked.
+- **In-process weekly scheduler** (hourly tick, DB-driven, restart-resilient) —
+  no separate worker / no Railway cron.
+- **Thumbnails → R2** under `listings/` prefix (old "local dir backed up with
+  images/" model is dead — Railway FS ephemeral). DB tables auto-captured by
+  the SQLite hot-copy backup.
+- **Retention:** closed listings kept forever; manual delete is soft-delete
+  only (resolves the dev-plan "soft vs hard TBD"). New `deleted_at` +
+  `catalog_version` columns on `tbl_tracked_listings`.
+- **Guest-visible price data (NEW requirement):** photocard-only lean listing
+  summaries, gated behind a single global admin toggle
+  (`catalog_publish_listings`, OFF by default). Added as dev-plan **Phase 8**.
+  (Originally designed against catalog snapshot+delta; **retargeted to `/pcs/`
+  later this session** — see guest-deprecation note below.)
+- **Tracker page** confirmed as the "all my URLs in one place" report; added
+  per-row open button, group-by-card, and bulk open/copy-URLs ergonomics.
+
+**Phase 0B audit → wanted-gate removed.** Stringent audit of Phase 0B against
+the real photocard schema found the design plan's books template wrong for
+photocards (`os.id/os.name` vs actual `ownership_status_id/status_code`;
+ownership lives in `tbl_photocard_copies` not `tbl_items`; no `title`; owned-
+precedence inconsistency with `/admin/trade-ownership`). User then decided
+**any item is trackable regardless of ownership status — no validation gate**.
+Consequences applied to both plan docs + CLAUDE.md:
+- Wanted-validation rule struck; Standardized Wanted Query / all
+  `view_wanted_*` views **dropped**; `get_wanted_items()` dropped.
+- **Phase 0B removed entirely** — no longer a prerequisite. Phase 0A is the
+  only Phase 0 work and it's done, so **Phase 1 is the first open item**.
+- `POST /listings/track` takes any item; "Add price tracking" shows on every
+  item detail view; Phase 5C reframed to a general coverage view.
+- Residual photocard rule recorded as a **hard safety constraint**: the
+  tracker must be strictly additive — never retrofit `/admin/trade-ownership`,
+  `_attach_copies`, or the catalog/seed builders. Per-module display-label
+  resolver (photocards: group+member(s)+source_origin+version, never `title`,
+  `collection_type`-scoped) is built in Phase 4 where consumed.
+
+**Guest deprecation → Phase 8 retargeted to `/pcs/`.** User flagged that the
+old `/guest/` WASM tier is being deprecated (replacement = `/pcs/`
+authenticated tier, plan at `C:\Users\world\.claude\plans\guest-cloud-accounts.md`
+— **a complete draft, last updated 2026-05-12, not started**; P8 sunset
+deletes `/catalog/*` + `seed_builder.py`). Original Phase 8 (8C/8D) was built
+on exactly that doomed infra. Rewrote Phase 8 across design plan v3 + dev plan
++ CLAUDE.md: dropped snapshot+delta / seed / `guest_catalog_listings` mirror /
+`tbl_tracked_listings.catalog_version`; Phase 8 is now a plain server-side read
+on the `/pcs/` tier, gated by the same toggle, **dependent on `/pcs/` being
+built first**. No new functionality goes to `/guest/`. Admin-side tracker
+(Phases 1–7) is unaffected.
+
+**Next:** still not built. **Phase 1 (schema & core backend)** is the first
+open work item — no remaining Phase 0 blockers.
+
 ### 2026-05-09 (US CDT) — Photocard trading v2 (Parts 1-4 shipped)
 
 Full trade-page architecture landed. Plan at

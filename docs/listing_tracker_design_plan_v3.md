@@ -17,10 +17,12 @@ provides price history for purchase decision-making.
   automatically when adding from a copy row; NULL when adding from item header
   (assignable later)
 
-### Wanted validation
-A listing can only be created for an item that has at least one copy/edition
-in "wanted" ownership status. Validated via a standardized wanted query
-(see Standardized Wanted Query section below).
+### No ownership gate (decided 2026-05-15)
+A listing can be created for **any** item regardless of ownership status —
+owned, wanted, catalog, or anything else. The user curates what to track
+manually; the app imposes no "must be wanted" precondition. (Supersedes the
+earlier wanted-validation rule and the Standardized Wanted Query that backed
+it — see below.)
 
 ### Entry point
 "Add price tracking" button on the item detail view. All tracked listings
@@ -32,48 +34,39 @@ or create copies. That remains a manual step.
 
 ---
 
-## Standardized Wanted Query
+## Item/Copy Resolution (replaces the former Standardized Wanted Query)
 
-Per-module SQL views emitting a common shape, plus a UNION'd master view:
+The "Standardized Wanted Query" (per-module `view_wanted_*` + master
+`view_wanted_all`) was designed solely to power the wanted-validation gate.
+With the gate removed (see No ownership gate), it is **dropped** — no
+`view_wanted_*` views are built, and the former development Phase 0B is no
+longer a blocking prerequisite.
 
-```sql
--- Per-module view (example: books)
-CREATE VIEW view_wanted_books AS
-SELECT
-    i.collection_type_id,
-    i.id AS item_id,
-    bc.id AS copy_id,
-    bc.ownership_status_id,
-    NULL AS target_price,
-    i.title || ' — ' || COALESCE(bc.format, '') AS display_label
-FROM tbl_items i
-JOIN tbl_book_copies bc ON bc.item_id = i.id
-JOIN lkup_ownership_statuses os ON os.id = bc.ownership_status_id
-WHERE os.name = 'Wanted';
+What the tracker actually needs instead:
 
--- Master view
-CREATE VIEW view_wanted_all AS
-    SELECT * FROM view_wanted_books
-    UNION ALL
-    SELECT * FROM view_wanted_graphicnovels
-    UNION ALL
-    SELECT * FROM view_wanted_videogames
-    -- ... one per module
-;
-```
+1. **Attach flow — in-context, no cross-module query.** "Add price tracking"
+   launches from a specific item's detail page, where that module's own item
+   and copy data is already loaded by the existing module endpoint. The
+   tracker records `item_id` + `collection_type_id` (+ optional `copy_id`)
+   straight from that context. No `WHERE … wanted` filter, no shared query.
+2. **Display label — per-module resolver, consumed in Phase 4.** The tracker
+   screen and reporting need a human-readable label per tracked item. This is
+   a small per-module label function, NOT a wanted filter, and is built where
+   it is used (Phase 4 UI), not as a Phase 0 prerequisite. **Photocards have
+   no `title`:** the label must be composed from group + member(s) +
+   source_origin + version (see `tbl_photocard_details` /
+   `xref_photocard_members`), and any cross-module join keyed on `item_id`
+   must scope `collection_type_id` (item ids are global across all 8 modules).
+3. **Reporting** — "items with vs. without tracked listings" is derived by
+   joining `tbl_tracked_listings` back to `tbl_items` + the per-module label;
+   it does not need an ownership concept.
 
-Columns:
-- `collection_type_id`
-- `item_id`
-- `copy_id` (NULL for modules without a copy sub-table, e.g., Graphic Novels)
-- `ownership_status_id`
-- `target_price` (NULL if not set)
-- `display_label` (module-specific human-readable label)
-
-Used by the listing tracker for:
-1. **Validation gate** — can I add a listing for this item?
-2. **Copy picker** — dropdown of wanted copies when adding from item header
-3. **Reporting** — matched vs. orphaned listings, total wanted count
+### Hard safety rule (audit 2026-05-15)
+The label resolver and any tracker query are **strictly additive**. They must
+NOT refactor existing photocard/trade/catalog paths
+(`/admin/trade-ownership`, `_attach_copies`, the catalog/seed builders) to
+route through shared tracker code. Those paths are correct today; the only way
+the listing tracker can break the trade page is by retrofitting them, so don't.
 
 ---
 
@@ -143,7 +136,7 @@ a standard `(price: float, currency: str)` tuple. Examples:
 | listing_url | TEXT NOT NULL | |
 | date_added | TEXT NOT NULL | ISO 8601 |
 | title | TEXT | Extracted listing title |
-| thumbnail_path | TEXT | Local cached path (not hotlinked) |
+| thumbnail_path | TEXT | Full R2 URL (`https://images.collectcoreapp.com/listings/...`), not hotlinked |
 | first_seen_price | REAL | Price at time of first successful parse |
 | current_price | REAL | Most recent parsed price |
 | lowest_price_ever | REAL | Running minimum — updated on each refresh |
@@ -160,6 +153,7 @@ a standard `(price: float, currency: str)` tuple. Examples:
 | refresh_lock_until | TEXT | ISO 8601 — cooldown |
 | next_scheduled_check_at | TEXT | ISO 8601 |
 | is_active_tracking | INTEGER | 1 = active, 0 = paused |
+| deleted_at | TEXT | ISO 8601 — soft-delete tombstone; NULL = live (see Retention & Deletion) |
 
 ### listing_snapshots
 | Column | Type | Notes |
@@ -233,6 +227,22 @@ WHERE id = :listing_id;
 
 ---
 
+## Retention & Deletion (resolved 2026-05-15)
+
+History is kept indefinitely for future price reference — closed listings are
+**never auto-purged**.
+
+- **Listing closes** (`sold_out` / `removed`): Phase 3D sets
+  `is_active_tracking = 0`. The row and all its `listing_snapshots` are
+  retained. It still appears in the tracker (filterable / dimmed) as a
+  historical price record.
+- **Manual delete** (`DELETE /listings/{id}`): **soft delete only.** Sets
+  `deleted_at` and hides the row from the default active view; the row and its
+  snapshots are preserved. (Resolves the "soft vs. hard delete TBD" left open
+  in the dev plan.) A hard-purge path is intentionally not built.
+- **Snapshots** are append-only and never trimmed. At weekly cadence the
+  volume is trivial (~52 rows/listing/year).
+
 ## Scheduling Logic
 
 - **On add:** `next_scheduled_check_at = date_added + 7 days`
@@ -292,13 +302,19 @@ estimated_total_cost =
 
 ## Thumbnail Handling
 
-Thumbnails are cached locally, not hotlinked. Stored in `images/listings/`
-directory alongside the library images.
+Thumbnails are copied to our own storage, not hotlinked (marketplace CDN URLs
+rot once a listing closes). **Stored on Cloudflare R2** under the `listings/`
+prefix, served via `images.collectcoreapp.com` — same R2 client and custom
+domain used for `catalog/` and `admin/` images.
 
-- On first successful parse: download thumbnail, store at
-  `images/listings/{listing_id}_thumb.{ext}`
-- On subsequent refreshes: re-download only if source URL changed
-- Backed up automatically with the rest of `images/`
+- On first successful parse: download the source thumbnail, upload to R2 at
+  `listings/{listing_id}_thumb.{ext}`. Store the full R2 URL in
+  `tbl_tracked_listings.thumbnail_path`.
+- On subsequent refreshes: re-upload only if the source URL changed between
+  snapshots.
+- **Not** in the backup ZIP (Railway local FS is ephemeral; the old
+  "backed up with `images/`" model no longer applies). R2 is independently
+  durable; a lost thumbnail self-heals on the next successful refresh.
 
 ---
 
@@ -326,6 +342,8 @@ Accessible as a top-level tab. Shows all tracked listings across modules.
 Columns:
 - Thumbnail
 - Title
+- Open (↗ button — opens `listing_url` in a new tab directly from the row, no
+  need to enter the detail modal)
 - Module (collection type)
 - Marketplace
 - Current price
@@ -339,7 +357,21 @@ Columns:
 - Last checked
 - Next scheduled
 
-Filterable by: module, marketplace, priority, status, target hit (yes/no).
+Filterable by: module, marketplace, priority, status, target hit (yes/no),
+active/closed.
+
+**URL access ergonomics** (this screen *is* the "all my tracked URLs in one
+place" report):
+- Per-row ↗ open button (above) for one-click access to any listing.
+- **Group-by-card toggle** — collapse rows under their parent item so every
+  listing URL for a card sits together (a card may have several marketplace
+  listings tracked at once).
+- **Bulk actions on selected rows:** "Open all" (opens each `listing_url` in a
+  new tab) and "Copy all URLs" (newline-joined to clipboard).
+- Closed/sold listings remain listed (filterable, dimmed) — the page doubles
+  as the historical price-reference archive, never auto-pruned.
+- Optional CSV export of the current filtered view (URLs + price columns) as a
+  later enhancement; the page itself satisfies the "pull a report" need.
 
 ---
 
@@ -352,30 +384,114 @@ Filterable by: module, marketplace, priority, status, target hit (yes/no).
 
 ---
 
-## Open Question: Cloud Hosting Impact (added 2026-04-21)
+## Cloud Hosting Decisions (resolved 2026-05-15)
 
-CollectCore's hosting is now Railway + Cloudflare R2 (ARCHITECTURE.md Decision A,
-resolved 2026-04-21). The listing tracker was designed with a local/Unraid
-deployment in mind; re-evaluate the following before implementation begins:
+Supersedes the prior "Open Question: Cloud Hosting Impact" (raised 2026-04-21,
+when the listing tracker was designed against a local/Unraid deployment).
+CollectCore is now Railway + Cloudflare R2 (ARCHITECTURE.md Decision A).
+Decisions:
 
-- **Playwright + Chromium on Railway:** feasible via a custom Docker image, but
-  verify Railway's ephemeral filesystem and memory/CPU constraints against scraper
-  workloads (especially Mercari's ~17s/URL Playwright path).
-- **Marketplace IP reputation:** Mercari / Neokyo scraping from Railway IPs may
-  face rate limiting or blocks compared to home IP. Test early against a small URL
-  set before committing to Railway for the scheduler.
-- **Scheduler architecture:** Railway requires a separate worker service for
-  background jobs. Decide between a Railway cron trigger, a long-running worker
-  service, or keeping the scheduler on the home network and hitting the Railway
-  API.
-- **Scraped thumbnails:** listing thumbnails are transient — decide whether they
-  go to R2, Railway's ephemeral disk, or stay as external CDN URLs (with the risk
-  of link rot).
-- **Fallback consideration:** if Railway IPs are blocked by target marketplaces,
-  the listing tracker may need to run on Unraid while the rest of CollectCore stays
-  on Railway. Plan for this split-deployment possibility.
+- **Playwright + Chromium on Railway — DECIDED: run on Railway, no pre-spike.**
+  Built into a Railway **Dockerfile** (Playwright base image, or python base +
+  `playwright install --with-deps chromium`). The current Procfile/Nixpacks
+  build switches to a Dockerfile for the backend so Chromium's system deps are
+  reliably present. **Accepted risk:** if datacenter IPs or memory limits prove
+  unworkable in production, fall back to the split deployment below — this is
+  the main rework exposure of the no-spike decision and is accepted knowingly.
+- **Memory containment:** weekly batch only; reuse a single Playwright browser
+  context across the Mercari batch (see Batch Safety). Chromium is ~200-400MB
+  resident while a batch runs and idle otherwise — acceptable for the Railway
+  Hobby plan at weekly cadence.
+- **Scheduler architecture — DECIDED: in-process periodic sweep.** No separate
+  worker service and no Railway cron. A periodic in-process task (hourly tick)
+  queries listings where `next_scheduled_check_at <= now`. Schedule state lives
+  in SQLite (`next_scheduled_check_at`), so the sweep is **resilient to Railway
+  redeploys/restarts** — a restart just resumes from DB state on the next tick.
+- **Marketplace IP reputation — accepted risk.** The POC succeeded from a
+  residential IP; Railway runs on datacenter (GCP) IPs, which carry a higher
+  block risk for Mercari behind Cloudflare. No pre-spike (per the no-spike
+  decision). If production scraping is blocked, invoke the split-deployment
+  fallback.
+- **Scraped thumbnails — DECIDED: R2.** Stored on Cloudflare R2 under a
+  `listings/` prefix (consistent with the `catalog/` and `admin/` image
+  prefixes), served via `images.collectcoreapp.com`. Railway's local FS is
+  ephemeral, so the design plan's original "local dir, backed up with
+  `images/`" approach no longer holds — see Thumbnail Handling.
+- **Backup:** `tbl_tracked_listings`, `listing_snapshots`, and
+  `marketplace_fee_profiles` are captured automatically by the existing SQLite
+  hot-copy backup (new tables need no backup changes — per CLAUDE.md Backup &
+  Restore). Thumbnails are durable independently on R2 and are intentionally
+  **not** in the backup ZIP (regenerable on next refresh if ever lost).
+- **Split-deployment fallback (contingency, not initial build):** if Railway
+  IPs are blocked, move only the scraper to a worker on the home network /
+  Unraid (the environment the POC already validated from a residential IP),
+  posting parsed results to Railway via an authenticated internal API. The rest
+  of CollectCore stays on Railway. Documented here so the data model and
+  refresh API are designed to allow it; not built unless triggered.
 
 ---
+
+## Guest-Visible Price Data (photocard-only, resolved 2026-05-15; retargeted 2026-05-15)
+
+Photocard price data can optionally be exposed to the guest tier. Gated OFF
+by default — flip it on once there's enough listing data to be worth sharing.
+
+> **Retargeted to the `/pcs/` tier.** The old WASM-SQLite `/guest/` tier is
+> being deprecated (`C:\Users\world\.claude\plans\guest-cloud-accounts.md`,
+> P8 sunset deletes `/catalog/*`, `seed_builder.py`, and the seed-regen
+> path). **No new functionality is added to `/guest/`.** The earlier
+> snapshot+delta / seed / `guest_catalog_listings`-mirror design here is
+> withdrawn — it would have been built on infrastructure slated for deletion.
+> This whole feature now targets the authenticated server-read `/pcs/` tier
+> instead, and is therefore **dependent on the `/pcs/` tier being built
+> first.**
+
+### Scope
+- **Photocard-only**, matching both the catalog and the `/pcs/` tier
+  (photocard-only by charter). Book/game/etc. listings are admin-only and
+  never exposed to guests. Keyed by `tbl_items.collection_type_id = photocards`.
+- Closed listings are kept forever (see Retention & Deletion); a closed
+  listing simply shows `status = sold_out/removed`. Read-only for guests —
+  no guest writes, ever.
+
+### What guests get — a lean per-card summary, not raw history
+A **summary per tracked listing**: `source_marketplace`, `listing_url`,
+`current_price`, `currency`, `lowest_price_ever`, `status`, `last_checked_at`,
+`thumbnail_path`. Full `listing_snapshots` history stays admin-side only.
+
+### Mechanism — plain server-side read on the `/pcs/` tier
+No snapshot+delta, no seed extension, no mirror table, no
+`catalog_version` on listings. The `/pcs/` tier already reads `tbl_items` +
+`tbl_photocard_details` server-side and joins the caller's annotations by
+`catalog_item_id` (per the guest-cloud-accounts plan, which explicitly does
+*not* use the delta machinery). Guest-visible price data is just one more
+read in that same path:
+
+- A `/pcs/`-tier read endpoint (or an extension of its existing photocard
+  read) LEFT JOINs the lean listing summary from `tbl_tracked_listings` to
+  the photocard via `tbl_items.catalog_item_id`, **only when the global
+  publish toggle is on**.
+- Strictly additive to the **new** tier. Touches no `/guest/` code, no
+  `/catalog/*` endpoint, no `seed_builder.py` — all of which are being
+  retired.
+
+### Publish gate — single global toggle, OFF by default
+- One admin setting (e.g., `catalog_publish_listings`, default `0`),
+  surfaced wherever the admin manages photocard/guest publishing.
+- OFF (default): the `/pcs/` read omits all listing data. Tracking still
+  works fully admin-side; nothing reaches guests.
+- ON: every photocard tracked-listing summary is exposed via the `/pcs/`
+  read (all-or-nothing — no per-listing/per-card selection). Because it's a
+  live server read, turning the toggle off immediately stops exposure (no
+  already-synced copies to worry about — there is no guest-side mirror).
+
+### Dependencies
+1. The `/pcs/` tier must exist (guest-cloud-accounts plan, currently a draft
+   — not yet built).
+2. Real listing/price data must exist — i.e. after the refresh engine
+   (dev-plan Phase 3).
+Tracked as dev-plan **Phase 8**. The admin-side tracker (Phases 1–7) has no
+dependency on the guest tier and is unaffected.
 
 ## POC Validation (2026-04-16)
 
