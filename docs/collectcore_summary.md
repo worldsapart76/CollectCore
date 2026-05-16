@@ -191,6 +191,44 @@ All three collection modules are fully implemented.
 ### Books
 - GET /books
 - POST /books
+
+---
+
+## Key Schema Decisions
+
+> Moved here from `CLAUDE.md` 2026-05-15. These are settled decisions; the
+> bug-preventing subset (LEFT JOIN nullable `source_origin_id`; `subcategory`
+> stays removed; no tags on new modules) is digested in CLAUDE.md → Hard Rules.
+
+- `subcategory` has been removed — **do not reintroduce it**
+- `source_origin` and `version` are distinct concepts:
+  - source_origin = release/event origin (e.g., `5-STAR`)
+  - version = specific variation (e.g., `Soundwave POB`)
+- `source_origin_id` is explicitly nullable — **all queries must use LEFT JOIN**
+- `member` is no longer a scalar field — stored in `xref_photocard_members`
+- Categories and ownership resolve through shared lookup tables
+- Source origins are scoped by `group_id` + `top_level_category_id`
+- `format` field: module-specific (not on `tbl_items`). Each module handles
+  format via its own copy/edition sub-table or field.
+- Tags: book-specific tags implemented (`lkup_book_tags`). Cross-collection
+  tag architecture remains deferred — **do not add tags to new modules
+  without explicit decision.**
+
+---
+
+## Known Shortcuts (Intentional Simplifications)
+
+> Moved here from `CLAUDE.md` 2026-05-15. **Do not "fix" these unless
+> explicitly instructed** — they are deliberate, not oversights.
+
+- Direct image upload to R2 not implemented; admin tools sweep local-staged
+  images to R2 in batches (`tools/publish_catalog.py`, `tools/sync_admin_images.py`)
+- Option tables derived from card data, not authoritative lookups
+- No virtualization or performance layer (lazy-load on `<img>` is the only
+  perf concession; library "All" view of 10K+ cards still renders eagerly otherwise)
+- Inline styling in many places (no full design system; CSS variables + Inter font
+  + green palette is the baseline)
+- Export logic is still photocard-specific
 - GET /books/{id}
 - PUT /books/{id}
 - DELETE /books/{id}
