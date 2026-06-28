@@ -242,16 +242,26 @@ export default function PhotocardLibraryPage() {
     });
   }, [cards]);
 
-  // Version list for filter sidebar — sorted alphabetically
+  // Version list for filter sidebar — sorted alphabetically. Scoped to the
+  // selected source origin(s): versions are free-text per card and, post-canon,
+  // live under a specific source origin, so only surface versions that appear in
+  // the currently-selected origins (one-way, origin → version). No source
+  // origin selected → all versions.
   const filterVersions = useMemo(() => {
+    const originFilterActive = sectionActive(filters.sourceOrigin);
     const seen = new Map();
     for (const card of cards) {
-      if (card.version && !seen.has(card.version)) {
-        seen.set(card.version, { id: card.version, label: card.version });
+      if (!card.version || seen.has(card.version)) continue;
+      if (
+        originFilterActive &&
+        !applySection(filters.sourceOrigin, [String(card.source_origin_id)])
+      ) {
+        continue;
       }
+      seen.set(card.version, { id: card.version, label: card.version });
     }
     return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [cards]);
+  }, [cards, filters.sourceOrigin]);
 
   // Source origins for filter sidebar — derive from cards
   const filterSourceOrigins = useMemo(() => {
