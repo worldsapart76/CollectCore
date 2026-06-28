@@ -1769,3 +1769,39 @@ INSERT OR IGNORE INTO lkup_ttrpg_format_types (format_name, sort_order) VALUES (
 -- the user had explicitly deleted). The Python seed only runs on a
 -- truly fresh DB and also cleans up orphan collection_type_id rows.
 -- ============================================================
+
+-- ============================================================
+-- AUTHENTICATED GUEST TIER (`/pcs/`)
+-- Server-stored per-user photocard annotations over the shared catalog,
+-- replacing the deprecated browser-local `/guest/` WASM tier. Keyed by the
+-- stable catalog_item_id contract ({group_code}_{id:06d}) so rows survive a
+-- catalog rebuild. No FK on catalog_item_id (its parent unique index is
+-- partial, which SQLite won't accept as an FK target — validated in the API
+-- layer instead). See docs/guest_cloud_accounts_plan.md.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS pcs_users (
+    user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    email        TEXT NOT NULL UNIQUE,          -- verified Cloudflare Access identity
+    display_name TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pcs_card_copies (
+    copy_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    catalog_item_id     TEXT NOT NULL,
+    ownership_status_id INTEGER NOT NULL,
+    notes               TEXT,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES pcs_users(user_id),
+    FOREIGN KEY (ownership_status_id) REFERENCES lkup_ownership_statuses(ownership_status_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user
+    ON pcs_card_copies(user_id);
+CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user_card
+    ON pcs_card_copies(user_id, catalog_item_id);

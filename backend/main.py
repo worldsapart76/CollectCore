@@ -100,6 +100,41 @@ async def spa_host_routing(request: Request, call_next):
         return FileResponse(str(index_html))
     return await call_next(request)
 
+# ---------- Admin authorization gate (env-gated) ----------
+# CollectCore historically had zero authorization: Cloudflare Access allowed
+# only the admin email through the edge, so every endpoint could trust its
+# caller. The `/pcs/` tier opens the edge to non-admin Google accounts, so
+# non-public, non-/pcs paths must be restricted to admins in the app.
+#
+# Fail-closed default-deny: anything not on a public/bypass prefix and not
+# under /pcs/ requires an admin identity. Registered AFTER spa_host_routing so
+# it runs OUTERMOST (before the SPA fallback), blocking a non-admin from even
+# loading the admin SPA at "/".
+#
+# Disabled by default. Enabled (PCS_ADMIN_GATE=1) in Phase 3 together with the
+# Cloudflare Access guest policy + ADMIN_EMAILS, so current prod — where only
+# the admin reaches the edge — is unaffected until guest access is opened.
+# See docs/guest_cloud_accounts_plan.md §3.1.
+_GATE_PUBLIC_PREFIXES = ("/catalog", "/guest", "/trade", "/images", "/pcs", "/assets", "/health")
+_GATE_PUBLIC_EXACT = ("/vite.svg", "/favicon.ico")
+
+def _gate_is_exempt(path: str) -> bool:
+    if path in _GATE_PUBLIC_EXACT:
+        return True
+    return any(path == p or path.startswith(p + "/") for p in _GATE_PUBLIC_PREFIXES)
+
+@app.middleware("http")
+async def admin_authorization_gate(request: Request, call_next):
+    if os.environ.get("PCS_ADMIN_GATE") != "1":
+        return await call_next(request)
+    if _gate_is_exempt(request.url.path):
+        return await call_next(request)
+    from auth import get_identity, is_admin
+    if not is_admin(get_identity(request)):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=403, content={"detail": "Admin access required"})
+    return await call_next(request)
+
 # ---------- DB init ----------
 init_db()
 
@@ -138,6 +173,7 @@ from routers import (
     admin_lookups,
     catalog,
     trades,
+    pcs,
 )
 
 app.include_router(shared.router)
@@ -155,6 +191,7 @@ app.include_router(admin.router)
 app.include_router(admin_lookups.router)
 app.include_router(catalog.router)
 app.include_router(trades.router)
+app.include_router(pcs.router)
 
 # ---------- Frontend SPA (must be last) ----------
 admin.register_frontend_static(app)
