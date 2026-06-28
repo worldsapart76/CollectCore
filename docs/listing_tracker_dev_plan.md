@@ -282,7 +282,7 @@ Reference: design plan → Guest-Visible Price Data.
 > `seed_builder.py`; add a `guest_catalog_listings` mirror + section into the
 > old `frontend/src/guest/` tier) is **withdrawn** — the `/guest/` WASM tier
 > is being deprecated and that infra is deleted at its sunset
-> (`C:\Users\world\.claude\plans\guest-cloud-accounts.md` P8). No new
+> (`docs/guest_cloud_accounts_plan.md` P8). No new
 > functionality goes into `/guest/`. Phase 8 now targets the authenticated
 > server-read `/pcs/` tier instead.
 

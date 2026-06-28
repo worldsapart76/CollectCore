@@ -57,7 +57,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |
 | `docs/guest_deploy_runbook.md` | Deploy-time checklist for `/guest/` (CF bypass, smoke test, rollback) |
 | `docs/listing_tracker_design_plan_v3.md` / `_dev_plan.md` | **Authoritative** listing-tracker design + phased plan (not built) |
-| `C:\Users\world\.claude\plans\guest-cloud-accounts.md` | **Authoritative** `/pcs/` tier replacing `/guest/` WASM (not built) |
+| `docs/guest_cloud_accounts_plan.md` | **Authoritative** `/pcs/` tier replacing `/guest/` WASM (not built) |
 | `docs/release-guide.md`, `plans\pure-inventing-whisper.md`, `plans\fancy-stirring-hollerith.md` | Historical/superseded — consult only for back-history |
 
 ## Deployment & Access
@@ -101,7 +101,7 @@ Plan docs are authoritative — read before starting; don't duplicate decisions 
   + `_dev_plan.md`. Phase 0A done; **Phase 1 (schema & core backend) is the first
   open item**; depends on `/pcs/` first.
 - **Guest access overhaul** — `/pcs/` authenticated tier replacing `/guest/` WASM
-  (photocard-only). `C:\Users\world\.claude\plans\guest-cloud-accounts.md`.
+  (photocard-only). `docs/guest_cloud_accounts_plan.md`.
 
 ## Session Notes
 

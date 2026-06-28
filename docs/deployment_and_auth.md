@@ -62,7 +62,7 @@ originally had a local-mobile guest). Full reasoning: `docs/session_notes.md`
   `frontend/src/guest/`, reuses admin's `PhotocardLibraryPage` with
   data-source branching and `isAdmin`-gated controls (Path A).
   **This `/guest/` WASM tier is deprecated** — being replaced by the
-  authenticated `/pcs/` tier (`C:\Users\world\.claude\plans\guest-cloud-accounts.md`);
+  authenticated `/pcs/` tier (`docs/guest_cloud_accounts_plan.md`);
   no new functionality goes to `/guest/`.
 
 **Capacitor mobile is INDEFINITELY DEFERRED.** The `mobile-shell` branch holds

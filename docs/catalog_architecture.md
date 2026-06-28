@@ -92,5 +92,5 @@ or the device is lost.
 The `/guest/` WASM-SQLite tier described above is **deprecated**. It remains
 deployed but no new functionality goes there — it is being replaced by the
 authenticated `/pcs/` tier (server-stored data, Google IdP; see
-`C:\Users\world\.claude\plans\guest-cloud-accounts.md`). This document
+`docs/guest_cloud_accounts_plan.md`). This document
 describes the existing tier's mechanics for maintenance/reference only.

@@ -55,7 +55,7 @@ Consequences applied to both plan docs + CLAUDE.md:
 
 **Guest deprecation → Phase 8 retargeted to `/pcs/`.** User flagged that the
 old `/guest/` WASM tier is being deprecated (replacement = `/pcs/`
-authenticated tier, plan at `C:\Users\world\.claude\plans\guest-cloud-accounts.md`
+authenticated tier, plan at `docs/guest_cloud_accounts_plan.md`
 — **a complete draft, last updated 2026-05-12, not started**; P8 sunset
 deletes `/catalog/*` + `seed_builder.py`). Original Phase 8 (8C/8D) was built
 on exactly that doomed infra. Rewrote Phase 8 across design plan v3 + dev plan

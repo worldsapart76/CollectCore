@@ -437,7 +437,7 @@ Photocard price data can optionally be exposed to the guest tier. Gated OFF
 by default — flip it on once there's enough listing data to be worth sharing.
 
 > **Retargeted to the `/pcs/` tier.** The old WASM-SQLite `/guest/` tier is
-> being deprecated (`C:\Users\world\.claude\plans\guest-cloud-accounts.md`,
+> being deprecated (`docs/guest_cloud_accounts_plan.md`,
 > P8 sunset deletes `/catalog/*`, `seed_builder.py`, and the seed-regen
 > path). **No new functionality is added to `/guest/`.** The earlier
 > snapshot+delta / seed / `guest_catalog_listings`-mirror design here is
