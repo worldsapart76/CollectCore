@@ -6,6 +6,56 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-06-28 (US CDT) — Guest `/pcs/` plan reconstructed + version filter shipped; listing-tracker parked
+
+Two things shipped to **main** (deployed via Railway), one branch parked.
+
+**Shipped — guest cloud accounts (`/pcs/`) plan reconstructed (commit `f134236`).**
+The authoritative `/pcs/` plan referenced across the docs lived only at
+`C:\Users\world\.claude\plans\guest-cloud-accounts.md`, which **no longer exists**
+and was unrecoverable (checked transcripts, backups, Dropbox, Drive — all gone;
+the whole `.claude\plans\` dir was wiped). Rebuilt it **in-repo** (durable,
+version-controlled) at `docs/guest_cloud_accounts_plan.md` from surviving
+references + this session's decisions, and repointed every dead `.claude\plans\`
+reference (CLAUDE.md, deployment_and_auth.md, catalog_architecture.md, both
+listing_tracker docs, this file). Key design (user-confirmed): reuse admin
+photocard library via a server-data adapter (no Tailwind in CollectCore); CF
+Access + Google with an **email allowlist**; mirror the multi-copy tracking
+model (guest-added own cards → v2); photocard-only. The cloud tier is *simpler*
+than the WASM `/guest/` it replaces — moving annotations server-side deletes the
+WASM/OPFS/snapshot-delta/backup machinery. Notable: introduces the **first
+app-layer authorization code** (admin-email gate; CF JWT verification
+recommended as hardening over the plaintext email header).
+
+**Shipped — photocard Version filter scoped to source origin (commit `51ee5cc`).**
+Backlog item (was in `project_future_enhancements.md`). `filterVersions` in
+[PhotocardLibraryPage.jsx](frontend/src/pages/PhotocardLibraryPage.jsx) now draws
+only from cards passing the active source-origin filter (one-way, origin →
+version), reusing `applySection`; no origin selected → all versions. Frontend
+only, rebuilt `frontend_dist`. Benefits the future `/pcs/` UI for free (reuses
+the same page).
+
+**Parked — `listing-tracker` branch (local only, NOT pushed; decision pending).**
+Holds 3 unpushed commits = Listing Tracker **Phases 1–3** (~2,100 lines, backend-
+heavy): schema (`tbl_tracked_listings`, `listing_snapshots`,
+`marketplace_fee_profiles`), CRUD/price-history endpoints, parsers
+(`backend/parsers/` — Neokyo HTTP + Mercari Playwright), thumbnail→R2, refresh
+engine (`listing_refresh.py`, `listing_scheduler.py`), and a **backend
+Dockerfile** switching Railway's build to a Playwright/Chromium image. **State:**
+code-complete but **never validated against real URLs or Railway** (no local
+scraping stack — deferred to first deploy by design); **Phases 4 (UI) + 5
+(item-detail integration) not built**, so unusable from the app; the Dockerfile
+build-system change is the risky bit. Kept off main on purpose — pushing/merging
+would put unproven scraping + a build change into prod. Its own build-session
+history (2026-05-15→17) lives in this file *on that branch*. Branch is now behind
+main by the 2 commits above → needs `git rebase main` when resumed (today's doc
+edits were made to merge cleanly).
+
+**Next:** Guest tier **Phase 1 (backend)** when ready — branch `pcs-tier` off
+main: `pcs_users` / `pcs_card_copies` schema, CF-identity dependency, `/pcs/*`
+endpoints, admin-authorization gate. Listing-tracker disposition is the user's
+open decision.
+
 ### 2026-05-15 (US CDT) — Listing tracker plan: cloud-hosting resolved + wanted-gate removed
 
 No code. Planning session — the listing tracker's tabled "Open Question:
