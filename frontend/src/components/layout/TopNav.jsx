@@ -3,14 +3,18 @@ import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { MODULE_DEFS, getActiveModuleId } from "../../modules";
 import { fetchSettings } from "../../api";
 import { API_BASE } from "../../utils/imageUrl";
-import { isAdmin } from "../../utils/env";
+import { isAdmin, isPcs } from "../../utils/env";
 import { usePageActionsList } from "../../contexts/PageActionsContext";
 
-// Phase 7d: guest-mode hamburger menu items. Lazy + env-gated so admin
-// builds eliminate the chunk + the sqliteService graph it pulls in.
+// Non-admin hamburger menu items. Lazy + env-gated so admin builds eliminate
+// the chunk. The /pcs/ build shows the account/sign-out affordance; the legacy
+// WASM /guest/ build shows backup/restore/refresh. Variable name kept as
+// GuestMenuItems to avoid churn at the render site.
 const GuestMenuItems = import.meta.env.VITE_IS_ADMIN === "true"
   ? null
-  : lazy(() => import("../../guest/GuestMenuItems"));
+  : (import.meta.env.VITE_IS_PCS === "true"
+      ? lazy(() => import("../../pcs/PcsMenuItems"))
+      : lazy(() => import("../../guest/GuestMenuItems")));
 
 function navClass({ isActive }) {
   return isActive ? "topnav-link active" : "topnav-link";
@@ -336,9 +340,13 @@ export default function TopNav({ theme, toggleTheme }) {
             Restore) for guest. Label tracks the audience: "Admin" for the
             full settings surface, "Backup" for the guest's single-purpose
             page. Exit (legacy desktop-installer shutdown) stays admin-only. */}
-        <NavLink to="/admin" className={navClass}>
-          {isAdmin ? "Admin" : "Backup"}
-        </NavLink>
+        {/* /pcs has no admin or backup destination — account/sign-out live in
+            the hamburger menu instead. */}
+        {!isPcs && (
+          <NavLink to="/admin" className={navClass}>
+            {isAdmin ? "Admin" : "Backup"}
+          </NavLink>
+        )}
         <button
           type="button"
           className="theme-toggle-btn"

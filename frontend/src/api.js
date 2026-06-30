@@ -22,9 +22,19 @@ async function handleJsonResponse(res, fallbackMessage) {
 //
 // Cached as a Promise so we only do the dynamic import once. Admin bundles
 // see `_guestData = null` and never load anything.
-const _guestData = import.meta.env.VITE_IS_ADMIN === "true"
+const _guestData = (import.meta.env.VITE_IS_ADMIN === "true"
+  || import.meta.env.VITE_IS_PCS === "true")
   ? null
   : import("./guest/guestData");
+
+// Authenticated /pcs/ tier adapter. When VITE_IS_PCS === "true", photocard
+// reads delegate to server-side /pcs/* endpoints (per-user annotations stored
+// in the cloud). Same constant-folding as _guestData so admin + guest bundles
+// eliminate this dynamic import. _pcsData takes precedence over _guestData;
+// only one is ever non-null per build.
+const _pcsData = import.meta.env.VITE_IS_PCS === "true"
+  ? import("./pcs/pcsData")
+  : null;
 
 // --- Shared lookups ---
 
@@ -34,6 +44,10 @@ export async function fetchHealth() {
 }
 
 export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
+  if (_pcsData) {
+    const m = await _pcsData;
+    return m.fetchTopLevelCategories(collectionTypeIdOrCode);
+  }
   if (_guestData) {
     const m = await _guestData;
     return m.fetchTopLevelCategories(collectionTypeIdOrCode);
@@ -46,6 +60,11 @@ export async function fetchTopLevelCategories(collectionTypeIdOrCode) {
 }
 
 export async function fetchOwnershipStatuses(collectionTypeId = null) {
+  if (_pcsData) {
+    const m = await _pcsData;
+    // Same as guest: /pcs sees Catalog (filter to it to find cards to add).
+    return m.fetchOwnershipStatuses(collectionTypeId);
+  }
   if (_guestData) {
     const m = await _guestData;
     // Guest sees Catalog (it's the entire point — filter to Catalog to find
@@ -91,6 +110,10 @@ export async function toggleStatusVisibility(statusType, statusId, collectionTyp
 // --- Photocard lookups ---
 
 export async function fetchPhotocardGroups() {
+  if (_pcsData) {
+    const m = await _pcsData;
+    return m.fetchPhotocardGroups();
+  }
   if (_guestData) {
     const m = await _guestData;
     return m.fetchPhotocardGroups();
@@ -100,6 +123,10 @@ export async function fetchPhotocardGroups() {
 }
 
 export async function fetchPhotocardMembers(groupId) {
+  if (_pcsData) {
+    const m = await _pcsData;
+    return m.fetchPhotocardMembers(groupId);
+  }
   if (_guestData) {
     const m = await _guestData;
     return m.fetchPhotocardMembers(groupId);
@@ -111,6 +138,10 @@ export async function fetchPhotocardMembers(groupId) {
 }
 
 export async function fetchPhotocardSourceOrigins(groupId, categoryId) {
+  if (_pcsData) {
+    const m = await _pcsData;
+    return m.fetchPhotocardSourceOrigins(groupId, categoryId);
+  }
   if (_guestData) {
     const m = await _guestData;
     return m.fetchPhotocardSourceOrigins(groupId, categoryId);
@@ -137,6 +168,10 @@ export async function createPhotocardSourceOrigin({ groupId, categoryId, sourceO
 // --- Photocard CRUD ---
 
 export async function listPhotocards() {
+  if (_pcsData) {
+    const m = await _pcsData;
+    return m.listPhotocards();
+  }
   if (_guestData) {
     const m = await _guestData;
     return m.listPhotocards();

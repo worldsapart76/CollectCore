@@ -20,17 +20,22 @@ import { libraryState, persistMobileCardsPerRow } from "../photocardPageState";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import { usePageActions } from "../contexts/PageActionsContext";
 
-// Guest-mode detail modal (Phase 7c). Imported lazily and only when
-// !VITE_IS_ADMIN — admin builds eliminate the chunk + the sqliteService
-// graph it pulls in. Same pattern as App.jsx's GuestBootstrap gating.
+// Non-admin detail + bulk-add modals (the card-copy editors). Lazy + env-gated
+// so admin builds eliminate them. Two non-admin tiers resolve to different
+// implementations: the /pcs/ build uses the server-backed modals; the legacy
+// WASM /guest/ build uses the SQLite-backed ones. Admin builds get null.
+// Variable names keep the Guest* prefix to avoid churn at the render sites.
 const GuestPhotocardDetailModal = import.meta.env.VITE_IS_ADMIN === "true"
   ? null
-  : lazy(() => import("../guest/GuestPhotocardDetailModal"));
+  : (import.meta.env.VITE_IS_PCS === "true"
+      ? lazy(() => import("../pcs/PcsPhotocardDetailModal"))
+      : lazy(() => import("../guest/GuestPhotocardDetailModal")));
 
-// Guest-mode bulk-add modal. Same lazy + admin-build-elision treatment.
 const GuestPhotocardBulkAdd = import.meta.env.VITE_IS_ADMIN === "true"
   ? null
-  : lazy(() => import("../guest/GuestPhotocardBulkAdd"));
+  : (import.meta.env.VITE_IS_PCS === "true"
+      ? lazy(() => import("../pcs/PcsPhotocardBulkAdd"))
+      : lazy(() => import("../guest/GuestPhotocardBulkAdd")));
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 

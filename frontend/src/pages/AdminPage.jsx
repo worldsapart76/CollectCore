@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate } from "react-router-dom";
+import { isPcs } from "../utils/env";
 import PageContainer from "../components/layout/PageContainer";
 import { MODULE_DEFS } from "../modules";
 import {
@@ -26,7 +28,11 @@ import {
 // drawer entry. Constant-folded import.meta.env.VITE_IS_ADMIN gate so the
 // admin bundle eliminates this lazy import (and the sqliteService graph it
 // pulls in) at build time.
-const GuestAdminPage = import.meta.env.VITE_IS_ADMIN === "true"
+// Legacy WASM /guest/ build only — backup/restore over local SQLite. Excluded
+// from admin (no need) AND from /pcs (server-backed, no local backup), so both
+// builds drop this lazy import and the sqliteService graph it pulls in.
+const GuestAdminPage = (import.meta.env.VITE_IS_ADMIN === "true"
+  || import.meta.env.VITE_IS_PCS === "true")
   ? null
   : lazy(() => import("../guest/GuestAdminPage"));
 
@@ -55,6 +61,11 @@ function tabStyle(active) {
 }
 
 export default function AdminPage() {
+  // /pcs tier has no admin or backup surface (server-stored, no local data to
+  // back up; account/sign-out live in the hamburger menu). Send it to library.
+  if (isPcs) {
+    return <Navigate to="/library" replace />;
+  }
   // Guest builds: render the guest backup/restore page and skip the admin
   // tabs entirely. Constant-folded so the admin build eliminates this whole
   // branch.

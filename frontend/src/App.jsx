@@ -42,7 +42,11 @@ const GuestDebugPage = import.meta.env.DEV
 // pass — guarantees the lazy import + sqlite-wasm chunk are eliminated from
 // admin bundles. Verified with `import.meta.env.DEV` in the GuestDebugPage
 // line above, same mechanism.
-const GuestBootstrap = import.meta.env.VITE_IS_ADMIN === "true"
+// Null for admin AND for the /pcs/ tier: /pcs is server-backed (no WASM SQLite
+// seed download / OPFS / welcome flow), so it renders the app directly without
+// the guest bootstrap gate. Only the legacy WASM /guest/ build wraps with it.
+const GuestBootstrap = (import.meta.env.VITE_IS_ADMIN === "true"
+  || import.meta.env.VITE_IS_PCS === "true")
   ? null
   : lazy(() => import("./guest/GuestBootstrap"));
 

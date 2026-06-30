@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { fetchTradeData } from "../api";
+import { isGuestWasm } from "../utils/env";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -52,6 +53,11 @@ const BADGE_TONES = {
 const TRADE_PER_ROW_KEY = "trade.mobileCardsPerRow";
 
 async function probeGuestOwnership(catalogItemIds) {
+  // Only the legacy WASM /guest/ build has local SQLite to probe. The guard is
+  // constant-folded so admin AND /pcs builds drop the dynamic import (and the
+  // sqlite-wasm graph) entirely. A /pcs viewer's own-ownership badges are a
+  // later (server-side) concern; for now the page degrades to unauth mode.
+  if (!isGuestWasm) return null;
   // Lazy import — only fetched when the admin probe falls through. Returns
   // null on any failure so the page degrades to unauth mode silently.
   let svc;

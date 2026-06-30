@@ -235,6 +235,23 @@ def pcs_ownership_statuses(email: str = Depends(require_user), db=Depends(get_db
     )]
 
 
+@router.get("/categories")
+def pcs_categories(email: str = Depends(require_user), db=Depends(get_db)):
+    # /pcs/ is photocard-only; always scoped to the photocard collection type.
+    return [dict(r._mapping) for r in db.execute(
+        text(
+            """
+            SELECT top_level_category_id, collection_type_id, category_name,
+                   sort_order, is_active
+            FROM lkup_top_level_categories
+            WHERE collection_type_id = :pc AND is_active = 1
+            ORDER BY sort_order, category_name
+            """
+        ),
+        {"pc": PHOTOCARD_COLLECTION_TYPE_ID},
+    )]
+
+
 @router.get("/photocards/groups")
 def pcs_groups(email: str = Depends(require_user), db=Depends(get_db)):
     return [dict(r._mapping) for r in db.execute(

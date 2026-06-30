@@ -8,3 +8,16 @@
 // branches in the guest bundle. Avoid wrapping with String()/toLowerCase() —
 // those are runtime calls Rollup won't fold.
 export const isAdmin = import.meta.env.VITE_IS_ADMIN === "true";
+
+// True only in the authenticated `/pcs/` guest-tier build. Same dead-code-
+// elimination rules as isAdmin above — keep the comparison a bare literal.
+export const isPcs = import.meta.env.VITE_IS_PCS === "true";
+
+// True ONLY for the legacy WASM `/guest/` build — the one tier that uses
+// browser-local SQLite (sqliteService → worker → sqlite-wasm). Both admin and
+// the server-backed /pcs/ tier are false here. Use this (not `!isAdmin`) to
+// gate any local-SQLite import so the /pcs build tree-shakes the wasm graph
+// out. Constant-folds the same way isAdmin does.
+export const isGuestWasm =
+  import.meta.env.VITE_IS_ADMIN !== "true" &&
+  import.meta.env.VITE_IS_PCS !== "true";

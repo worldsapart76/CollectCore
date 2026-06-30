@@ -1,0 +1,110 @@
+// Server-data adapter for the authenticated /pcs/ guest tier.
+//
+// Mirrors the read-function shape of guest/guestData.js (so the reused
+// PhotocardLibraryPage needs no data-shape branching) but fetches from the
+// server's /pcs/* endpoints — per-user annotations are stored server-side,
+// not in browser SQLite. Selected in api.js when VITE_IS_PCS === "true";
+// the admin and guest bundles tree-shake this module out.
+//
+// Cloudflare Access cookies must ride along on every call (credentials:
+// include) so the edge can attach the verified identity header.
+
+const API = import.meta.env.VITE_API_BASE_URL ?? "";
+const _nativeFetch = window.fetch.bind(window);
+
+function req(path, opts = {}) {
+  return _nativeFetch(`${API}${path}`, { credentials: "include", ...opts });
+}
+
+async function asJson(res, fallbackMessage) {
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || fallbackMessage);
+  }
+  return res.json();
+}
+
+function jsonBody(method, body) {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+// --- Account ---
+
+export async function getMe() {
+  return asJson(await req("/pcs/me"), "Failed to load account");
+}
+
+// --- Reads (shape-matched to admin / guest adapters) ---
+
+export async function listPhotocards() {
+  return asJson(await req("/pcs/photocards"), "Failed to fetch photocards");
+}
+
+export async function fetchPhotocardGroups() {
+  return asJson(await req("/pcs/photocards/groups"), "Failed to fetch photocard groups");
+}
+
+export async function fetchPhotocardMembers(groupId) {
+  return asJson(
+    await req(`/pcs/photocards/members?group_id=${encodeURIComponent(groupId)}`),
+    "Failed to fetch photocard members",
+  );
+}
+
+export async function fetchPhotocardSourceOrigins(groupId, categoryId) {
+  return asJson(
+    await req(
+      `/pcs/photocards/source-origins?group_id=${encodeURIComponent(groupId)}` +
+        `&category_id=${encodeURIComponent(categoryId)}`,
+    ),
+    "Failed to fetch source origins",
+  );
+}
+
+export async function fetchTopLevelCategories() {
+  // /pcs/ is photocard-only; any collection-type arg from callers is ignored.
+  return asJson(await req("/pcs/categories"), "Failed to fetch top-level categories");
+}
+
+export async function fetchOwnershipStatuses() {
+  // Guests see ALL statuses including Catalog (the point of the catalog view).
+  return asJson(await req("/pcs/ownership-statuses"), "Failed to fetch ownership statuses");
+}
+
+// --- Writes (per-user annotations; scoped server-side to the caller) ---
+// Signatures mirror guest/sqliteService so the /pcs write modals read the same.
+
+export async function addPcsCardCopy({ catalogItemId, ownershipStatusId, notes = null }) {
+  const data = await asJson(
+    await req("/pcs/copies", jsonBody("POST", {
+      catalog_item_id: catalogItemId,
+      ownership_status_id: ownershipStatusId,
+      notes,
+    })),
+    "Failed to add copy",
+  );
+  return data.copy_id;
+}
+
+export async function updatePcsCardCopy(copyId, { ownershipStatusId, notes } = {}) {
+  // Partial update — only fields explicitly passed are sent. `notes: null`
+  // clears; omitting notes leaves it untouched (backend uses exclude_unset).
+  const body = {};
+  if (ownershipStatusId !== undefined) body.ownership_status_id = ownershipStatusId;
+  if (notes !== undefined) body.notes = notes;
+  return asJson(
+    await req(`/pcs/copies/${copyId}`, jsonBody("PUT", body)),
+    "Failed to update copy",
+  );
+}
+
+export async function deletePcsCardCopy(copyId) {
+  return asJson(
+    await req(`/pcs/copies/${copyId}`, { method: "DELETE" }),
+    "Failed to delete copy",
+  );
+}

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:guest": "vite build --mode guest",
+    "build:pcs": "vite build --mode pcs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -30,6 +30,7 @@ const PROXY_PATHS = [
   '/images',
   '/shutdown',
   '/catalog',
+  '/pcs',
 ]
 
 // Frontend sub-paths that share a prefix with backend routes.
@@ -68,6 +69,7 @@ const proxy = Object.fromEntries(PROXY_PATHS.map(p => [p, {
 function outDirFor(mode) {
   if (mode === 'mobile') return 'dist'
   if (mode === 'guest') return '../backend/frontend_dist_guest'
+  if (mode === 'pcs') return '../backend/frontend_dist_pcs'
   return '../backend/frontend_dist'
 }
 
@@ -77,6 +79,7 @@ function outDirFor(mode) {
 // is mounted separately. See spa_host_routing in backend/main.py.
 function assetsDirFor(mode) {
   if (mode === 'guest') return 'guest-assets'
+  if (mode === 'pcs') return 'pcs-assets'
   return 'assets'
 }
 
@@ -89,6 +92,7 @@ function assetsDirFor(mode) {
 function baseFor(mode) {
   if (mode === 'mobile') return './'
   if (mode === 'guest') return '/guest/'
+  if (mode === 'pcs') return '/pcs/'
   return '/'
 }
 

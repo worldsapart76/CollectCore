@@ -6,7 +6,7 @@
 // builds because `isAdmin` is a Vite-inlined literal, so the import lives
 // inside an `if (false)` branch that Rollup eliminates.
 
-import { isAdmin } from "./env";
+import { isAdmin, isGuestWasm } from "./env";
 import { fetchSettings, updateSetting } from "../api";
 
 const ADMIN_KEYS = {
@@ -19,6 +19,10 @@ const GUEST_TRADES_KEY = "my_trades";
 
 let _guestSqlitePromise = null;
 function _loadGuestSqlite() {
+  // Only the legacy WASM /guest/ build has local SQLite. Guarding on the
+  // constant-folded isGuestWasm makes the dynamic import dead code (hence
+  // eliminated) in admin AND /pcs builds, keeping sqlite-wasm out of both.
+  if (!isGuestWasm) return Promise.reject(new Error("No local SQLite in this build"));
   if (!_guestSqlitePromise) {
     _guestSqlitePromise = import("../guest/sqliteService");
   }
@@ -62,6 +66,7 @@ export async function saveTradeDefaults({ from, to, notes }) {
     ]);
     return;
   }
+  if (!isGuestWasm) return; // /pcs has no client-side trade defaults yet
   const m = await _loadGuestSqlite();
   await m.setGuestMeta(
     GUEST_DEFAULTS_KEY,
@@ -74,7 +79,7 @@ export async function saveTradeDefaults({ from, to, notes }) {
 // identity, so this is the only place that knows "these are mine."
 
 export async function recordGuestTrade(entry) {
-  if (isAdmin) return;
+  if (!isGuestWasm) return;
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
   const list = raw ? JSON.parse(raw) : [];
@@ -83,7 +88,7 @@ export async function recordGuestTrade(entry) {
 }
 
 export async function listGuestTrades() {
-  if (isAdmin) return [];
+  if (!isGuestWasm) return [];
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
   if (!raw) return [];
@@ -95,7 +100,7 @@ export async function listGuestTrades() {
 }
 
 export async function removeGuestTrade(slug) {
-  if (isAdmin) return;
+  if (!isGuestWasm) return;
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
   const list = raw ? JSON.parse(raw) : [];
