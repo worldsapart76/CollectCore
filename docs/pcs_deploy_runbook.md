@@ -42,12 +42,21 @@ Set on the CollectCore service (Railway → Variables):
 > JWT verification is enabled (Step 6), but it will be installed at build time.
 
 ## Step 3 — Cloudflare Access: allow guests onto `/pcs/`
-In Cloudflare Zero Trust → Access → Applications, on the existing apex+api
-application (team `collectcore`):
-- Add an **Allow** policy scoped to path `/pcs*` (apex **and** api host) whose
-  **Include** rule is *Emails* = your friends' Google addresses (the allowlist).
-- Keep the existing admin policy (admin email only) for everything else.
-- Keep the `/catalog/*` and `/guest` **bypass** policies unchanged.
+Access scopes by **application (hostname + path)**, not per-policy paths, and a
+more-specific path app takes precedence over the domain-wide admin app. So add a
+**new path-scoped Access application** for `/pcs` (same pattern as the `/trade`
+and `/guest` apps), team `collectcore`:
+
+1. Zero Trust → Access → Applications → **Add an application** → **Self-hosted**.
+2. Name: `CollectCore PCS`. Session duration: your choice.
+3. Application domains — add **two**:
+   - `collectcoreapp.com` path `pcs`
+   - `api.collectcoreapp.com` path `pcs`  (the SPA fetches the API from here)
+4. Add a policy: Action **Allow**, Include → **Emails** = your admin email +
+   each friend's Google address (the allowlist). (An Access Group or
+   "Emails ending in" also works.)
+5. Save. Keep the existing admin app (admin email only) for everything else and
+   the `/catalog/*` + `/guest` **bypass** apps unchanged.
 
 Verify: a friend on the allowlist can load `collectcoreapp.com/pcs/` after Google
 sign-in; a non-allowlisted account is blocked at the edge.
