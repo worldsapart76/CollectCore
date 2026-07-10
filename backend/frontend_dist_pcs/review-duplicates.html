@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photocard Duplicate Review</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; }
+  h1 { font-size: 18px; margin-bottom: 8px; color: #fff; }
+  .stats { font-size: 13px; color: #888; margin-bottom: 12px; }
+  .progress-bar { height: 4px; background: #333; border-radius: 2px; margin-bottom: 16px; }
+  .progress-fill { height: 100%; background: #4caf50; border-radius: 2px; transition: width 0.3s; }
+  .controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .controls button { padding: 6px 14px; border: 1px solid #555; background: #2a2a3e; color: #e0e0e0; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .controls button:hover { background: #3a3a5e; }
+  .controls button.active { background: #4a4a7e; border-color: #7a7aae; }
+  .controls select { padding: 5px 8px; background: #2a2a3e; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; font-size: 12px; }
+  .export-btn { background: #2e7d32 !important; border-color: #4caf50 !important; }
+  .export-btn:hover { background: #388e3c !important; }
+  .load-btn { background: #1565c0 !important; border-color: #42a5f5 !important; }
+  .load-btn:hover { background: #1976d2 !important; }
+
+  .group { border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+  .group.reviewed { border-color: #4caf50; }
+  .group.skipped { border-color: #ff9800; }
+  .group-header { background: #2a2a3e; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+  .group-header .label { font-size: 13px; font-weight: 600; }
+  .group-header .meta { font-size: 11px; color: #999; }
+  .group-header .badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+  .badge-reviewed { background: #1b5e20; color: #a5d6a7; }
+  .badge-skipped { background: #e65100; color: #ffcc02; }
+
+  .cards-row { display: flex; gap: 0; overflow-x: auto; }
+  .card { flex: 0 0 auto; width: 200px; border-right: 1px solid #333; padding: 8px; position: relative; }
+  .card:last-child { border-right: none; }
+  .card.selected-main { background: #1b3a1b; }
+  .card.selected-sub { background: #1a2a3a; }
+
+  .card-images { display: flex; gap: 4px; margin-bottom: 6px; }
+  .card-images img { width: 90px; height: 126px; object-fit: cover; border-radius: 3px; background: #333; cursor: pointer; }
+  .card-images .no-img { width: 90px; height: 126px; background: #2a2a3e; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666; }
+  .card-info { font-size: 11px; line-height: 1.5; }
+  .card-info .id { color: #888; }
+  .card-info .ownership { font-weight: 600; }
+  .own-Owned { color: #4caf50; }
+  .own-Wanted { color: #ff9800; }
+  .own-Trade { color: #f44336; }
+  .own-Pending { color: #9c27b0; }
+  .own-Formerly { color: #607d8b; }
+  .own-Borrowed { color: #00bcd4; }
+
+  .card-actions { margin-top: 6px; display: flex; gap: 4px; }
+  .card-actions button { flex: 1; padding: 4px; font-size: 10px; border: 1px solid #555; border-radius: 3px; cursor: pointer; background: #2a2a3e; color: #e0e0e0; }
+  .card-actions button:hover { background: #3a3a5e; }
+  .card-actions button.main-btn.active { background: #2e7d32; border-color: #4caf50; color: #fff; }
+  .card-actions button.unique-btn.active { background: #e65100; border-color: #ff9800; color: #fff; }
+
+  .group-actions { padding: 6px 12px; background: #222; display: flex; gap: 8px; align-items: center; }
+  .group-actions button { padding: 4px 10px; font-size: 11px; border: 1px solid #555; border-radius: 3px; cursor: pointer; background: #2a2a3e; color: #e0e0e0; }
+  .group-actions button:hover { background: #3a3a5e; }
+  .group-actions .skip-btn:hover { background: #e65100; }
+  .group-actions .note-input { flex: 1; max-width: 300px; padding: 4px 8px; font-size: 11px; background: #1a1a2e; border: 1px solid #555; border-radius: 3px; color: #e0e0e0; }
+
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; cursor: pointer; }
+  .lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; }
+
+  .hidden { display: none; }
+  .loading { text-align: center; padding: 40px; color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Photocard Duplicate Review</h1>
+<div class="stats" id="stats">Loading...</div>
+<div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
+
+<div class="controls">
+  <button id="filter-all" class="active" onclick="setFilter('all')">All</button>
+  <button id="filter-pending" onclick="setFilter('pending')">Pending</button>
+  <button id="filter-reviewed" onclick="setFilter('reviewed')">Reviewed</button>
+  <button id="filter-skipped" onclick="setFilter('skipped')">Skipped</button>
+  <span style="color:#666">|</span>
+  <select id="sort-select" onchange="applySort()">
+    <option value="source">Sort: Source Origin</option>
+    <option value="count-desc">Sort: Most Cards</option>
+    <option value="count-asc">Sort: Fewest Cards</option>
+  </select>
+  <span style="color:#666">|</span>
+  <button class="export-btn" onclick="exportMapping()">Export Mapping JSON</button>
+  <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+  <button class="load-btn" onclick="loadMapping()">Load Saved Progress</button>
+  <button onclick="saveProgress()">Save Progress</button>
+</div>
+
+<div id="groups-container" class="loading">Fetching photocards...</div>
+
+<!-- Lightbox -->
+<div id="lightbox" class="lightbox hidden" onclick="this.classList.add('hidden')">
+  <img id="lightbox-img" src="">
+</div>
+
+<script>
+const API_BASE = '';  // same origin via vite proxy
+let allCards = [];
+let duplicateGroups = [];
+let decisions = {};  // groupKey -> { main: itemId, unique: [itemIds], skipped: bool, note: '' }
+let currentFilter = 'all';
+
+async function init() {
+  try {
+    const resp = await fetch(`${API_BASE}/photocards`);
+    allCards = await resp.json();
+    buildGroups();
+    render();
+  } catch (e) {
+    document.getElementById('groups-container').textContent = `Error: ${e.message}. Is the backend running on port 8001?`;
+  }
+}
+
+function buildGroups() {
+  // Group by category + source_origin + version + sorted members
+  const map = new Map();
+  for (const card of allCards) {
+    const memberKey = (card.members || []).slice().sort().join(',');
+    const key = `${card.category}||${card.source_origin || ''}||${card.version || ''}||${memberKey}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(card);
+  }
+
+  // Filter to groups with >1 card AND >1 distinct ownership (excluding all-Trade groups)
+  duplicateGroups = [];
+  for (const [key, cards] of map) {
+    if (cards.length < 2) continue;
+    const ownerships = new Set(cards.map(c => c.ownership_status_id));
+    if (ownerships.size < 2) continue;
+    const parts = key.split('||');
+    duplicateGroups.push({
+      key,
+      category: parts[0],
+      sourceOrigin: parts[1] || '(none)',
+      version: parts[2] || '(none)',
+      members: parts[3] ? parts[3].split(',').join(', ') : '(none)',
+      cards: cards.sort((a, b) => a.item_id - b.item_id),
+    });
+  }
+  duplicateGroups.sort((a, b) => a.sourceOrigin.localeCompare(b.sourceOrigin) || a.version.localeCompare(b.version));
+}
+
+function ownershipClass(status) {
+  if (status.startsWith('Pending')) return 'own-Pending';
+  if (status.startsWith('Formerly')) return 'own-Formerly';
+  return `own-${status}`;
+}
+
+function imgSrc(path) {
+  if (!path) return null;
+  return `${API_BASE}/${path}`;
+}
+
+function openLightbox(src) {
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+
+function getGroupStatus(key) {
+  const d = decisions[key];
+  if (!d) return 'pending';
+  if (d.skipped) return 'skipped';
+  if (d.main) return 'reviewed';
+  return 'pending';
+}
+
+function updateStats() {
+  const total = duplicateGroups.length;
+  const reviewed = duplicateGroups.filter(g => getGroupStatus(g.key) === 'reviewed').length;
+  const skipped = duplicateGroups.filter(g => getGroupStatus(g.key) === 'skipped').length;
+  const pending = total - reviewed - skipped;
+  const totalCards = duplicateGroups.reduce((s, g) => s + g.cards.length, 0);
+  document.getElementById('stats').textContent = `${total} groups (${totalCards} cards) | ${reviewed} reviewed | ${skipped} skipped | ${pending} pending`;
+  document.getElementById('progress').style.width = `${((reviewed + skipped) / total * 100).toFixed(1)}%`;
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.controls button').forEach(b => {
+    if (b.id.startsWith('filter-')) b.classList.toggle('active', b.id === `filter-${f}`);
+  });
+  render();
+}
+
+function applySort() {
+  const sort = document.getElementById('sort-select').value;
+  if (sort === 'source') {
+    duplicateGroups.sort((a, b) => a.sourceOrigin.localeCompare(b.sourceOrigin) || a.version.localeCompare(b.version));
+  } else if (sort === 'count-desc') {
+    duplicateGroups.sort((a, b) => b.cards.length - a.cards.length);
+  } else if (sort === 'count-asc') {
+    duplicateGroups.sort((a, b) => a.cards.length - b.cards.length);
+  }
+  render();
+}
+
+function setMain(groupKey, itemId) {
+  if (!decisions[groupKey]) decisions[groupKey] = { main: null, unique: [], skipped: false, note: '' };
+  decisions[groupKey].main = itemId;
+  decisions[groupKey].skipped = false;
+  // Remove from unique if it was there
+  decisions[groupKey].unique = decisions[groupKey].unique.filter(id => id !== itemId);
+  render();
+}
+
+function toggleUnique(groupKey, itemId) {
+  if (!decisions[groupKey]) decisions[groupKey] = { main: null, unique: [], skipped: false, note: '' };
+  const idx = decisions[groupKey].unique.indexOf(itemId);
+  if (idx >= 0) {
+    decisions[groupKey].unique.splice(idx, 1);
+  } else {
+    decisions[groupKey].unique.push(itemId);
+    // Can't be both main and unique
+    if (decisions[groupKey].main === itemId) decisions[groupKey].main = null;
+  }
+  render();
+}
+
+function skipGroup(groupKey) {
+  if (!decisions[groupKey]) decisions[groupKey] = { main: null, unique: [], skipped: false, note: '' };
+  decisions[groupKey].skipped = !decisions[groupKey].skipped;
+  if (decisions[groupKey].skipped) {
+    decisions[groupKey].main = null;
+    decisions[groupKey].unique = [];
+  }
+  render();
+}
+
+function setNote(groupKey, note) {
+  if (!decisions[groupKey]) decisions[groupKey] = { main: null, unique: [], skipped: false, note: '' };
+  decisions[groupKey].note = note;
+}
+
+function render() {
+  const container = document.getElementById('groups-container');
+  const filtered = duplicateGroups.filter(g => {
+    if (currentFilter === 'all') return true;
+    return getGroupStatus(g.key) === currentFilter;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="loading">No groups match the current filter.</div>`;
+    updateStats();
+    return;
+  }
+
+  let html = '';
+  for (const group of filtered) {
+    const status = getGroupStatus(group.key);
+    const d = decisions[group.key] || { main: null, unique: [], skipped: false, note: '' };
+
+    html += `<div class="group ${status === 'reviewed' ? 'reviewed' : status === 'skipped' ? 'skipped' : ''}">`;
+    html += `<div class="group-header">`;
+    html += `<div>`;
+    html += `<span class="label">${group.sourceOrigin} &mdash; ${group.version}</span><br>`;
+    html += `<span class="meta">${group.category} | ${group.members} | ${group.cards.length} cards</span>`;
+    html += `</div>`;
+    if (status === 'reviewed') html += `<span class="badge badge-reviewed">REVIEWED</span>`;
+    if (status === 'skipped') html += `<span class="badge badge-skipped">SKIPPED</span>`;
+    html += `</div>`;
+
+    html += `<div class="cards-row">`;
+    for (const card of group.cards) {
+      const isMain = d.main === card.item_id;
+      const isUnique = d.unique.includes(card.item_id);
+      html += `<div class="card ${isMain ? 'selected-main' : isUnique ? 'selected-sub' : ''}">`;
+      html += `<div class="card-images">`;
+
+      const frontSrc = imgSrc(card.front_image_path);
+      const backSrc = imgSrc(card.back_image_path);
+      if (frontSrc) {
+        html += `<img src="${frontSrc}" alt="front" onclick="openLightbox('${frontSrc}')" loading="lazy">`;
+      } else {
+        html += `<div class="no-img">No front</div>`;
+      }
+      if (backSrc) {
+        html += `<img src="${backSrc}" alt="back" onclick="openLightbox('${backSrc}')" loading="lazy">`;
+      } else {
+        html += `<div class="no-img">No back</div>`;
+      }
+
+      html += `</div>`;
+      html += `<div class="card-info">`;
+      html += `<span class="id">ID: ${card.item_id}</span><br>`;
+      html += `<span class="ownership ${ownershipClass(card.ownership_status)}">${card.ownership_status}</span><br>`;
+      if (card.notes) html += `<span style="color:#aaa">${card.notes}</span>`;
+      html += `</div>`;
+      html += `<div class="card-actions">`;
+      html += `<button class="main-btn ${isMain ? 'active' : ''}" onclick="setMain('${esc(group.key)}', ${card.item_id})">Main</button>`;
+      html += `<button class="unique-btn ${isUnique ? 'active' : ''}" onclick="toggleUnique('${esc(group.key)}', ${card.item_id})">Unique</button>`;
+      html += `</div>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    html += `<div class="group-actions">`;
+    html += `<button class="skip-btn" onclick="skipGroup('${esc(group.key)}')">${d.skipped ? 'Unskip' : 'Skip'}</button>`;
+    html += `<input class="note-input" placeholder="Note (optional)" value="${esc(d.note)}" onchange="setNote('${esc(group.key)}', this.value)">`;
+    html += `</div>`;
+
+    html += `</div>`;
+  }
+  container.innerHTML = html;
+  updateStats();
+}
+
+function esc(s) {
+  return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function saveProgress() {
+  localStorage.setItem('pc-dup-review-decisions', JSON.stringify(decisions));
+  alert('Progress saved to localStorage.');
+}
+
+function loadMapping() {
+  const saved = localStorage.getItem('pc-dup-review-decisions');
+  if (saved) {
+    decisions = JSON.parse(saved);
+    render();
+    alert('Loaded saved progress.');
+  } else {
+    alert('No saved progress found.');
+  }
+}
+
+function exportMapping() {
+  // Build a clean mapping for each reviewed group
+  const mapping = [];
+  for (const group of duplicateGroups) {
+    const d = decisions[group.key];
+    if (!d || (!d.main && !d.skipped)) continue;
+
+    const entry = {
+      category: group.category,
+      source_origin: group.sourceOrigin,
+      version: group.version,
+      members: group.members,
+      status: d.skipped ? 'skipped' : 'reviewed',
+    };
+
+    if (d.main) {
+      entry.main_item_id = d.main;
+      entry.sub_edition_item_ids = group.cards
+        .map(c => c.item_id)
+        .filter(id => id !== d.main && !d.unique.includes(id));
+      entry.unique_item_ids = d.unique;
+    }
+    if (d.note) entry.note = d.note;
+    mapping.push(entry);
+  }
+
+  const blob = new Blob([JSON.stringify(mapping, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `photocard-duplicate-mapping-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV() {
+  let csv = 'Group Key,Category,Source Origin,Version,Members,Status,Main Item ID,Sub-Edition IDs,Unique IDs,Note\n';
+  for (const group of duplicateGroups) {
+    const d = decisions[group.key];
+    if (!d || (!d.main && !d.skipped)) continue;
+    const subIds = d.main
+      ? group.cards.map(c => c.item_id).filter(id => id !== d.main && !(d.unique || []).includes(id)).join(';')
+      : '';
+    const uniqueIds = (d.unique || []).join(';');
+    csv += `"${group.key}","${group.category}","${group.sourceOrigin}","${group.version}","${group.members}",${d.skipped ? 'skipped' : 'reviewed'},${d.main || ''},${subIds},${uniqueIds},"${(d.note || '').replace(/"/g, '""')}"\n`;
+  }
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `photocard-duplicate-mapping-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Auto-save periodically
+setInterval(() => {
+  if (Object.keys(decisions).length > 0) {
+    localStorage.setItem('pc-dup-review-decisions', JSON.stringify(decisions));
+  }
+}, 30000);
+
+init();
+</script>
+</body>
+</html>

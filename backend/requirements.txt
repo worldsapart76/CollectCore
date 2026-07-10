@@ -17,3 +17,6 @@ typing_extensions==4.15.0
 typing-inspection==0.4.2
 greenlet==3.3.0
 boto3==1.35.0
+# CF Access JWT verification (auth.py) — only used when CF_ACCESS_TEAM_DOMAIN
+# + CF_ACCESS_AUD are set; imported lazily so the app boots without it.
+PyJWT[crypto]==2.10.1

@@ -68,12 +68,15 @@ app.add_middleware(
 #   guest → /guest/guest-assets/  (Vite base='/guest/' + assetsDir='guest-assets')
 _API_HOST_PREFIXES = ("api.",)
 _GUEST_PATH_PREFIX = "/guest"
+_PCS_PATH_PREFIX = "/pcs"
 _SPA_PASSTHROUGH_PREFIXES = (
     "/assets/",
     "/guest/guest-assets/",
+    "/pcs/pcs-assets/",
     "/images/",
     "/vite.svg",
     "/guest/vite.svg",
+    "/pcs/vite.svg",
 )
 
 @app.middleware("http")
@@ -90,11 +93,17 @@ async def spa_host_routing(request: Request, call_next):
     path = request.url.path
     if any(path.startswith(p) for p in _SPA_PASSTHROUGH_PREFIXES):
         return await call_next(request)
-    from routers.admin import FRONTEND_DIST, FRONTEND_DIST_GUEST
-    # Anything under /guest (with or without trailing path) gets the guest
-    # bundle's index.html so React Router with basename='/guest' can take over.
-    is_guest_path = path == _GUEST_PATH_PREFIX or path.startswith(_GUEST_PATH_PREFIX + "/")
-    dist = FRONTEND_DIST_GUEST if is_guest_path else FRONTEND_DIST
+    from routers.admin import FRONTEND_DIST, FRONTEND_DIST_GUEST, FRONTEND_DIST_PCS
+    # Route /pcs and /guest to their own bundle's index.html so each SPA's
+    # React Router (basename='/pcs' or '/guest') can take over. Note the /pcs/*
+    # API endpoints are served on the api.* host (is_api_host short-circuits
+    # above); on the apex host these paths are SPA routes.
+    if path == _PCS_PATH_PREFIX or path.startswith(_PCS_PATH_PREFIX + "/"):
+        dist = FRONTEND_DIST_PCS
+    elif path == _GUEST_PATH_PREFIX or path.startswith(_GUEST_PATH_PREFIX + "/"):
+        dist = FRONTEND_DIST_GUEST
+    else:
+        dist = FRONTEND_DIST
     index_html = dist / "index.html"
     if index_html.exists():
         return FileResponse(str(index_html))

@@ -29,11 +29,16 @@ during the Phase 3 infra work, so it lands then — alongside enabling the admin
 gate (PCS_ADMIN_GATE) in prod.
 """
 
+import functools
+import logging
 import os
 
 from fastapi import HTTPException, Request
 
+logger = logging.getLogger("collectcore.auth")
+
 CF_EMAIL_HEADER = "cf-access-authenticated-user-email"
+CF_JWT_HEADER = "cf-access-jwt-assertion"
 
 # Synthetic local-dev identity (no CF edge on localhost). Treated as admin so
 # existing local admin workflows keep working without configuration.
@@ -54,14 +59,71 @@ def _is_local_request(request: Request) -> bool:
     return host in ("localhost", "127.0.0.1")
 
 
-def get_identity(request: Request) -> str | None:
-    """The caller's verified email (lowercased), or None if unauthenticated."""
-    raw = request.headers.get(CF_EMAIL_HEADER)
-    if raw and raw.strip():
-        return raw.strip().lower()
+def _dev_identity(request: Request) -> str | None:
+    """Synthesized identity for localhost dev; None off localhost."""
     if _is_local_request(request):
         return (os.environ.get("DEV_USER_EMAIL") or DEV_ADMIN_EMAIL).strip().lower()
     return None
+
+
+# ── Cloudflare Access JWT verification (hardening) ─────────────────────────
+# When CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD are set, verify the signed
+# `Cf-Access-Jwt-Assertion` JWT rather than trusting the plaintext email
+# header (which anyone who can reach the Railway origin directly could forge).
+# Unset → legacy plaintext-header trust (unchanged behavior). PyJWT is imported
+# lazily so the app boots without it when verification is disabled.
+
+def _team_domain() -> str:
+    d = os.environ.get("CF_ACCESS_TEAM_DOMAIN", "").strip()
+    if not d:
+        return ""
+    return d.replace("https://", "").replace("http://", "").rstrip("/")
+
+
+def _jwt_verification_enabled() -> bool:
+    return bool(_team_domain() and os.environ.get("CF_ACCESS_AUD", "").strip())
+
+
+@functools.lru_cache(maxsize=1)
+def _jwk_client():
+    import jwt  # PyJWT (lazy)
+    return jwt.PyJWKClient(f"https://{_team_domain()}/cdn-cgi/access/certs")
+
+
+def _email_from_jwt(token: str) -> str | None:
+    import jwt  # PyJWT (lazy)
+    signing_key = _jwk_client().get_signing_key_from_jwt(token)
+    payload = jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=os.environ.get("CF_ACCESS_AUD", "").strip(),
+        issuer=f"https://{_team_domain()}",
+    )
+    email = payload.get("email")
+    return email.strip().lower() if email else None
+
+
+def get_identity(request: Request) -> str | None:
+    """The caller's verified email (lowercased), or None if unauthenticated."""
+    if _jwt_verification_enabled():
+        # Hardened path: trust ONLY the signed assertion, never the plaintext
+        # header. A missing/invalid token off localhost is unauthenticated.
+        token = request.headers.get(CF_JWT_HEADER)
+        if token:
+            try:
+                email = _email_from_jwt(token)
+                if email:
+                    return email
+            except Exception as exc:  # invalid / expired / wrong aud
+                logger.warning("CF Access JWT verification failed: %s", exc)
+        return _dev_identity(request)
+
+    # Legacy path: no JWT config → trust the plaintext identity header.
+    raw = request.headers.get(CF_EMAIL_HEADER)
+    if raw and raw.strip():
+        return raw.strip().lower()
+    return _dev_identity(request)
 
 
 def is_admin(email: str | None) -> bool:

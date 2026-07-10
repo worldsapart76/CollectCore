@@ -32,6 +32,12 @@ FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend_dist"
 # with admin's /assets/.
 FRONTEND_DIST_GUEST = Path(__file__).resolve().parents[1] / "frontend_dist_guest"
 
+# Built authenticated-guest bundle (`vite build --mode pcs`). Served at
+# collectcoreapp.com/pcs/* by the path-routing middleware in main.py.
+# base='/pcs/' + assetsDir='pcs-assets', so index.html references
+# /pcs/pcs-assets/... — no collision with admin's /assets/ or guest's.
+FRONTEND_DIST_PCS = Path(__file__).resolve().parents[1] / "frontend_dist_pcs"
+
 router = APIRouter(tags=["admin"])
 
 
@@ -535,6 +541,15 @@ def register_frontend_static(app):
                 name="guest-assets",
             )
 
+    if FRONTEND_DIST_PCS.exists():
+        pcs_assets = FRONTEND_DIST_PCS / "pcs-assets"
+        if pcs_assets.exists():
+            app.mount(
+                "/pcs/pcs-assets",
+                StaticFiles(directory=str(pcs_assets)),
+                name="pcs-assets",
+            )
+
     if not FRONTEND_DIST.exists():
         return
 
@@ -550,6 +565,14 @@ def register_frontend_static(app):
         guest_svg = FRONTEND_DIST_GUEST / "vite.svg"
         if guest_svg.exists():
             return _FileResponse(str(guest_svg))
+        return _FileResponse(str(FRONTEND_DIST / "vite.svg"))
+
+    # /pcs/ index.html references /pcs/vite.svg (base='/pcs/'). Same fallback.
+    @app.get("/pcs/vite.svg", include_in_schema=False)
+    async def _serve_pcs_favicon():
+        pcs_svg = FRONTEND_DIST_PCS / "vite.svg"
+        if pcs_svg.exists():
+            return _FileResponse(str(pcs_svg))
         return _FileResponse(str(FRONTEND_DIST / "vite.svg"))
 
     @app.get("/{full_path:path}", include_in_schema=False)
