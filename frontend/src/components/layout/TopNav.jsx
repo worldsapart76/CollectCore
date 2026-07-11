@@ -27,8 +27,10 @@ export default function TopNav({ theme, toggleTheme }) {
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const [filtersAvailable, setFiltersAvailable] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const dropdownRef = useRef(null);
   const menuRef = useRef(null);
+  const accountRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   const pageActions = usePageActionsList();
@@ -118,8 +120,18 @@ export default function TopNav({ theme, toggleTheme }) {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [dropdownOpen]);
 
-  // Close any open page-action menu on outside click / route change.
-  useEffect(() => { setOpenMenuId(null); }, [location.pathname]);
+  // Close any open page-action / account menu on outside click / route change.
+  useEffect(() => { setOpenMenuId(null); setAccountMenuOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    function handleOutside(e) {
+      if (accountRef.current && !accountRef.current.contains(e.target)) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [accountMenuOpen]);
   useEffect(() => {
     if (!openMenuId) return;
     function handleOutside(e) {
@@ -346,6 +358,29 @@ export default function TopNav({ theme, toggleTheme }) {
           <NavLink to="/admin" className={navClass}>
             {isAdmin ? "Admin" : "Backup"}
           </NavLink>
+        )}
+        {/* /pcs has no /admin destination; account + sign-out + guest-backup
+            import live in a desktop dropdown here (the mobile build reaches the
+            same GuestMenuItems via the hamburger drawer below). */}
+        {isPcs && GuestMenuItems && (
+          <div className="module-switcher" ref={accountRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="module-switcher-btn"
+              onClick={() => setAccountMenuOpen(o => !o)}
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+            >
+              Account ▾
+            </button>
+            {accountMenuOpen && (
+              <div className="module-dropdown" style={{ left: "auto", right: 0, minWidth: 200 }} role="menu">
+                <Suspense fallback={null}>
+                  <GuestMenuItems itemClassName="module-dropdown-item" />
+                </Suspense>
+              </div>
+            )}
+          </div>
         )}
         <button
           type="button"
