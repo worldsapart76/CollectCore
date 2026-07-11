@@ -609,6 +609,44 @@ def pcs_delete_trade(slug: str, email: str = Depends(require_user), db=Depends(g
     return {"ok": True}
 
 
+@router.get("/trade-ownership")
+def pcs_trade_ownership(ids: str, email: str = Depends(require_user), db=Depends(get_db)):
+    """Per-card ownership for the CALLER over a comma-separated catalog_item_id
+    list: 'owned' | 'wanted' | 'in_catalog'. Ids not in the catalog are absent
+    (the trade page renders those as 'not in your catalog'). Mirrors
+    /admin/trade-ownership but scoped to the /pcs user's own copies, so a /pcs
+    viewer sees their own library badges on a shared trade page."""
+    user_id = _get_or_create_user(db, email)
+    cat_ids = [x.strip() for x in ids.split(",") if x.strip()]
+    if not cat_ids:
+        return {}
+    ph, params = _in_clause(cat_ids, "c")
+    params["uid"] = user_id
+    params["pc"] = PHOTOCARD_COLLECTION_TYPE_ID
+    rows = db.execute(
+        text(
+            f"""
+            SELECT i.catalog_item_id,
+                   MAX(CASE WHEN os.status_code = 'owned'  THEN 1 ELSE 0 END) AS is_owned,
+                   MAX(CASE WHEN os.status_code = 'wanted' THEN 1 ELSE 0 END) AS is_wanted
+            FROM tbl_items i
+            LEFT JOIN pcs_card_copies pc
+                   ON pc.catalog_item_id = i.catalog_item_id AND pc.user_id = :uid
+            LEFT JOIN lkup_ownership_statuses os
+                   ON pc.ownership_status_id = os.ownership_status_id
+            WHERE i.catalog_item_id IN ({ph})
+              AND i.collection_type_id = :pc
+            GROUP BY i.catalog_item_id
+            """
+        ),
+        params,
+    ).fetchall()
+    result = {}
+    for cid, is_owned, is_wanted in rows:
+        result[cid] = "owned" if is_owned else ("wanted" if is_wanted else "in_catalog")
+    return result
+
+
 @router.get("/trade-defaults")
 def pcs_get_trade_defaults(email: str = Depends(require_user), db=Depends(get_db)):
     user_id = _get_or_create_user(db, email)

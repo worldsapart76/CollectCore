@@ -25,6 +25,24 @@ async function tryAdminOwnership(catalogItemIds) {
     return null;
   }
 }
+
+// Probe /pcs viewer mode. Same redirect:manual trick as the admin probe so an
+// unauthenticated viewer (CF Access 302s to login) degrades silently instead
+// of throwing a CORS error. This is a NETWORK probe (not gated on the build
+// flag) because the shared /trade/<slug> URL is served by the admin bundle,
+// yet the viewer may be a /pcs account — their /pcs session cookie rides along
+// (credentials:include) and returns their server-stored ownership map.
+async function tryPcsOwnership(catalogItemIds) {
+  try {
+    const ids = catalogItemIds.join(",");
+    const url = `${API_BASE}/pcs/trade-ownership?ids=${encodeURIComponent(ids)}`;
+    const res = await fetch(url, { credentials: "include", redirect: "manual" });
+    if (res.type === "opaqueredirect" || res.status === 0 || !res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 import { useMediaQuery, useMobileCardsPerRow, MOBILE_BREAKPOINT, MobilePerRowStepper } from "../components/library/mobileGrid";
 
 // Public-facing trade page. Three viewer modes:
@@ -135,6 +153,15 @@ export default function TradePage() {
           return;
         }
 
+        // /pcs viewer path — server-stored per-user copies.
+        const pcsMap = await tryPcsOwnership(cardIds);
+        if (cancelled) return;
+        if (pcsMap && Object.keys(pcsMap).length > 0) {
+          setOwnership(pcsMap);
+          setViewerMode("pcs");
+          return;
+        }
+
         // Guest path via OPFS.
         const guestMap = await probeGuestOwnership(cardIds);
         if (cancelled) return;
@@ -210,6 +237,9 @@ export default function TradePage() {
         )}
         {viewerMode === "guest" && (
           <div style={styles.viewerBadge}>Viewing as guest — badges reflect your local CollectCore data.</div>
+        )}
+        {viewerMode === "pcs" && (
+          <div style={styles.viewerBadge}>Signed in — badges reflect your CollectCore library.</div>
         )}
         {isMobile && (
           <div style={styles.mobileControls}>
