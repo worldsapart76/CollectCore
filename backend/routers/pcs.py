@@ -16,7 +16,7 @@ from sqlalchemy import text
 from auth import is_admin, require_user
 from constants import PHOTOCARD_COLLECTION_TYPE_ID
 from dependencies import get_db
-from schemas.pcs import PcsCopyCreate, PcsCopyUpdate
+from schemas.pcs import PcsCopyCreate, PcsCopyUpdate, PcsGuestBackupImport
 
 router = APIRouter(prefix="/pcs", tags=["pcs"])
 
@@ -377,6 +377,95 @@ def pcs_update_copy(
         )
         db.commit()
     return {"ok": True}
+
+
+@router.post("/import-guest-backup")
+def pcs_import_guest_backup(
+    payload: PcsGuestBackupImport,
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    """
+    Migrate a friend's deprecated /guest/ WASM backup into their /pcs account.
+
+    REPLACE strategy: the caller's existing pcs_card_copies are deleted, then the
+    backup's guest_card_copies rows are inserted. Idempotent — re-importing the
+    same file yields the same end state, so a friend can't double-migrate into
+    duplicates.
+
+    Rows are validated against the live catalog. The catalog is monotonic (ids
+    never leave), so an unknown catalog_item_id means a hand-edited/foreign file;
+    it's skipped (counted, not fatal). The synthetic 'catalog' status is skipped
+    too — it marks an untouched card, never a real annotation.
+    """
+    if payload.version != 1:
+        raise HTTPException(status_code=422, detail=f"Unsupported backup version {payload.version}")
+    user_id = _get_or_create_user(db, email)
+
+    # Fetch the valid-id sets once, then validate rows in Python (cheaper than a
+    # per-row existence query for a multi-thousand-row library).
+    valid_catalog_ids = {
+        r[0] for r in db.execute(
+            text(
+                "SELECT catalog_item_id FROM tbl_items "
+                "WHERE catalog_item_id IS NOT NULL AND collection_type_id = :pc"
+            ),
+            {"pc": PHOTOCARD_COLLECTION_TYPE_ID},
+        )
+    }
+    valid_status_ids = {
+        r[0] for r in db.execute(
+            text("SELECT ownership_status_id FROM lkup_ownership_statuses")
+        )
+    }
+    cat_row = db.execute(
+        text("SELECT ownership_status_id FROM lkup_ownership_statuses WHERE status_code = 'catalog' LIMIT 1")
+    ).fetchone()
+    catalog_status_id = cat_row[0] if cat_row else None
+
+    to_insert = []
+    skipped_unknown_card = 0
+    skipped_bad_status = 0
+    for row in payload.tables.guest_card_copies:
+        if row.catalog_item_id not in valid_catalog_ids:
+            skipped_unknown_card += 1
+            continue
+        if row.ownership_status_id not in valid_status_ids or row.ownership_status_id == catalog_status_id:
+            skipped_bad_status += 1
+            continue
+        to_insert.append({
+            "uid": user_id,
+            "ci": row.catalog_item_id,
+            "s": row.ownership_status_id,
+            "n": row.notes,
+        })
+
+    try:
+        deleted = db.execute(
+            text("DELETE FROM pcs_card_copies WHERE user_id = :uid"),
+            {"uid": user_id},
+        ).rowcount
+        if to_insert:
+            db.execute(
+                text(
+                    "INSERT INTO pcs_card_copies "
+                    "(user_id, catalog_item_id, ownership_status_id, notes) "
+                    "VALUES (:uid, :ci, :s, :n)"
+                ),
+                to_insert,
+            )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
+
+    return {
+        "ok": True,
+        "imported": len(to_insert),
+        "skipped_unknown_card": skipped_unknown_card,
+        "skipped_bad_status": skipped_bad_status,
+        "replaced_existing": deleted if deleted and deleted > 0 else 0,
+    }
 
 
 @router.delete("/copies/{copy_id}")

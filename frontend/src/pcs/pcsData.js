@@ -108,3 +108,13 @@ export async function deletePcsCardCopy(copyId) {
     "Failed to delete copy",
   );
 }
+
+// --- Migration: import a deprecated /guest/ WASM "Download Backup" file ---
+// REPLACE strategy server-side (wipes this account's copies, then inserts the
+// backup's). Pass the parsed backup JSON verbatim; returns import counts.
+export async function importGuestBackup(snapshot) {
+  return asJson(
+    await req("/pcs/import-guest-backup", jsonBody("POST", snapshot)),
+    "Failed to import guest backup",
+  );
+}
