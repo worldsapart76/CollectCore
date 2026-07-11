@@ -6,6 +6,58 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-07-10 (US CDT) — `/pcs/` authenticated guest tier BUILT + DEPLOYED + LIVE
+
+The cloud guest tier is **live in production and safe to share.** Phases 1–3 of
+`docs/guest_cloud_accounts_plan.md` built on branch `pcs-tier`, fast-forward
+merged to **main**, deployed via Railway. Friends can now track their catalog in
+the cloud (server-stored, so clearing browser data can't wipe their work) — the
+original goal is met. Commits: `f652537` (P1 backend), `d51c073` (P2 frontend),
+`32d1054` (P3 serving + JWT hardening + runbook), `7b703bc` (runbook fix),
+`56e7229` (publish `limit` param).
+
+**What's live & verified end-to-end:**
+- **Auth**: Cloudflare Access + Google **email allowlist**, via a **path-scoped
+  Access application** `CollectCore PCS` (domains `collectcoreapp.com` path `pcs`
+  **and** `api.collectcoreapp.com` path `pcs`). CORS settings on that app mirror
+  the admin app (allow-credentials ON, origin `https://collectcoreapp.com`, all
+  methods/headers) — required so the JSON write preflights (`POST/PUT/DELETE
+  /pcs/copies`) aren't challenged by CF Access. That CORS gap was the "Add as
+  Owned → failed to fetch" bug; fixed.
+- **Backend** (`backend/auth.py`, `routers/pcs.py`, `schemas/pcs.py`): `pcs_users`
+  + `pcs_card_copies` tables, provision-on-first-hit `/pcs/me`, catalog joined
+  with the caller's copies, per-user copy CRUD scoped server-side (cross-user →
+  403). First app-layer authorization in the codebase.
+- **Admin gate ENABLED** (`PCS_ADMIN_GATE=1` on Railway, `ADMIN_EMAILS=
+  worldsapart76@gmail.com`): non-public, non-`/pcs` paths (admin SPA + all
+  admin/module APIs) now require an admin email — a guest hitting
+  `api.collectcoreapp.com/photocards` gets 403. Verified admin still works +
+  guest is blocked. Rollback = unset the var.
+- **Frontend** (`frontend/src/pcs/*`, `.env.pcs`, `build:pcs`): reuses admin
+  `PhotocardLibraryPage` via `pcsData.js` server-data adapter; env-flag
+  tree-shaking (`VITE_IS_PCS`, derived `isGuestWasm`) keeps sqlite-wasm out of
+  the pcs bundle. Served at `collectcoreapp.com/pcs/` by `spa_host_routing`.
+- **"They should see everything admin can"**: drained the publish backlog (417
+  images → R2), so **all 10,448 photocards** now carry `catalog_item_id` + R2
+  URLs = full parity with admin. NOTE: this means every photocard is now in the
+  monotonic catalog (no non-catalog/private photocards remain). 0 local paths
+  left; card 6121 verified on R2.
+
+**Also flagged this session:** admin has to *remember* to publish images to R2 →
+user wants this automated (scheduled cron calling `/admin/publish-catalog`, or
+publish-on-add). Parked as a follow-up, not built.
+
+**Next (all optional, none blocking sharing):**
+- **JWT hardening** (runbook Step 6) — set `CF_ACCESS_TEAM_DOMAIN` +
+  `CF_ACCESS_AUD`; closes the forgeable plaintext-header hole (raw
+  `*.up.railway.app` origin bypasses CF). Recommended before wide sharing.
+- **`PcsPhotocardDetailModal` image robustness** — resolve via `getImageUrl`
+  like admin so future *unpublished* cards don't render broken. Small frontend
+  patch + redeploy.
+- **Auto-publish to R2** — design + build the scheduler/publish-on-add above.
+- Phase 4 (WASM `/guest/` sunset: redirect `/guest/*` → `/pcs/`, optional
+  backup-JSON importer) — deferred.
+
 ### 2026-06-28 (US CDT) — Guest `/pcs/` plan reconstructed + version filter shipped; listing-tracker parked
 
 Two things shipped to **main** (deployed via Railway), one branch parked.
