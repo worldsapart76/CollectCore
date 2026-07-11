@@ -36,3 +36,21 @@ class GuestBackupTables(BaseModel):
 class PcsGuestBackupImport(BaseModel):
     version: int = 1
     tables: GuestBackupTables
+
+
+# ── Trades (server-backed per-user, mirrors the guest tier's local trades) ──
+
+class PcsTradeCreate(BaseModel):
+    from_name: str
+    to_name: Optional[str] = None
+    notes: Optional[str] = None
+    include_backs: bool = False
+    catalog_item_ids: list[str] = []
+
+
+class PcsTradeDefaults(BaseModel):
+    # Field names avoid the Python `from` keyword; the frontend adapter maps
+    # to/from its {from, to, notes} shape.
+    from_name: Optional[str] = ""
+    to_name: Optional[str] = ""
+    notes: Optional[str] = ""

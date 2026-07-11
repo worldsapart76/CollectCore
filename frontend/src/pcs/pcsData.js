@@ -118,3 +118,31 @@ export async function importGuestBackup(snapshot) {
     "Failed to import guest backup",
   );
 }
+
+// --- Trades (server-backed per-user; mirrors the guest tier's local trades) ---
+
+export async function createPcsTrade(body) {
+  return asJson(await req("/pcs/trades", jsonBody("POST", body)), "Failed to create trade");
+}
+
+export async function listPcsTrades() {
+  return asJson(await req("/pcs/trades"), "Failed to list trades");
+}
+
+export async function deletePcsTrade(slug) {
+  return asJson(
+    await req(`/pcs/trades/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+    "Failed to delete trade",
+  );
+}
+
+export async function getPcsTradeDefaults() {
+  return asJson(await req("/pcs/trade-defaults"), "Failed to load trade defaults");
+}
+
+export async function savePcsTradeDefaults(defaults) {
+  return asJson(
+    await req("/pcs/trade-defaults", jsonBody("PUT", defaults)),
+    "Failed to save trade defaults",
+  );
+}

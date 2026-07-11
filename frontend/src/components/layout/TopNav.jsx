@@ -333,16 +333,18 @@ export default function TopNav({ theme, toggleTheme }) {
           </div>
         )}
 
-        {/* Module-specific nav links — admin-only for now. Guest module links
-            (Inbox, Export) are admin-only flows; revisit when guest-side
-            equivalents land (e.g. guest export). */}
-        {isAdmin && activeModule && (
+        {/* Module-specific nav links. Admin sees all; /pcs sees the non-admin
+            subset (e.g. Library + Trades, but not the admin-only Inbox). Other
+            non-admin builds (legacy WASM guest) keep the prior behavior. */}
+        {(isAdmin || isPcs) && activeModule && (
           <nav className="topnav-links topnav-desktop-only">
-            {activeModule.links.map(link => (
-              <NavLink key={link.to} to={link.to} className={navClass}>
-                {link.label}
-              </NavLink>
-            ))}
+            {activeModule.links
+              .filter(link => isAdmin || !link.adminOnly)
+              .map(link => (
+                <NavLink key={link.to} to={link.to} className={navClass}>
+                  {link.label}
+                </NavLink>
+              ))}
           </nav>
         )}
       </div>
@@ -451,15 +453,17 @@ export default function TopNav({ theme, toggleTheme }) {
         {activeModule && (
           <div className="topnav-nav-drawer__section">
             <div className="topnav-nav-drawer__label">{activeModule.label}</div>
-            {activeModule.links.map(link => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
-              >
-                {link.label}
-              </NavLink>
-            ))}
+            {activeModule.links
+              .filter(link => isAdmin || !link.adminOnly)
+              .map(link => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) => `topnav-nav-drawer__item${isActive ? " active" : ""}`}
+                >
+                  {link.label}
+                </NavLink>
+              ))}
           </div>
         )}
 

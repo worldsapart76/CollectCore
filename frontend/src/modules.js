@@ -5,7 +5,7 @@ export const MODULE_DEFS = {
     primaryPath: '/library',
     description: 'Track your photocard collection',
     links: [
-      { label: 'Inbox',   to: '/inbox' },
+      { label: 'Inbox',   to: '/inbox', adminOnly: true },
       { label: 'Library', to: '/library' },
       { label: 'Trades',  to: '/trades' },
     ],

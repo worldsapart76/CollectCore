@@ -10,13 +10,21 @@ the stable `catalog_item_id` contract, mirroring the deprecated tier's
 `guest_card_copies` model but stored server-side.
 """
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
 from auth import is_admin, require_user
 from constants import PHOTOCARD_COLLECTION_TYPE_ID
 from dependencies import get_db
-from schemas.pcs import PcsCopyCreate, PcsCopyUpdate, PcsGuestBackupImport
+from schemas.pcs import (
+    PcsCopyCreate,
+    PcsCopyUpdate,
+    PcsGuestBackupImport,
+    PcsTradeCreate,
+    PcsTradeDefaults,
+)
 
 router = APIRouter(prefix="/pcs", tags=["pcs"])
 
@@ -484,5 +492,164 @@ def pcs_delete_copy(
     if row[0] != user_id:
         raise HTTPException(status_code=403, detail="Not your copy")
     db.execute(text("DELETE FROM pcs_card_copies WHERE copy_id = :id"), {"id": copy_id})
+    db.commit()
+    return {"ok": True}
+
+
+# ── Trades (server-backed, per-user) ──────────────────────────────────────
+# The deprecated guest tier kept a user's trade list + default fields in
+# browser-local SQLite; the /pcs tier stores them server-side instead. Trade
+# rows live in the shared tbl_trades (so the public /trade/<slug> view is
+# unchanged); pcs_trades records which /pcs user owns each slug. Reuses the
+# trade-page builder from routers.trades to keep the payload format identical.
+
+@router.post("/trades", status_code=201)
+def pcs_create_trade(
+    payload: PcsTradeCreate,
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    from routers.trades import _fetch_payload_cards, _generate_slug, GUEST_TRADE_LIFETIME
+
+    user_id = _get_or_create_user(db, email)
+    cards = _fetch_payload_cards(db, payload.catalog_item_ids, payload.include_backs)
+    if not cards:
+        raise HTTPException(
+            status_code=400,
+            detail="No eligible cards in selection (missing catalog_item_id or a published front image).",
+        )
+    payload_json = json.dumps(
+        {"version": 1, "cards": cards}, ensure_ascii=False, separators=(",", ":")
+    )
+    slug = _generate_slug(db)
+    db.execute(
+        text(
+            "INSERT INTO tbl_trades "
+            "(slug, created_by, from_name, to_name, notes, include_backs, payload_json, expires_at) "
+            f"VALUES (:slug, 'guest', :fn, :tn, :nt, :ib, :pj, datetime('now', '{GUEST_TRADE_LIFETIME}'))"
+        ),
+        {
+            "slug": slug,
+            "fn": payload.from_name.strip(),
+            "tn": (payload.to_name or "").strip() or None,
+            "nt": (payload.notes or "").strip() or None,
+            "ib": 1 if payload.include_backs else 0,
+            "pj": payload_json,
+        },
+    )
+    db.execute(
+        text("INSERT INTO pcs_trades (user_id, slug) VALUES (:uid, :slug)"),
+        {"uid": user_id, "slug": slug},
+    )
+    row = db.execute(
+        text("SELECT created_at, expires_at FROM tbl_trades WHERE slug = :s"),
+        {"s": slug},
+    ).fetchone()
+    db.commit()
+    return {
+        "slug": slug,
+        "url": f"/trade/{slug}",
+        "card_count": len(cards),
+        "skipped_unpublished": max(0, len(payload.catalog_item_ids) - len(cards)),
+        "created_at": row[0],
+        "expires_at": row[1],
+    }
+
+
+@router.get("/trades")
+def pcs_list_trades(email: str = Depends(require_user), db=Depends(get_db)):
+    """The caller's own, non-expired trade pages (shape matches the guest tier
+    so the reused TradesPage renders without branching)."""
+    user_id = _get_or_create_user(db, email)
+    rows = db.execute(
+        text(
+            """
+            SELECT t.slug, t.from_name, t.to_name, t.notes, t.created_at, t.expires_at,
+                   (SELECT COUNT(*) FROM json_each(json_extract(t.payload_json, '$.cards'))) AS card_count
+            FROM pcs_trades p
+            JOIN tbl_trades t ON t.slug = p.slug
+            WHERE p.user_id = :uid
+              AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
+            ORDER BY t.created_at DESC
+            """
+        ),
+        {"uid": user_id},
+    )
+    out = []
+    for r in rows:
+        m = r._mapping
+        out.append({
+            "slug": m["slug"],
+            "from_name": m["from_name"],
+            "to_name": m["to_name"],
+            "name": m["to_name"],
+            "notes": m["notes"],
+            "card_count": m["card_count"],
+            "created_at": m["created_at"],
+            "expires_at": m["expires_at"],
+        })
+    return out
+
+
+@router.delete("/trades/{slug}")
+def pcs_delete_trade(slug: str, email: str = Depends(require_user), db=Depends(get_db)):
+    user_id = _get_or_create_user(db, email)
+    own = db.execute(
+        text("SELECT 1 FROM pcs_trades WHERE user_id = :uid AND slug = :s"),
+        {"uid": user_id, "s": slug},
+    ).fetchone()
+    if own is None:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    db.execute(text("DELETE FROM tbl_trades WHERE slug = :s"), {"s": slug})
+    db.execute(
+        text("DELETE FROM pcs_trades WHERE user_id = :uid AND slug = :s"),
+        {"uid": user_id, "s": slug},
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/trade-defaults")
+def pcs_get_trade_defaults(email: str = Depends(require_user), db=Depends(get_db)):
+    user_id = _get_or_create_user(db, email)
+    row = db.execute(
+        text("SELECT value FROM pcs_user_meta WHERE user_id = :uid AND key = 'trade_defaults'"),
+        {"uid": user_id},
+    ).fetchone()
+    data = {}
+    if row and row[0]:
+        try:
+            data = json.loads(row[0])
+        except (ValueError, TypeError):
+            data = {}
+    return {
+        "from_name": data.get("from_name", ""),
+        "to_name": data.get("to_name", ""),
+        "notes": data.get("notes", ""),
+    }
+
+
+@router.put("/trade-defaults")
+def pcs_put_trade_defaults(
+    payload: PcsTradeDefaults,
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    user_id = _get_or_create_user(db, email)
+    value = json.dumps({
+        "from_name": payload.from_name or "",
+        "to_name": payload.to_name or "",
+        "notes": payload.notes or "",
+    })
+    db.execute(
+        text(
+            """
+            INSERT INTO pcs_user_meta (user_id, key, value)
+            VALUES (:uid, 'trade_defaults', :v)
+            ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value
+            """
+        ),
+        {"uid": user_id, "v": value},
+    )
     db.commit()
     return {"ok": True}

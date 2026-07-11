@@ -1805,3 +1805,29 @@ CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user
     ON pcs_card_copies(user_id);
 CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user_card
     ON pcs_card_copies(user_id, catalog_item_id);
+
+-- Ownership map for /pcs-created trade pages. tbl_trades itself stays
+-- owner-agnostic (admin + legacy guest rows have no owner); this table records
+-- which authenticated /pcs user created a slug so they can list/delete their
+-- own. Additive — the public /trade/<slug> view is unchanged.
+CREATE TABLE IF NOT EXISTS pcs_trades (
+    user_id    INTEGER NOT NULL,
+    slug       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (user_id, slug),
+    FOREIGN KEY (user_id) REFERENCES pcs_users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pcs_trades_slug ON pcs_trades(slug);
+
+-- Per-user key/value settings for the /pcs tier (server-side counterpart to the
+-- deprecated guest tier's browser-local guest_meta). First use: trade default
+-- fields stored under key 'trade_defaults' as JSON.
+CREATE TABLE IF NOT EXISTS pcs_user_meta (
+    user_id INTEGER NOT NULL,
+    key     TEXT NOT NULL,
+    value   TEXT,
+
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES pcs_users(user_id)
+);

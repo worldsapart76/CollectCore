@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Button, Input, Textarea, Checkbox, FormField, Alert } from "../primitives";
 import { createTrade } from "../../api";
-import { isAdmin } from "../../utils/env";
+import { isAdmin, isPcs } from "../../utils/env";
 import { loadTradeDefaults, recordGuestTrade } from "../../utils/tradeDefaults";
 
 /**
@@ -68,10 +68,19 @@ export default function TradeCreateModal({ selectedCards, onClose, onCreated }) 
     }
 
     try {
-      const res = await createTrade(body);
-      // For guests, persist the slug locally so the guest's TradesPage can
-      // show their own trades (no server-side per-user identity).
-      if (!isAdmin) {
+      let res;
+      if (isPcs) {
+        // /pcs posts to the authenticated endpoint, which stamps ownership
+        // server-side (no local record needed). Dynamic import so pcsData
+        // stays out of the admin/guest bundles.
+        const { createPcsTrade } = await import("../../pcs/pcsData");
+        res = await createPcsTrade(body);
+      } else {
+        res = await createTrade(body);
+      }
+      // Legacy WASM guest has no server-side identity, so it persists the slug
+      // locally for its TradesPage. recordGuestTrade no-ops in admin + /pcs.
+      if (!isAdmin && !isPcs) {
         await recordGuestTrade({
           slug: res.slug,
           name: body.to_name || "Trade",

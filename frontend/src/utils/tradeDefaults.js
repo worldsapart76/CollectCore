@@ -6,7 +6,7 @@
 // builds because `isAdmin` is a Vite-inlined literal, so the import lives
 // inside an `if (false)` branch that Rollup eliminates.
 
-import { isAdmin, isGuestWasm } from "./env";
+import { isAdmin, isGuestWasm, isPcs } from "./env";
 import { fetchSettings, updateSetting } from "../api";
 
 const ADMIN_KEYS = {
@@ -29,6 +29,17 @@ function _loadGuestSqlite() {
   return _guestSqlitePromise;
 }
 
+let _pcsDataPromise = null;
+function _loadPcsData() {
+  // Only the /pcs build talks to the server trade endpoints. Guarding on the
+  // constant-folded isPcs makes this import dead code in admin/guest builds.
+  if (!isPcs) return Promise.reject(new Error("Not the /pcs build"));
+  if (!_pcsDataPromise) {
+    _pcsDataPromise = import("../pcs/pcsData");
+  }
+  return _pcsDataPromise;
+}
+
 export async function loadTradeDefaults() {
   if (isAdmin) {
     try {
@@ -38,6 +49,15 @@ export async function loadTradeDefaults() {
         to: all[ADMIN_KEYS.to] || "",
         notes: all[ADMIN_KEYS.notes] || "",
       };
+    } catch {
+      return { from: "", to: "", notes: "" };
+    }
+  }
+  if (isPcs) {
+    try {
+      const m = await _loadPcsData();
+      const d = await m.getPcsTradeDefaults();
+      return { from: d.from_name || "", to: d.to_name || "", notes: d.notes || "" };
     } catch {
       return { from: "", to: "", notes: "" };
     }
@@ -66,7 +86,12 @@ export async function saveTradeDefaults({ from, to, notes }) {
     ]);
     return;
   }
-  if (!isGuestWasm) return; // /pcs has no client-side trade defaults yet
+  if (isPcs) {
+    const m = await _loadPcsData();
+    await m.savePcsTradeDefaults({ from_name: from || "", to_name: to || "", notes: notes || "" });
+    return;
+  }
+  if (!isGuestWasm) return; // legacy WASM guest only past this point
   const m = await _loadGuestSqlite();
   await m.setGuestMeta(
     GUEST_DEFAULTS_KEY,
@@ -79,6 +104,7 @@ export async function saveTradeDefaults({ from, to, notes }) {
 // identity, so this is the only place that knows "these are mine."
 
 export async function recordGuestTrade(entry) {
+  // /pcs records ownership server-side at create time, so nothing to do here.
   if (!isGuestWasm) return;
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
@@ -88,6 +114,10 @@ export async function recordGuestTrade(entry) {
 }
 
 export async function listGuestTrades() {
+  if (isPcs) {
+    const m = await _loadPcsData();
+    return m.listPcsTrades(); // server already scopes to the caller + filters expired
+  }
   if (!isGuestWasm) return [];
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
@@ -100,6 +130,11 @@ export async function listGuestTrades() {
 }
 
 export async function removeGuestTrade(slug) {
+  if (isPcs) {
+    const m = await _loadPcsData();
+    await m.deletePcsTrade(slug); // also deletes the shared tbl_trades row
+    return;
+  }
   if (!isGuestWasm) return;
   const m = await _loadGuestSqlite();
   const raw = await m.getGuestMeta(GUEST_TRADES_KEY);
