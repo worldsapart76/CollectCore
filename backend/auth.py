@@ -80,8 +80,22 @@ def _team_domain() -> str:
     return d.replace("https://", "").replace("http://", "").rstrip("/")
 
 
+def _audiences() -> list[str]:
+    """Accepted CF Access application audience (AUD) tags (CF_ACCESS_AUD,
+    comma-separated).
+
+    Each Access application signs its JWTs with its OWN aud tag, so a multi-app
+    setup (the domain-wide admin app + the path-scoped `CollectCore PCS` app)
+    must accept BOTH — otherwise a token issued by one app is rejected on
+    requests authenticated to the other (e.g. only the PCS aud → admin's JWT
+    fails the audience check → admin gets locked out by the admin gate). PyJWT
+    passes a token whose `aud` claim matches ANY entry in this list.
+    """
+    return [a.strip() for a in os.environ.get("CF_ACCESS_AUD", "").split(",") if a.strip()]
+
+
 def _jwt_verification_enabled() -> bool:
-    return bool(_team_domain() and os.environ.get("CF_ACCESS_AUD", "").strip())
+    return bool(_team_domain() and _audiences())
 
 
 @functools.lru_cache(maxsize=1)
@@ -97,7 +111,7 @@ def _email_from_jwt(token: str) -> str | None:
         token,
         signing_key.key,
         algorithms=["RS256"],
-        audience=os.environ.get("CF_ACCESS_AUD", "").strip(),
+        audience=_audiences(),
         issuer=f"https://{_team_domain()}",
     )
     email = payload.get("email")
