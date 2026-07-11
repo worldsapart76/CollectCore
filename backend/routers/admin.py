@@ -465,7 +465,7 @@ def regenerate_seed():
 
 
 @router.post("/admin/publish-catalog")
-def publish_catalog():
+def publish_catalog(limit: int | None = None):
     """
     Sweeps any photocard image with storage_type='local' to R2, rewriting
     the DB row to storage_type='hosted' with the R2 URL. Triggers a
@@ -475,10 +475,17 @@ def publish_catalog():
     Run this after replacing or adding photocard images via the admin UI
     (those land on Railway local storage by default — guests can't reach
     them there because Cloudflare Access gates /images on api.*).
+
+    `limit` caps how many ITEMS one call processes and COMMITS. Each call is
+    atomic (commits its own batch), so a large backlog can be drained in
+    chunks that each finish inside Cloudflare's ~100s proxy timeout — call
+    repeatedly until `uploaded` comes back 0. None = publish everything in one
+    request (fine for small backlogs; will time out via Cloudflare for large
+    ones).
     """
     from catalog_publisher import publish_pending
     try:
-        info = publish_pending()
+        info = publish_pending(limit=limit)
         return {"ok": True, **info}
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
