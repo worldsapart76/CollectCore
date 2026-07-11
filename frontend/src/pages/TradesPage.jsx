@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Input, Textarea, FormField, Alert, ConfirmButton } from "../components/primitives";
 import { isAdmin } from "../utils/env";
+import { MOBILE_BREAKPOINT, useMediaQuery } from "../components/library/mobileGrid";
 import { listAdminTrades, deleteAdminTrade } from "../api";
 import { loadTradeDefaults, saveTradeDefaults, listGuestTrades, removeGuestTrade } from "../utils/tradeDefaults";
 
@@ -12,6 +13,7 @@ import { loadTradeDefaults, saveTradeDefaults, listGuestTrades, removeGuestTrade
 export default function TradesPage() {
   const [trades, setTrades] = useState(null);
   const [error, setError] = useState("");
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
 
   // Defaults editor state
   const [defaults, setDefaults] = useState({ from: "", to: "", notes: "" });
@@ -127,6 +129,35 @@ export default function TradesPage() {
           <div style={styles.empty}>
             No active trade pages. Open the <Link to="/library">Library</Link>, multi-select cards, and click <em>Generate Trade Page</em>.
           </div>
+        ) : isMobile ? (
+          // Mobile: stacked cards so the row wraps instead of scrolling the
+          // action buttons off-screen. Desktop keeps the table below unchanged.
+          <div style={styles.mobileList}>
+            {trades.map((t) => (
+              <div key={t.slug} style={styles.mobileCard}>
+                <Link to={`/trade/${t.slug}`} style={styles.mobileTitle}>
+                  {t.to_name || t.name || "(no name)"}
+                </Link>
+                {t.notes && <div style={styles.mobileNotes}>{t.notes}</div>}
+                <div style={styles.mobileMeta}>
+                  <span><strong>From:</strong> {t.from_name}</span>
+                  <span><strong>Cards:</strong> {t.card_count}</span>
+                  {t.created_at && <span><strong>Created:</strong> {new Date(t.created_at).toLocaleDateString()}</span>}
+                  {t.expires_at && <span><strong>Expires:</strong> {new Date(t.expires_at).toLocaleDateString()}</span>}
+                </div>
+                <div style={styles.mobileActions}>
+                  <Button size="sm" variant="secondary" onClick={() => handleCopy(t.slug)}>Copy URL</Button>
+                  <ConfirmButton
+                    label="Delete"
+                    size="sm"
+                    variant="danger"
+                    confirmLabel="Confirm"
+                    onConfirm={() => handleDelete(t.slug)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <table style={styles.table}>
             <thead>
@@ -188,6 +219,20 @@ const styles = {
   defaultsForm: { display: "flex", flexDirection: "column", gap: 12, maxWidth: 560 },
   defaultsActions: { display: "flex", justifyContent: "flex-end", marginTop: 4 },
   empty: { padding: "24px 8px", color: "#6b7280" },
+  // Mobile card layout for the trade list (desktop uses the table below).
+  mobileList: { display: "flex", flexDirection: "column", gap: 10 },
+  mobileCard: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 6,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  mobileTitle: { fontWeight: 600, fontSize: 15 },
+  mobileNotes: { fontSize: 12, color: "#6b7280", whiteSpace: "normal", wordBreak: "break-word" },
+  mobileMeta: { display: "flex", flexWrap: "wrap", gap: "4px 14px", fontSize: 13, color: "#374151" },
+  mobileActions: { display: "flex", flexWrap: "wrap", gap: 8 },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
   th: { textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", fontWeight: 500 },
   thActions: { padding: "6px 8px", borderBottom: "1px solid #e5e7eb" },
