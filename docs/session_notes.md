@@ -33,6 +33,17 @@ original goal is met. Commits: `f652537` (P1 backend), `d51c073` (P2 frontend),
   admin/module APIs) now require an admin email — a guest hitting
   `api.collectcoreapp.com/photocards` gets 403. Verified admin still works +
   guest is blocked. Rollback = unset the var.
+- **JWT hardening ENABLED** (`CF_ACCESS_TEAM_DOMAIN=collectcore.cloudflareaccess.com`,
+  `CF_ACCESS_AUD=<admin-aud>,<pcs-aud>` on Railway): the app now verifies the
+  signed `Cf-Access-Jwt-Assertion` and IGNORES the forgeable plaintext email
+  header, closing the raw-`*.up.railway.app`-origin spoof hole. Verified admin +
+  guest both work under JWT. **Required a code fix** (`33c9023`): each Access
+  application signs with its OWN aud tag, so `CF_ACCESS_AUD` is now
+  comma-separated and a token passes if its aud matches ANY entry — single-aud
+  would have locked out whichever app wasn't listed. Gotcha hit during setup: a
+  wrong team-domain value → JWKS DNS failure (`Errno -2 Name or service not
+  known`) → ALL verification fails (both apps 401/403); fix = correct the value,
+  rollback = unset both vars. Rollback reverts to plaintext-header trust.
 - **Frontend** (`frontend/src/pcs/*`, `.env.pcs`, `build:pcs`): reuses admin
   `PhotocardLibraryPage` via `pcsData.js` server-data adapter; env-flag
   tree-shaking (`VITE_IS_PCS`, derived `isGuestWasm`) keeps sqlite-wasm out of
@@ -48,9 +59,6 @@ user wants this automated (scheduled cron calling `/admin/publish-catalog`, or
 publish-on-add). Parked as a follow-up, not built.
 
 **Next (all optional, none blocking sharing):**
-- **JWT hardening** (runbook Step 6) — set `CF_ACCESS_TEAM_DOMAIN` +
-  `CF_ACCESS_AUD`; closes the forgeable plaintext-header hole (raw
-  `*.up.railway.app` origin bypasses CF). Recommended before wide sharing.
 - **`PcsPhotocardDetailModal` image robustness** — resolve via `getImageUrl`
   like admin so future *unpublished* cards don't render broken. Small frontend
   patch + redeploy.
