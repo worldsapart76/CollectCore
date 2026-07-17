@@ -4,6 +4,8 @@ import AppShell from "./components/layout/AppShell";
 import HomePage from "./pages/HomePage";
 import { activeModules } from "./modules";
 import InboxPage from "./pages/InboxPage";
+import BulkCreatePage from "./pages/BulkCreatePage";
+import BatchImagePage from "./pages/BatchImagePage";
 import PhotocardLibraryPage from "./pages/PhotocardLibraryPage";
 import AdminPage from "./pages/AdminPage";
 import BooksIngestPage from "./pages/BooksIngestPage";
@@ -87,6 +89,8 @@ function AppRoot() {
           element={singleModulePath ? <Navigate to={singleModulePath} replace /> : <HomePage />}
         />
         <Route path="/inbox" element={<InboxPage />} />
+        <Route path="/bulk-create" element={<BulkCreatePage />} />
+        <Route path="/batch-images" element={<BatchImagePage />} />
         <Route path="/library" element={<PhotocardLibraryPage />} />
         <Route path="/trades" element={<TradesPage />} />
         <Route path="/admin" element={<AdminPage />} />

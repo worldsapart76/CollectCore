@@ -194,6 +194,7 @@ export async function createPhotocard({
   sourceOriginId,
   version = null,
   memberIds,
+  isSpecial = false,
 }) {
   const res = await fetch(`${API}/photocards`, {
     method: "POST",
@@ -207,6 +208,7 @@ export async function createPhotocard({
       source_origin_id: sourceOriginId,
       version,
       member_ids: memberIds,
+      is_special: isSpecial,
     }),
   });
   return handleJsonResponse(res, "Failed to create photocard");
@@ -732,6 +734,14 @@ export async function publishCatalogToR2() {
 export async function publishAdminImagesToR2() {
   const res = await fetch(`${API}/admin/publish-admin-images`, { method: "POST" });
   return handleJsonResponse(res, "Admin image publish failed.");
+}
+
+// Publish every not-yet-committed photocard (catalog_item_id IS NULL) to the
+// catalog in one shot — no images required — so /pcs/ friends can see and track
+// bulk-created draft sets. The admin "grab everything unpublished and push it".
+export async function commitCatalogDrafts() {
+  const res = await fetch(`${API}/admin/publish-catalog-drafts`, { method: "POST" });
+  return handleJsonResponse(res, "Publish new cards to catalog failed.");
 }
 
 // --- Admin: Unused Lookup Cleanup ---

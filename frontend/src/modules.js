@@ -5,9 +5,11 @@ export const MODULE_DEFS = {
     primaryPath: '/library',
     description: 'Track your photocard collection',
     links: [
-      { label: 'Inbox',   to: '/inbox', adminOnly: true },
-      { label: 'Library', to: '/library' },
-      { label: 'Trades',  to: '/trades' },
+      { label: 'Inbox',        to: '/inbox', adminOnly: true },
+      { label: 'Bulk Create',  to: '/bulk-create', adminOnly: true },
+      { label: 'Batch Images', to: '/batch-images', adminOnly: true },
+      { label: 'Library',      to: '/library' },
+      { label: 'Trades',       to: '/trades' },
     ],
   },
   books: {
@@ -101,6 +103,6 @@ export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/video')) return 'video';
   if (pathname.startsWith('/boardgames')) return 'boardgames';
   if (pathname.startsWith('/ttrpg')) return 'ttrpg';
-  if (['/inbox', '/library', '/trades', '/trade'].some(p => pathname.startsWith(p))) return 'photocards';
+  if (['/inbox', '/bulk-create', '/batch-images', '/library', '/trades', '/trade'].some(p => pathname.startsWith(p))) return 'photocards';
   return null;
 }

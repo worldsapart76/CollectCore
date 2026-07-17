@@ -491,6 +491,44 @@ def publish_catalog(limit: int | None = None):
         raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
 
 
+class CommitCatalogPayload(BaseModel):
+    item_ids: List[int]
+
+
+@router.post("/admin/commit-catalog")
+def commit_catalog(payload: CommitCatalogPayload):
+    """
+    Make the given photocards catalog members (assign catalog_item_id + bump
+    catalog_version) **without requiring images** — the imageless-catalog path
+    so /pcs/ friends can see and track a set before scans exist.
+
+    Deliberate, explicit commit: bulk-created cards stay admin-only drafts
+    (freely deletable) until this runs. Idempotent — already-committed cards
+    are skipped.
+    """
+    from catalog_publisher import commit_items_to_catalog
+    try:
+        info = commit_items_to_catalog(payload.item_ids)
+        return {"ok": True, **info}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Commit failed: {exc}")
+
+
+@router.post("/admin/publish-catalog-drafts")
+def publish_catalog_drafts():
+    """
+    Publish every not-yet-committed photocard (catalog_item_id IS NULL) to the
+    catalog in one action — no images required. Makes bulk-created draft sets
+    visible/trackable for /pcs/ friends. Idempotent; safe to run anytime.
+    """
+    from catalog_publisher import commit_all_drafts
+    try:
+        info = commit_all_drafts()
+        return {"ok": True, **info}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Publish drafts failed: {exc}")
+
+
 @router.post("/admin/publish-admin-images")
 def publish_admin_images():
     """

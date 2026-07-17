@@ -44,11 +44,14 @@ CLI equivalents for offline/automation use.
   xref_photocard_members, tbl_attachments, lkup_photocard_groups,
   lkup_photocard_source_origins, lkup_photocard_members,
   lkup_top_level_categories } }`. Lookup tables only include rows
-  referenced by changed items. **No tombstones yet** — admin has no
-  remove-from-catalog flow today; tombstones land alongside the admin
-  publish UI (PD1). A pure lookup edit (e.g. group rename) won't
-  propagate until something bumps a related item's catalog_version —
-  known limitation.
+  referenced by changed items. **No tombstones in this WASM-delta path** —
+  and none planned: removals are handled on the server-backed `/pcs/` tier
+  (2026-07-17, live query — a deleted card just stops appearing; the deprecated
+  WASM `/guest/` mirror can't reflect removals and is frozen). A pure lookup edit
+  (e.g. group rename) won't propagate until something bumps a related item's
+  catalog_version — known limitation. See
+  `docs/photocard_bulk_create_and_batch_images_plan.md` for the imageless-catalog
+  commit path (`POST /admin/commit-catalog`) and removal design.
 - `GET /catalog/seed.db` → FileResponse of `backend/data/mobile_seed.db`
   (committed to repo) OR `DATA_ROOT/data/mobile_seed.db` (volume copy,
   preferred when present — written by Regenerate Guest Seed). R2 redirect

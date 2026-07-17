@@ -540,6 +540,16 @@ def bulk_delete_photocards(payload: BulkDeletePayload, db=Depends(get_db)):
     if len(found) != len(payload.item_ids):
         raise HTTPException(status_code=404, detail="One or more item_ids not found.")
 
+    # Capture catalog_item_ids before deletion so we can drop orphaned /pcs/
+    # copies (a friend's annotation of a card that's about to cease to exist).
+    # Catalog is no longer strictly monotonic — rare removals propagate; on
+    # /pcs/ the card just vanishes (live query), we only clean the dead rows.
+    catalog_ids = [
+        r[0] for r in db.execute(
+            text(f"SELECT catalog_item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND catalog_item_id IS NOT NULL"),
+        ).fetchall()
+    ]
+
     all_files = []
     for item_id in payload.item_ids:
         all_files.extend(delete_attachment_files(db, item_id))
@@ -548,6 +558,19 @@ def bulk_delete_photocards(payload: BulkDeletePayload, db=Depends(get_db)):
         db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
+
+    # Silently drop friends' /pcs/ annotations for the removed catalog cards
+    # (decided 2026-07-17 — removals are rare, mostly duplicate cleanup).
+    if catalog_ids:
+        has_pcs = db.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pcs_card_copies' LIMIT 1")
+        ).fetchone()
+        if has_pcs:
+            cat_ph = ",".join(f":c{i}" for i in range(len(catalog_ids)))
+            db.execute(
+                text(f"DELETE FROM pcs_card_copies WHERE catalog_item_id IN ({cat_ph})"),
+                {f"c{i}": cid for i, cid in enumerate(catalog_ids)},
+            )
 
     db.commit()
     remove_files(all_files)

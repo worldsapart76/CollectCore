@@ -326,10 +326,20 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
           decoding="async"
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
         />
-      ) : (
-        <div style={styles.imagePlaceholder}>
-          {side === "front" ? "No front" : "No back"}
+      ) : side === "front" ? (
+        // Intentional placeholder graphic (not a blank box) so a photo-less
+        // card reads as "awaiting photo" for admin and /pcs/ friends alike.
+        <div style={styles.frontPlaceholder}>
+          <svg viewBox="0 0 24 24" width="34%" height="34%" aria-hidden="true"
+               style={{ opacity: 0.5 }} fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="9" r="1.5" />
+            <path d="M21 16l-5-5-9 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div style={styles.frontPlaceholderLabel}>Awaiting photo</div>
         </div>
+      ) : (
+        <div style={styles.imagePlaceholder}>No back</div>
       )}
 
       {/* Primary badge (O or W) — bottom-left */}
@@ -387,6 +397,25 @@ const styles = {
     textAlign: "center",
     padding: 4,
     boxSizing: "border-box",
+  },
+  frontPlaceholder: {
+    width: "100%",
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    color: "var(--text-muted)",
+    background: "var(--bg-surface)",
+    boxSizing: "border-box",
+    padding: 4,
+  },
+  frontPlaceholderLabel: {
+    fontSize: 10,
+    letterSpacing: "0.03em",
+    textTransform: "uppercase",
+    opacity: 0.75,
   },
   ownershipBadge: {
     position: "absolute",

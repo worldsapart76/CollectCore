@@ -80,9 +80,21 @@ catalog; guests pull a snapshot then deltas. Everyday publishing = **Admin →
 Backup & Restore** → *Publish Photocard Images* (after replacing/batch-adding)
 and *Regenerate Guest Seed* (occasional baseline).
 
-**Guardrail: the catalog is monotonic** — cards never leave it; no tombstones,
-soft-delete, or remove-from-catalog flows. Delta endpoints, guest schema, backup
-format: `docs/catalog_architecture.md`.
+**Catalog membership = `catalog_item_id IS NOT NULL`, not ownership status, and
+no longer requires an image.** Cards enter the catalog at a deliberate commit
+step: *Publish Photocard Images* (when images exist) **or** `POST
+/admin/commit-catalog` (imageless — for placeholder sets so `/pcs/` friends can
+see/track cards before scans exist; assigns the deterministic
+`{group_code}_{item_id:06d}` id + bumps `catalog_version`). Bulk-created cards are
+admin-only drafts until committed.
+
+**Catalog removals are allowed but rare** (mostly pre-workflow duplicate cleanup)
+— reversed the old "monotonic / no removals" rule 2026-07-17. On `/pcs/` (live
+server query) a deleted card just disappears; `bulk_delete_photocards` also drops
+orphaned `pcs_card_copies` (silently). **No tombstones on `/pcs/`.** The
+deprecated WASM `/guest/` tier can't reflect removals — accepted; it's frozen.
+Delta endpoints, guest schema, backup format: `docs/catalog_architecture.md`.
+Full design: `docs/photocard_bulk_create_and_batch_images_plan.md`.
 
 ## Build & Release
 

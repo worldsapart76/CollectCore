@@ -253,6 +253,93 @@ def publish_pending(limit: Optional[int] = None) -> dict:
     }
 
 
+def commit_items_to_catalog(item_ids: list[int]) -> dict:
+    """
+    Make the given photocards catalog members by assigning catalog_item_id
+    **regardless of image presence** — the imageless-catalog path that lets
+    /pcs/ friends see and track cards before scans exist.
+
+    catalog_item_id is the deterministic `{group_code}_{item_id:06d}` string
+    (via _assign_catalog_item_id, which already falls back to it when there's
+    no front image). Bumps catalog_version on newly-committed items so the
+    guest delta propagates. Idempotent: already-committed items are skipped
+    (no re-assign, no version bump); non-photocard ids are ignored.
+    """
+    if not item_ids:
+        return {"committed": 0, "already": 0, "skipped_non_photocard": 0, "new_catalog_version": None}
+
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        photocards_id = conn.execute(
+            "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
+            (PHOTOCARDS_CODE,),
+        ).fetchone()[0]
+
+        committed: list[int] = []
+        already = 0
+        skipped_non_pc = 0
+        for item_id in item_ids:
+            row = conn.execute(
+                "SELECT collection_type_id, catalog_item_id FROM tbl_items WHERE item_id = ?",
+                (item_id,),
+            ).fetchone()
+            if not row or row[0] != photocards_id:
+                skipped_non_pc += 1
+                continue
+            if row[1]:
+                already += 1
+                continue
+            _assign_catalog_item_id(conn, item_id, photocards_id)
+            committed.append(item_id)
+
+        new_version = None
+        if committed:
+            cur = conn.execute("SELECT COALESCE(MAX(catalog_version), 0) FROM tbl_items").fetchone()[0]
+            new_version = (cur or 0) + 1
+            placeholders = ",".join("?" * len(committed))
+            conn.execute(
+                f"UPDATE tbl_items SET catalog_version = ? WHERE item_id IN ({placeholders})",
+                (new_version, *committed),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.info(
+        "Committed %d photocards to catalog (%d already, %d non-photocard skipped)",
+        len(committed), already, skipped_non_pc,
+    )
+    return {
+        "committed": len(committed),
+        "already": already,
+        "skipped_non_photocard": skipped_non_pc,
+        "new_catalog_version": new_version,
+    }
+
+
+def commit_all_drafts() -> dict:
+    """
+    Commit every uncommitted photocard (catalog_item_id IS NULL) to the catalog
+    in one shot — the admin-page "grab everything not yet published and push it"
+    action. Delegates to commit_items_to_catalog for the per-item assign +
+    version bump. Idempotent (already-committed cards aren't selected).
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        photocards_id = conn.execute(
+            "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
+            (PHOTOCARDS_CODE,),
+        ).fetchone()[0]
+        ids = [r[0] for r in conn.execute(
+            "SELECT item_id FROM tbl_items WHERE collection_type_id = ? AND catalog_item_id IS NULL",
+            (photocards_id,),
+        ).fetchall()]
+    finally:
+        conn.close()
+    return commit_items_to_catalog(ids)
+
+
 def sweep_r2_orphans() -> dict:
     """
     Delete any tbl_r2_orphans rows whose scheduled_delete_at has passed,

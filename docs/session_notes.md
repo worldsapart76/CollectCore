@@ -6,6 +6,36 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-07-17 (US CDT) — Photocard bulk-create + imageless catalog + batch-image window BUILT (dev)
+
+Built Phases 1–3 of `docs/photocard_bulk_create_and_batch_images_plan.md`
+(committed, **not yet deployed** — dev only). Motivator: onboard a new album era
+(Stray Kids) as placeholder cards before release, then attach scans en masse.
+
+- **Phase 1 — Bulk Create** (`frontend/src/pages/BulkCreatePage.jsx`, route
+  `/bulk-create`): set selectors + member checkboxes, two buttons — "Create
+  separate cards" (one per member) / "Create one combined card". Ownership fixed
+  to **Wanted** (admin's own annotation, invisible to /pcs/). Rides existing
+  `POST /photocards` (now passes `is_special`).
+- **Phase 2 — Imageless catalog membership + removal.** Reversed the "catalog is
+  monotonic" guardrail (CLAUDE.md + `project_catalog_is_monotonic` memory + this
+  doc synced). Catalog membership no longer needs an image: `commit_all_drafts()`
+  / `POST /admin/publish-catalog-drafts`, surfaced as **Admin → Publish New Cards
+  to Catalog** (grabs every `catalog_item_id IS NULL` photocard). Also
+  `commit_items_to_catalog()` / `POST /admin/commit-catalog`. Removals now
+  propagate: `bulk_delete_photocards` drops orphaned `pcs_card_copies` (silently);
+  on /pcs/ the card just vanishes (live query, no tombstones). Null-front cards
+  render an "Awaiting photo" placeholder graphic (admin + /pcs/).
+- **Phase 3 — Batch Images** (`frontend/src/pages/BatchImagePage.jsx`, route
+  `/batch-images`): inbox-style staged attach/replace — to-do pool + paginated
+  captioned card grid with front/back drop slots; images move pool⇄slots, ✕ /
+  Discard All return to pool, Save commits via `replace-front|back`. Verified in
+  the UI by the user; dev-DB test edits reverted from a per-card snapshot.
+
+**Next:** Phase 4 — let allowlisted /pcs/ friends fill null-front catalog cards
+(first non-admin write to catalog/R2; first-write-wins, no review queue). Own
+sub-plan vs `docs/guest_cloud_accounts_plan.md`. Then build + deploy Phases 1–3.
+
 ### 2026-07-10 (US CDT) — `/pcs/` authenticated guest tier BUILT + DEPLOYED + LIVE
 
 The cloud guest tier is **live in production and safe to share.** Phases 1–3 of

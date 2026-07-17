@@ -12,6 +12,19 @@ export const inboxState = {
   notes: "",
 };
 
+// Bulk placeholder-create page. Mirrors the inbox metadata form (minus image
+// handling) and persists across navigation via the JS module cache.
+export const bulkCreateState = {
+  groupId: "",
+  categoryId: "",
+  ownershipStatusId: "",
+  selectedMemberIds: [],
+  sourceOriginId: "",
+  isSpecial: false,
+  version: "",
+  notes: "",
+};
+
 const STORAGE_KEY_MCPR = "photocard.mobileCardsPerRow";
 
 function readMobileCardsPerRow() {

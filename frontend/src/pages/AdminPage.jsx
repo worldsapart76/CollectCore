@@ -15,6 +15,7 @@ import {
   mergeLookupRows,
   patchLookupRow,
   prepareBackup,
+  commitCatalogDrafts,
   publishAdminImagesToR2,
   publishCatalogToR2,
   regenerateGuestSeed,
@@ -104,6 +105,11 @@ function AdminPageImpl() {
   const [publishStatus, setPublishStatus] = useState(null);
   const [publishInfo, setPublishInfo] = useState(null);
   const [publishError, setPublishError] = useState(null);
+
+  // ── Publish new (imageless) cards to catalog ─────────────────────────────────
+  const [draftsStatus, setDraftsStatus] = useState(null);
+  const [draftsInfo, setDraftsInfo] = useState(null);
+  const [draftsError, setDraftsError] = useState(null);
 
   // ── Admin (non-photocard) cover image publish ────────────────────────────────
   const [adminPublishStatus, setAdminPublishStatus] = useState(null);
@@ -218,6 +224,18 @@ function AdminPageImpl() {
     } catch (e) {
       setPublishError(e.message || "Publish failed.");
       setPublishStatus("error");
+    }
+  }
+
+  async function handlePublishDrafts() {
+    setDraftsStatus("working"); setDraftsInfo(null); setDraftsError(null);
+    try {
+      const info = await commitCatalogDrafts();
+      setDraftsInfo(info);
+      setDraftsStatus("done");
+    } catch (e) {
+      setDraftsError(e.message || "Publish failed.");
+      setDraftsStatus("error");
     }
   }
 
@@ -440,6 +458,39 @@ function AdminPageImpl() {
             )}
             {publishStatus === "error" && (
               <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{publishError}</span>
+            )}
+          </div>
+
+          {/* Publish new (imageless) cards to catalog */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Publish New Cards to Catalog</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            Cards you create (e.g. via Bulk Create) start as admin-only drafts —
+            invisible to /pcs/ friends until published. This grabs every photocard
+            not yet in the catalog and publishes it, <strong>no images required</strong>,
+            so friends can see and track a new set/era before scans exist. Bumps
+            the catalog version.
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>When to run this:</strong> after bulk-creating a new set.
+            Safe to run anytime — cards already in the catalog are skipped.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={handlePublishDrafts}
+              disabled={draftsStatus === "working"}
+              style={{ padding: "5px 14px", cursor: draftsStatus === "working" ? "default" : "pointer" }}
+            >
+              {draftsStatus === "working" ? "Publishing…" : "Publish New Cards to Catalog"}
+            </button>
+            {draftsStatus === "done" && draftsInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                Published {draftsInfo.committed} card{draftsInfo.committed === 1 ? "" : "s"} to the catalog.
+                {draftsInfo.committed === 0 && " Nothing new to publish."}
+              </span>
+            )}
+            {draftsStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{draftsError}</span>
             )}
           </div>
 
