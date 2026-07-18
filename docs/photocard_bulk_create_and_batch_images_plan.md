@@ -1,8 +1,9 @@
 # Photocard Bulk Create, Imageless Catalog & Batch Image Window — Design & Phased Plan
 
-> **Status: in progress.** Brainstormed & partially built in the 2026-07-17
-> working session. **Phase 1 (bulk create) is built & verified.** Phases 2–4 are
-> designed, not built. This document is authoritative for the work.
+> **Status: DONE — all 4 phases built, deployed to Railway, and live in prod
+> (2026-07-17).** Verified end-to-end incl. a prod /pcs upload test (cleaned up
+> after). Commits `48a8c91` (P1–3), `b415486` (P4 + dev R2 kill-switch),
+> `c0bb8b8` (pcs modal fix). Kept as the authoritative design record.
 >
 > Motivating use case: a new album era (e.g. Stray Kids) drops with new card sets
 > that need to exist in the app *before* release day (as placeholders), then get

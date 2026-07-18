@@ -6,11 +6,14 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-07-17 (US CDT) — Photocard bulk-create + imageless catalog + batch-image window BUILT (dev)
+### 2026-07-17 (US CDT) — Photocard bulk-create + imageless catalog + batch-image window + /pcs uploads DEPLOYED + LIVE
 
-Built Phases 1–3 of `docs/photocard_bulk_create_and_batch_images_plan.md`
-(committed, **not yet deployed** — dev only). Motivator: onboard a new album era
-(Stray Kids) as placeholder cards before release, then attach scans en masse.
+All 4 phases of `docs/photocard_bulk_create_and_batch_images_plan.md` **built,
+deployed to Railway, and verified live in prod.** Commits `48a8c91` (P1–3),
+`b415486` (P4 + dev R2 kill-switch), `c0bb8b8` (pcs modal image-stretch fix).
+Phase 4 tested end-to-end in prod on throwaway cards (18102/18103), then cleaned
+up (cards bulk-deleted; their R2 objects removed). Motivator: onboard a new album
+era (Stray Kids) as placeholder cards before release, then attach scans en masse.
 
 - **Phase 1 — Bulk Create** (`frontend/src/pages/BulkCreatePage.jsx`, route
   `/bulk-create`): set selectors + member checkboxes, two buttons — "Create
@@ -43,8 +46,9 @@ Built Phases 1–3 of `docs/photocard_bulk_create_and_batch_images_plan.md`
   `_make_r2_client`s refuse, `sweep_r2_orphans` skips, pcs upload goes local. Dev
   is now R2-inert; **prod must leave the var unset.**
 
-**Next:** build + push to deploy Phases 1–4 (Railway). Note the /pcs/ upload UI
-lives in the pcs bundle (`build:pcs` → `backend/frontend_dist_pcs/`).
+**Nothing left open** on this work — all shipped. (Reference: the /pcs/ upload UI
+lives in the pcs bundle, `build:pcs` → `backend/frontend_dist_pcs/`; prod must
+leave `COLLECTCORE_DISABLE_R2` unset — it's dev-`.env` only.)
 
 ### 2026-07-10 (US CDT) — `/pcs/` authenticated guest tier BUILT + DEPLOYED + LIVE
 
