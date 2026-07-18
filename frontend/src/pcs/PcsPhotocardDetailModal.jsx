@@ -9,13 +9,14 @@
 // Owned/Wanted mutual exclusion is enforced client-side here, mirroring
 // admin's server-side rule, to keep the UX consistent.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Modal from "../components/primitives/Modal";
 import { useSwipeNav } from "../hooks/useSwipeNav";
 import {
   addPcsCardCopy,
   updatePcsCardCopy,
   deletePcsCardCopy,
+  uploadPcsImage,
 } from "./pcsData";
 
 // Match admin's status_code values (from lkup_ownership_statuses).
@@ -63,6 +64,21 @@ export default function PcsPhotocardDetailModal({
   const [copies, setCopies] = useState(() => initialCopies(currentCard));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [uploadingSide, setUploadingSide] = useState(null);
+
+  async function handleUpload(side, file) {
+    if (!file || uploadingSide) return;
+    setUploadingSide(side);
+    setError("");
+    try {
+      await uploadPcsImage(currentCard.item_id, side, file);
+      onChanged?.(); // parent reloads → currentCard picks up the new image
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setUploadingSide(null);
+    }
+  }
 
   useEffect(() => {
     setCopies(initialCopies(currentCard));
@@ -264,11 +280,19 @@ export default function PcsPhotocardDetailModal({
         {...swipeHandlers}
         style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}
       >
-        {/* Cover images */}
+        {/* Cover images — empty slots offer an "Add photo" that becomes THE
+            shared catalog image for everyone (first-write-wins). */}
         <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-          <CardImage path={currentCard?.front_image_path} alt="Front" />
-          {currentCard?.back_image_path && <CardImage path={currentCard.back_image_path} alt="Back" />}
+          <CardImage path={currentCard?.front_image_path} alt="Front" side="front"
+            onUpload={handleUpload} uploading={uploadingSide === "front"} />
+          <CardImage path={currentCard?.back_image_path} alt="Back" side="back"
+            onUpload={handleUpload} uploading={uploadingSide === "back"} />
         </div>
+        {(!currentCard?.front_image_path || !currentCard?.back_image_path) && (
+          <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 11, marginTop: -8 }}>
+            Have this card? Add a photo — it becomes the shared catalog image for everyone.
+          </div>
+        )}
 
         {/* Catalog metadata (read-only) */}
         <div
@@ -390,24 +414,59 @@ function Field({ label, value }) {
   );
 }
 
-function CardImage({ path, alt }) {
+function CardImage({ path, alt, side, onUpload, uploading }) {
   const url = resolveImageUrl(path);
+  const inputRef = useRef(null);
   if (!url) {
     return (
-      <div
-        style={{
-          width: 140,
-          aspectRatio: "65 / 100",
-          background: "var(--bg-placeholder, #eee)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--text-muted)",
-          fontSize: 11,
-          borderRadius: 4,
-        }}
-      >
-        {alt}: no image
+      <div style={{ width: 140, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+        <div
+          style={{
+            width: 140,
+            aspectRatio: "65 / 100",
+            background: "var(--bg-placeholder, #eee)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-muted)",
+            fontSize: 11,
+            borderRadius: 4,
+          }}
+        >
+          {alt}: no image
+        </div>
+        {onUpload && (
+          <>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+              style={{
+                padding: "4px 10px",
+                fontSize: 12,
+                borderRadius: 3,
+                border: "1px solid var(--border-input)",
+                background: "var(--bg-base)",
+                color: "var(--text-primary)",
+                cursor: uploading ? "default" : "pointer",
+                opacity: uploading ? 0.6 : 1,
+              }}
+            >
+              {uploading ? "Uploading…" : `Add ${alt.toLowerCase()} photo`}
+            </button>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) onUpload(side, f);
+              }}
+            />
+          </>
+        )}
       </div>
     );
   }

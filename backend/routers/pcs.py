@@ -11,8 +11,9 @@ the stable `catalog_item_id` contract, mirroring the deprecated tier's
 """
 
 import json
+import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import text
 
 from auth import is_admin, require_user
@@ -222,6 +223,131 @@ def pcs_photocards(email: str = Depends(require_user), db=Depends(get_db)):
             "copies": copies,
         })
     return out
+
+
+# ── Contribute a catalog image (fill an empty front/back) ──────────────────
+# First non-admin write into the shared catalog / to R2. A friend can fill a
+# side that is currently EMPTY; existing images are never overwritten
+# (first-write-wins → 409). Publish-on-attach: prod uploads straight to the
+# catalog R2 key; dev (no R2) writes locally. See the plan doc, Phase 4.
+
+_MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
+
+
+def _pcs_attach_catalog_image(db, item_id: int, side: str, file: UploadFile, user_id: int) -> dict:
+    from catalog_publisher import _resize_to_jpeg  # resize + validates it's an image
+
+    row = db.execute(
+        text(
+            """
+            SELECT catalog_item_id FROM tbl_items
+            WHERE item_id = :id AND collection_type_id = :pc
+              AND catalog_item_id IS NOT NULL
+            """
+        ),
+        {"id": item_id, "pc": PHOTOCARD_COLLECTION_TYPE_ID},
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Catalog card not found")
+    catalog_item_id = row[0]
+
+    # First-write-wins: never overwrite an existing image (any storage type).
+    if db.execute(
+        text("SELECT 1 FROM tbl_attachments WHERE item_id = :id AND attachment_type = :s LIMIT 1"),
+        {"id": item_id, "s": side},
+    ).fetchone():
+        raise HTTPException(status_code=409, detail=f"This card already has a {side} image.")
+
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 15 MB).")
+    try:
+        body = _resize_to_jpeg(raw)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not read that image.")
+
+    side_letter = "f" if side == "front" else "b"
+    # Dev safety: backend/.env carries prod R2 creds, so a naive "R2 if creds
+    # present" would publish dev uploads to the PRODUCTION bucket. Setting
+    # COLLECTCORE_DISABLE_R2=1 (dev .env) forces local storage instead. Prod
+    # (Railway) leaves it unset, so real uploads still publish to R2.
+    disable_r2 = os.environ.get("COLLECTCORE_DISABLE_R2", "").strip().lower() in ("1", "true", "yes")
+    public_base = "" if disable_r2 else os.environ.get("R2_PUBLIC_BASE_URL", "").strip()
+    if public_base:
+        # Prod: publish straight to the catalog R2 key. Brand-new attachment → _v1.
+        from catalog_publisher import _make_r2_client, _require_env
+        key = f"catalog/images/{catalog_item_id}_{side_letter}_v1.jpg"
+        _make_r2_client().put_object(
+            Bucket=_require_env("R2_BUCKET"),
+            Key=key,
+            Body=body,
+            ContentType="image/jpeg",
+            CacheControl="public, max-age=31536000, immutable",
+        )
+        file_path = f"{public_base.rstrip('/')}/{key}"
+        storage_type = "hosted"
+    else:
+        # Dev (no R2): write locally, same deterministic name admin publish expects.
+        from file_helpers import LIBRARY_DIR
+        LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+        fname = f"{catalog_item_id}_{side_letter}.jpg"
+        (LIBRARY_DIR / fname).write_bytes(body)
+        file_path = f"images/library/{fname}"
+        storage_type = "local"
+
+    db.execute(
+        text(
+            """
+            INSERT INTO tbl_attachments
+                (item_id, attachment_type, file_path, storage_type, mime_type, display_order, image_version)
+            VALUES (:id, :s, :fp, :st, 'image/jpeg', 0, 1)
+            """
+        ),
+        {"id": item_id, "s": side, "fp": file_path, "st": storage_type},
+    )
+    # Bump catalog_version so the change propagates (guest delta / seed).
+    db.execute(
+        text(
+            "UPDATE tbl_items SET catalog_version = "
+            "(SELECT COALESCE(MAX(catalog_version), 0) + 1 FROM tbl_items) WHERE item_id = :id"
+        ),
+        {"id": item_id},
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO pcs_image_contributions (item_id, catalog_item_id, side, user_id)
+            VALUES (:id, :ci, :s, :uid)
+            """
+        ),
+        {"id": item_id, "ci": catalog_item_id, "s": side, "uid": user_id},
+    )
+    db.commit()
+    return {"ok": True, "item_id": item_id, "side": side, "file_path": file_path, "storage_type": storage_type}
+
+
+@router.post("/photocards/{item_id}/upload-front")
+def pcs_upload_front(
+    item_id: int,
+    file: UploadFile = File(...),
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    user_id = _get_or_create_user(db, email)
+    return _pcs_attach_catalog_image(db, item_id, "front", file, user_id)
+
+
+@router.post("/photocards/{item_id}/upload-back")
+def pcs_upload_back(
+    item_id: int,
+    file: UploadFile = File(...),
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    user_id = _get_or_create_user(db, email)
+    return _pcs_attach_catalog_image(db, item_id, "back", file, user_id)
 
 
 # ── Read-only lookups (namespaced under /pcs so the whole guest surface sits

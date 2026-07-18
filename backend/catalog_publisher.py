@@ -47,7 +47,21 @@ RESIZE_MAX = (600, 924)
 JPEG_QUALITY = 80
 
 
+def _r2_disabled() -> bool:
+    """
+    Dev kill-switch. backend/.env carries PROD R2 creds and main.py loads it, so
+    without this any R2 op in dev would read/write/delete the production bucket.
+    Set COLLECTCORE_DISABLE_R2=1 in dev .env; prod (Railway) leaves it unset.
+    """
+    return os.environ.get("COLLECTCORE_DISABLE_R2", "").strip().lower() in ("1", "true", "yes")
+
+
 def _make_r2_client():
+    # Central chokepoint: no R2 client is ever created when the kill-switch is on.
+    if _r2_disabled():
+        raise RuntimeError(
+            "R2 is disabled in this environment (COLLECTCORE_DISABLE_R2) — refusing to touch the production bucket."
+        )
     import boto3
     from botocore.config import Config
 
@@ -351,6 +365,9 @@ def sweep_r2_orphans() -> dict:
     Called from main.py at startup and (eventually) from a daily cron.
     No-op when R2 env vars are absent (e.g. local dev without R2 creds).
     """
+    if _r2_disabled():
+        logger.info("sweep_r2_orphans: R2 disabled (COLLECTCORE_DISABLE_R2) — skipping")
+        return {"deleted": 0, "skipped_disabled": True}
     if not os.environ.get("R2_PUBLIC_BASE_URL"):
         logger.info("sweep_r2_orphans: R2 env vars unset — skipping")
         return {"deleted": 0, "skipped_no_r2": True}

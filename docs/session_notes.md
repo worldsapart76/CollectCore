@@ -31,10 +31,20 @@ Built Phases 1–3 of `docs/photocard_bulk_create_and_batch_images_plan.md`
   captioned card grid with front/back drop slots; images move pool⇄slots, ✕ /
   Discard All return to pool, Save commits via `replace-front|back`. Verified in
   the UI by the user; dev-DB test edits reverted from a per-card snapshot.
+- **Phase 4 — /pcs/ friends fill missing images** (`backend/routers/pcs.py`
+  `POST /pcs/photocards/{item_id}/upload-front|back`, `pcs_image_contributions`
+  table; `pcsData.uploadPcsImage`; "Add photo" on empty slots in
+  `PcsPhotocardDetailModal`): friend fills an empty front/back → becomes THE
+  catalog image, first-write-wins (409), attribution recorded, bumps
+  `catalog_version`. **First non-admin write to catalog/R2.** Verified e2e.
+- **Dev R2 kill-switch:** discovered `backend/.env` holds PROD R2 creds (loaded by
+  `main.py`), so the dev app writes to the **prod** bucket (my first Phase 4 test
+  did — objects deleted). Added `COLLECTCORE_DISABLE_R2` (dev `.env`): both
+  `_make_r2_client`s refuse, `sweep_r2_orphans` skips, pcs upload goes local. Dev
+  is now R2-inert; **prod must leave the var unset.**
 
-**Next:** Phase 4 — let allowlisted /pcs/ friends fill null-front catalog cards
-(first non-admin write to catalog/R2; first-write-wins, no review queue). Own
-sub-plan vs `docs/guest_cloud_accounts_plan.md`. Then build + deploy Phases 1–3.
+**Next:** build + push to deploy Phases 1–4 (Railway). Note the /pcs/ upload UI
+lives in the pcs bundle (`build:pcs` → `backend/frontend_dist_pcs/`).
 
 ### 2026-07-10 (US CDT) — `/pcs/` authenticated guest tier BUILT + DEPLOYED + LIVE
 

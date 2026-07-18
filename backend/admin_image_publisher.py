@@ -53,6 +53,12 @@ MODULES = {
 
 
 def _make_r2_client():
+    # Dev kill-switch — see catalog_publisher._r2_disabled. backend/.env holds
+    # PROD R2 creds, so without this a dev cover-image publish would hit prod R2.
+    if os.environ.get("COLLECTCORE_DISABLE_R2", "").strip().lower() in ("1", "true", "yes"):
+        raise RuntimeError(
+            "R2 is disabled in this environment (COLLECTCORE_DISABLE_R2) — refusing to touch the production bucket."
+        )
     import boto3
     from botocore.config import Config
 

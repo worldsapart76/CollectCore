@@ -1806,6 +1806,22 @@ CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user
 CREATE INDEX IF NOT EXISTS idx_pcs_card_copies_user_card
     ON pcs_card_copies(user_id, catalog_item_id);
 
+-- Attribution for /pcs-contributed catalog images (a friend filling an empty
+-- front/back on a catalog card — the upload becomes THE shared catalog image).
+-- One row per successful upload; the image itself lives in tbl_attachments.
+CREATE TABLE IF NOT EXISTS pcs_image_contributions (
+    contribution_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id         INTEGER NOT NULL,
+    catalog_item_id TEXT NOT NULL,
+    side            TEXT NOT NULL,          -- 'front' | 'back'
+    user_id         INTEGER NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES pcs_users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pcs_image_contributions_item
+    ON pcs_image_contributions(item_id);
+
 -- Ownership map for /pcs-created trade pages. tbl_trades itself stays
 -- owner-agnostic (admin + legacy guest rows have no owner); this table records
 -- which authenticated /pcs user created a slug so they can list/delete their

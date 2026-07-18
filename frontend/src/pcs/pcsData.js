@@ -109,6 +109,22 @@ export async function deletePcsCardCopy(copyId) {
   );
 }
 
+// Contribute a catalog image to a card's empty front/back slot. The upload
+// becomes THE shared catalog image (first-write-wins; 409 if the side is
+// already filled). Multipart — no JSON Content-Type, so the browser sets the
+// multipart boundary itself. Keyed by item_id (matches tbl_attachments).
+export async function uploadPcsImage(itemId, side, file) {
+  const form = new FormData();
+  form.append("file", file);
+  return asJson(
+    await req(`/pcs/photocards/${encodeURIComponent(itemId)}/upload-${side}`, {
+      method: "POST",
+      body: form,
+    }),
+    "Failed to upload image",
+  );
+}
+
 // --- Migration: import a deprecated /guest/ WASM "Download Backup" file ---
 // REPLACE strategy server-side (wipes this account's copies, then inserts the
 // backup's). Pass the parsed backup JSON verbatim; returns import counts.

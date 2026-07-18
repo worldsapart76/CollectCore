@@ -217,30 +217,57 @@ the green-border / bold-green treatment was cut. No work here.
 
 ---
 
-## Phase 4 (last): /pcs/ friends fill missing images
+## Phase 4 (last): /pcs/ friends fill missing images — ✅ BUILT (2026-07-17)
 
-**Goal:** Let allowlisted /pcs/ friends attach images to null-front catalog cards;
-the upload becomes THE catalog image for everyone.
+**Goal:** Let allowlisted /pcs/ friends attach images to empty front/back catalog
+slots; the upload becomes THE catalog image for everyone.
+
+**Built:** `POST /pcs/photocards/{item_id}/upload-front|back` (`backend/routers/pcs.py`,
+`require_user`-gated) → validates catalog card + empty side (409 if filled),
+resizes, publishes to R2 (prod) or writes local (dev), inserts the `hosted`/`local`
+`tbl_attachments` row, bumps `catalog_version`, records attribution in new
+`pcs_image_contributions` table. Frontend: `uploadPcsImage()` in `pcsData.js`;
+"Add front/back photo" affordance on empty slots in `PcsPhotocardDetailModal`
+(both slots always rendered). Verified end-to-end (upload → attachment → version
+bump → contribution → first-write-wins 409 → appears in `/pcs/`).
+
+**Dev R2 kill-switch (important):** `backend/.env` carries **prod** R2 creds and
+`main.py` loads it, so the dev app would otherwise read/write/delete the
+**production** bucket. `COLLECTCORE_DISABLE_R2=1` (dev `.env`, gitignored) now makes
+dev fully R2-inert: `catalog_publisher._make_r2_client` and
+`admin_image_publisher._make_r2_client` refuse (so both admin publish flows fail
+loud, never touching R2), `sweep_r2_orphans` skips at startup (no auto-deletes),
+and the pcs upload stores local. Prod (Railway) leaves the var unset → normal R2.
+Verified: sweep skipped, both publishes refused, pcs upload local. (CLI tools in
+`tools/` are separate manual scripts — not covered, not run by the server.)
 
 > Still the guardrail-crossing piece (**first non-admin write into the catalog /
 > to R2**). Its own careful sub-plan against `docs/guest_cloud_accounts_plan.md`.
 > Now unblocked by Phase 2 (cards are already friend-visible before images exist).
 
-### Locked rules
-- **Null-front cards only** — friends fill an empty front (and/or back); can
-  **never overwrite** an existing catalog image. Admin retains the normal replace
-  flow to fix anything.
-- **Becomes THE catalog image** for everyone.
+### Locked rules (decisions 2026-07-17)
+- **Empty slots only, front AND back** — a friend can fill either side that is
+  currently missing; can **never overwrite** an existing image. Admin retains the
+  normal replace flow to fix anything.
+- **Becomes THE catalog image** for everyone (publish-on-attach).
 - **No review queue** — trust-and-attach for the allowlist.
-- **First-write-wins** — once a card has an image it drops off everyone's
-  needs-image grid; a concurrent second upload is rejected.
+- **First-write-wins** — once a side has an image, further uploads to it are
+  rejected (409). Enforced by re-checking "no attachment for this side" inside
+  the write.
+- **UI = per-card "Add photo" in the /pcs/ library** — cards with a null front
+  and/or back show an upload/drop affordance on the empty slot(s), right in the
+  existing library view. No separate page.
 
-### Open design items (detail when this phase starts)
-- Auth gate on the /pcs/ upload endpoint; server-side resize + publish-on-attach
-  (friends can't run the admin publish button); land at the catalog R2 key and
-  bump `catalog_version`.
-- Attribution (which /pcs/ user contributed).
-- DB-level enforcement of first-write-wins (guard against the race).
+### Build plan
+- **Backend:** `POST /pcs/photocards/{catalog_item_id}/image` (multipart `file` +
+  `side`), gated by `require_user`. Validates: catalog card exists; that side is
+  currently empty (else 409); file is a valid image within a size cap. Resizes +
+  uploads straight to the catalog R2 key `catalog/images/{catalog_item_id}_{f|b}_v1.jpg`
+  (reuse `catalog_publisher._resize_to_jpeg` / `_make_r2_client`), inserts the
+  `tbl_attachments` row as `hosted`, bumps `catalog_version`. Records contributor
+  (which pcs user). Publish-on-attach — friends can't run the admin publish button.
+- **Frontend:** `uploadPcsImage(catalogItemId, side, file)` wrapper; per-card
+  affordance on null-image slots in the /pcs/ library, pcs-build only.
 
 ### Milestone: a /pcs/ friend attaches a front/back to a null-front catalog card and it becomes the shared catalog image, published and propagated.
 
