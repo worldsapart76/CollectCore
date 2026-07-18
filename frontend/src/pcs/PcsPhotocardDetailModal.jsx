@@ -281,8 +281,10 @@ export default function PcsPhotocardDetailModal({
         style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}
       >
         {/* Cover images — empty slots offer an "Add photo" that becomes THE
-            shared catalog image for everyone (first-write-wins). */}
-        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+            shared catalog image for everyone (first-write-wins). align-items:
+            flex-start so a filled slot keeps its aspect ratio instead of
+            stretching to match an empty slot's taller (box + button) column. */}
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "flex-start" }}>
           <CardImage path={currentCard?.front_image_path} alt="Front" side="front"
             onUpload={handleUpload} uploading={uploadingSide === "front"} />
           <CardImage path={currentCard?.back_image_path} alt="Back" side="back"
