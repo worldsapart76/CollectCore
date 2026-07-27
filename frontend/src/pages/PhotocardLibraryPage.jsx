@@ -60,7 +60,7 @@ const DEFAULT_FILTERS = {
   cardType: emptySection(),
   version: emptySection(),
   ownership: emptySection(),
-  backImage: emptySection(),
+  imageStatus: emptySection(),
 };
 
 const SORT_OPTIONS = [
@@ -333,10 +333,15 @@ export default function PhotocardLibraryPage() {
       );
     }
 
-    if (sectionActive(filters.backImage)) {
-      result = result.filter((c) =>
-        applySection(filters.backImage, [c.back_image_path ? "has_back" : "no_back"])
-      );
+    if (sectionActive(filters.imageStatus)) {
+      result = result.filter((c) => {
+        // A card emits a token for each side it's MISSING. Cards with both
+        // images emit no tokens, so any active include filters them out.
+        const missing = [];
+        if (!c.front_image_path) missing.push("missing_front");
+        if (!c.back_image_path) missing.push("missing_back");
+        return applySection(filters.imageStatus, missing);
+      });
     }
 
     if (filters.notesSearch?.trim()) {

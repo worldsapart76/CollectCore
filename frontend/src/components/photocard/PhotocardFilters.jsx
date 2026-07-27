@@ -10,7 +10,7 @@
  *   cardType      — { mode, include, exclude }  ("special" | "regular")
  *   version       — { mode, include, exclude }  (version string)
  *   ownership     — { mode, include, exclude }  (ownership_status_id)
- *   backImage     — { mode, include, exclude }  ("has_back" | "no_back")
+ *   imageStatus   — { mode, include, exclude }  ("missing_front" | "missing_back")
  *
  * Props:
  *   groups            — array of { group_id, group_name }
@@ -50,7 +50,7 @@ export default function PhotocardFilters({
     sectionActive(filters.cardType) ||
     sectionActive(filters.version) ||
     sectionActive(filters.ownership) ||
-    sectionActive(filters.backImage);
+    sectionActive(filters.imageStatus);
 
   return (
     <FilterSidebarShell
@@ -129,13 +129,13 @@ export default function PhotocardFilters({
       />
 
       <TriStateFilterSection
-        title="Back Image"
+        title="Image"
         items={[
-          { id: "has_back", label: "Has Back" },
-          { id: "no_back", label: "Missing Back" },
+          { id: "missing_front", label: "Missing Front" },
+          { id: "missing_back", label: "Missing Back" },
         ]}
-        section={filters.backImage}
-        onChange={(s) => onSectionChange("backImage", s)}
+        section={filters.imageStatus}
+        onChange={(s) => onSectionChange("imageStatus", s)}
       />
     </FilterSidebarShell>
   );
