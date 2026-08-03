@@ -21,8 +21,10 @@ so in-flight trade pages and stale guest catalogs keep working). The next
 publish run lands at the new versioned key. See sweep_r2_orphans() for the
 delete-after-7-days half of this story.
 
-After all uploads complete, bumps catalog_version (global MAX + 1) on every
-touched item so guests pick up the new R2 URLs via the next /catalog/delta.
+Each item commits on its own (catalog_item_id + attachment rows + a
+catalog_version bump of global MAX + 1) so guests pick up the new R2 URLs via
+the next /catalog/delta. Uploads deliberately run outside the write transaction:
+holding it across R2 network calls locked out every other request.
 
 Idempotent: rows with storage_type='hosted' are skipped — no re-upload,
 no version bump.
@@ -35,7 +37,7 @@ import re
 import sqlite3
 from typing import Optional
 
-from db import DB_PATH
+from db import raw_connect
 from file_helpers import IMAGES_DIR
 
 
@@ -98,9 +100,15 @@ def _resize_to_jpeg(src_bytes: bytes) -> bytes:
         return buf.getvalue()
 
 
-def _assign_catalog_item_id(
+def _derive_catalog_item_id(
     conn: sqlite3.Connection, item_id: int, photocards_id: int
-) -> str:
+) -> tuple[str, bool]:
+    """Read-only half of _assign_catalog_item_id.
+
+    Returns (catalog_item_id, needs_write). Split out so publish_pending can do
+    the lookup outside a write transaction and defer the UPDATE until after the
+    slow R2 work is done.
+    """
     row = conn.execute(
         """
         SELECT i.catalog_item_id, g.group_code, a.file_path
@@ -117,7 +125,7 @@ def _assign_catalog_item_id(
         raise RuntimeError(f"photocard item_id={item_id} not found")
     existing, group_code, front_path = row
     if existing:
-        return existing
+        return existing, False
 
     derived = None
     if front_path:
@@ -127,10 +135,18 @@ def _assign_catalog_item_id(
     if derived is None:
         derived = f"{group_code}_{item_id:06d}"
 
-    conn.execute(
-        "UPDATE tbl_items SET catalog_item_id = ? WHERE item_id = ?",
-        (derived, item_id),
-    )
+    return derived, True
+
+
+def _assign_catalog_item_id(
+    conn: sqlite3.Connection, item_id: int, photocards_id: int
+) -> str:
+    derived, needs_write = _derive_catalog_item_id(conn, item_id, photocards_id)
+    if needs_write:
+        conn.execute(
+            "UPDATE tbl_items SET catalog_item_id = ? WHERE item_id = ?",
+            (derived, item_id),
+        )
     return derived
 
 
@@ -146,7 +162,7 @@ def publish_pending(limit: Optional[int] = None) -> dict:
     bucket = _require_env("R2_BUCKET")
     s3 = _make_r2_client()
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = raw_connect()
     try:
         photocards_id = conn.execute(
             "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
@@ -178,9 +194,12 @@ def publish_pending(limit: Optional[int] = None) -> dict:
         skipped_total = 0
         missing_files = []
         touched_items = []
+        new_version = None
 
         for item_id in item_ids:
-            catalog_item_id = _assign_catalog_item_id(conn, item_id, photocards_id)
+            catalog_item_id, needs_assign = _derive_catalog_item_id(
+                conn, item_id, photocards_id
+            )
             attachments = conn.execute(
                 """
                 SELECT attachment_id, attachment_type, file_path, storage_type, image_version
@@ -191,7 +210,11 @@ def publish_pending(limit: Optional[int] = None) -> dict:
                 (item_id,),
             ).fetchall()
 
-            item_uploaded = 0
+            # Resize + upload with NO write transaction open. Every DB write for
+            # this item is deferred to the short commit block below, so the write
+            # lock is never held across network I/O — that's what used to make
+            # every concurrent request fail with "database is locked".
+            pending_writes: list[tuple[str, int]] = []
             for att_id, atype, file_path, storage_type, image_version in attachments:
                 # "Already on R2" is determined by the file_path itself, not
                 # the storage_type column — see SELECT-filter rationale above.
@@ -226,30 +249,42 @@ def publish_pending(limit: Optional[int] = None) -> dict:
                     ContentType="image/jpeg",
                     CacheControl="public, max-age=31536000, immutable",
                 )
+                pending_writes.append((hosted_url, att_id))
+
+            if not needs_assign and not pending_writes:
+                continue
+
+            # Short write transaction — nothing slow happens between the first
+            # UPDATE and the COMMIT. Committing per item also means a run cut
+            # short (Cloudflare's ~100s proxy timeout) keeps everything it
+            # already uploaded instead of rolling the whole batch back.
+            if needs_assign:
+                conn.execute(
+                    "UPDATE tbl_items SET catalog_item_id = ? WHERE item_id = ?",
+                    (catalog_item_id, item_id),
+                )
+            for hosted_url, att_id in pending_writes:
                 conn.execute(
                     "UPDATE tbl_attachments SET storage_type = 'hosted', "
                     "file_path = ?, mime_type = 'image/jpeg' WHERE attachment_id = ?",
                     (hosted_url, att_id),
                 )
-                uploaded_total += 1
-                item_uploaded += 1
-
-            if item_uploaded > 0:
+            if pending_writes:
+                # Bump catalog_version so the guest delta sync picks up the new
+                # R2 URLs on its next call. Per item rather than one version for
+                # the whole batch, since each item now commits on its own.
+                cur = conn.execute(
+                    "SELECT COALESCE(MAX(catalog_version), 0) FROM tbl_items"
+                ).fetchone()[0]
+                new_version = (cur or 0) + 1
+                conn.execute(
+                    "UPDATE tbl_items SET catalog_version = ? WHERE item_id = ?",
+                    (new_version, item_id),
+                )
+                uploaded_total += len(pending_writes)
                 touched_items.append(item_id)
 
-        # Bump catalog_version on touched items so the guest delta sync picks
-        # up the new R2 URLs on its next call.
-        new_version = None
-        if touched_items:
-            cur = conn.execute("SELECT COALESCE(MAX(catalog_version), 0) FROM tbl_items").fetchone()[0]
-            new_version = (cur or 0) + 1
-            placeholders = ",".join("?" * len(touched_items))
-            conn.execute(
-                f"UPDATE tbl_items SET catalog_version = ? WHERE item_id IN ({placeholders})",
-                (new_version, *touched_items),
-            )
-
-        conn.commit()
+            conn.commit()
     finally:
         conn.close()
 
@@ -282,7 +317,7 @@ def commit_items_to_catalog(item_ids: list[int]) -> dict:
     if not item_ids:
         return {"committed": 0, "already": 0, "skipped_non_photocard": 0, "new_catalog_version": None}
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = raw_connect()
     try:
         photocards_id = conn.execute(
             "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
@@ -339,7 +374,7 @@ def commit_all_drafts() -> dict:
     action. Delegates to commit_items_to_catalog for the per-item assign +
     version bump. Idempotent (already-committed cards aren't selected).
     """
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = raw_connect()
     try:
         photocards_id = conn.execute(
             "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
@@ -375,7 +410,7 @@ def sweep_r2_orphans() -> dict:
     bucket = _require_env("R2_BUCKET")
     s3 = _make_r2_client()
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = raw_connect()
     deleted = 0
     failed = []
     try:
@@ -399,8 +434,10 @@ def sweep_r2_orphans() -> dict:
                 logger.warning("sweep_r2_orphans: failed to delete %s: %s", key, exc)
                 failed.append(key)
                 continue
+            # Commit per row so the write lock isn't held across the next
+            # delete_object call — this sweep runs at startup, alongside traffic.
             conn.execute("DELETE FROM tbl_r2_orphans WHERE key = ?", (key,))
-        conn.commit()
+            conn.commit()
     finally:
         conn.close()
 

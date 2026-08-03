@@ -21,7 +21,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from db import DB_PATH
+from db import DB_PATH, raw_connect
 from file_helpers import DATA_ROOT
 
 
@@ -90,7 +90,10 @@ def build_seed(seed_db_path: Path = SEED_DB_PATH) -> dict:
             dst.execute(f"DELETE FROM {table}")
         dst.commit()
 
-        src = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        # Not opened ?mode=ro: a read-only connection to a WAL database fails
+        # unless the -shm/-wal sidecars already exist and are writable. This
+        # connection only ever reads.
+        src = raw_connect()
         try:
             counts = {}
             for table in LOOKUP_TABLES:

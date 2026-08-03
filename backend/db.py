@@ -1,7 +1,8 @@
 import logging
 import os
+import sqlite3
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger("collectcore.db")
@@ -20,10 +21,52 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+# SQLite concurrency settings, applied to EVERY connection (SQLAlchemy pool and
+# the raw sqlite3 connections used by the publishers/backup code).
+#
+# journal_mode=WAL — readers no longer block the writer and vice versa. Under the
+# default rollback journal a single slow write (an image-publish sweep, a restore)
+# makes every concurrent request fail with "database is locked". WAL is persisted
+# in the DB header, but we re-issue it per connection so a freshly restored or
+# replaced DB file picks it up without a redeploy.
+#
+# busy_timeout — wait for a held write lock instead of failing instantly.
+# pysqlite defaults to 5s, which a publish run blows through easily.
+BUSY_TIMEOUT_MS = 15000
+
+
+def _apply_sqlite_pragmas(dbapi_conn) -> None:
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    finally:
+        cur.close()
+
+
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_MS / 1000},
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
+    _apply_sqlite_pragmas(dbapi_conn)
+
+
+def raw_connect(**kwargs) -> sqlite3.Connection:
+    """Open a plain sqlite3 connection to the app DB with the shared PRAGMAs.
+
+    Use this instead of `sqlite3.connect(DB_PATH)` anywhere in the running app —
+    a connection without busy_timeout raises "database is locked" the moment any
+    other request holds the write lock.
+    """
+    kwargs.setdefault("timeout", BUSY_TIMEOUT_MS / 1000)
+    conn = sqlite3.connect(str(DB_PATH), **kwargs)
+    _apply_sqlite_pragmas(conn)
+    return conn
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

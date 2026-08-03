@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from db import DB_PATH
+from db import DB_PATH, raw_connect
 from dependencies import get_db
 from file_helpers import DATA_ROOT, IMAGES_DIR, LIBRARY_DIR
 
@@ -72,7 +72,7 @@ def prepare_backup():
     try:
         with zipfile.ZipFile(str(tmp_zip_path), "w", compression=zipfile.ZIP_DEFLATED) as zf:
             # --- Database ---
-            src_conn = sqlite3.connect(str(DB_PATH))
+            src_conn = raw_connect()
             dst_conn = sqlite3.connect(":memory:")
             src_conn.backup(dst_conn)
             src_conn.close()
@@ -236,6 +236,11 @@ async def upload_restore(file: UploadFile = File(...)):
                 engine.dispose()
 
                 tmp_db_path.replace(DB_PATH)
+
+                # The old DB's WAL sidecars must go with it — SQLite would
+                # otherwise try to replay them over the restored file.
+                for suffix in ("-wal", "-shm"):
+                    Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
             except Exception:
                 tmp_db_path.unlink(missing_ok=True)
                 raise

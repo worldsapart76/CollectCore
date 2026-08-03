@@ -31,7 +31,7 @@ import sqlite3
 import urllib.request
 from typing import Optional
 
-from db import DB_PATH
+from db import raw_connect
 
 
 logger = logging.getLogger("collectcore.admin_image_publisher")
@@ -187,10 +187,14 @@ def _publish_module(
             errors.append({"pk": pk, "stage": "upload", "error": str(exc)})
             continue
 
+        # Commit per row: the download/resize/upload above must not run with a
+        # write transaction open, or every concurrent request fails with
+        # "database is locked" for the length of the sweep.
         conn.execute(
             f"UPDATE {table} SET {url_col} = ? WHERE {pk_col} = ?",
             (hosted_url, pk),
         )
+        conn.commit()
         uploaded += 1
 
     return {
@@ -211,7 +215,7 @@ def publish_pending() -> dict:
     bucket = _require_env("R2_BUCKET")
     s3 = _make_r2_client()
 
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = raw_connect()
     try:
         modules = []
         for module_code in MODULES:
