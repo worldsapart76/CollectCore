@@ -6,7 +6,7 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
-### 2026-08-12 (US CDT) — Photocard triage statuses (Undecided / Not Wanted) BUILT + DEPLOYED (prod DB not yet migrated)
+### 2026-08-12 (US CDT) — Photocard triage statuses (Undecided / Not Wanted) BUILT + DEPLOYED + LIVE
 
 Split the meaningless Wanted pile into an explicit collecting decision. Commits
 `f4facd1` (feature), `72951ec` (bulk-create fallback fix), `0298649` (CLAUDE.md).
@@ -14,8 +14,13 @@ Design doc: `docs/photocard_triage_statuses_plan.md` (authoritative).
 
 **Motivator:** `wanted` had come to mean "this card exists in my library", not
 "I want this" — the 2026-04 import and BulkCreatePage both stamped it on every
-card, leaving 9,314 of 10,024 (93%) Wanted. Goal is to hand-triage all ~10k by
-member + source sweeps with individual curation.
+card, leaving ~93% of the library Wanted. Goal is to hand-triage the whole
+library by member + source sweeps with individual curation.
+
+> **All figures in this entry are DEV-measured** (9,314 Wanted of 10,024 cards;
+> 690 owned / 157 trade / 84 trade stacks; the 1.60s → 0.004s sweep timing).
+> The dev DB is a stale snapshot: **prod holds 11,306 photocards**. Don't treat
+> the dev numbers as prod's.
 
 - **Two new statuses, photocards-only** (`sort_order` 9/10, appended — no
   existing row renumbered, so other modules are untouched and the sidebar's
@@ -45,17 +50,21 @@ member + source sweeps with individual curation.
   old `os.find(undecided) || os[0]` fallback would have stamped new bulk-created
   cards **Owned** — now falls back to Wanted (`72951ec`).
 
+**Prod migrated 2026-08-12** via the two manual admin steps (no script run
+against the Railway volume): (a) Admin → Status Visibility, tick Undecided +
+Not Wanted for Photocards — the code migration is additive-only, so an existing
+DB never gets the xref rows from `_seed_status_visibility_xref`, which seeds a
+*fresh* DB only; (b) library → filter Ownership = Wanted → Select All → Bulk
+Edit → Undecided. `backend/migrate_triage_statuses.py` scripts both, and was how
+dev was migrated, but it needs volume access the UI route avoids.
+
 **Next / open:**
-1. **Prod DB is not migrated.** Two manual steps: (a) Admin → Status Visibility,
-   tick Undecided + Not Wanted for Photocards; (b) library → filter Ownership =
-   Wanted → Select All → Bulk Edit → Undecided. `backend/migrate_triage_statuses.py`
-   scripts both but needs volume access; the UI route avoids that.
-2. **Dev DB already migrated** (9,314 rows; Wanted = 0) — dev and prod differ
-   until step 1 runs.
-3. **Default `Triage = Tracked` filter deliberately NOT enabled** — it would hide
+1. **Triage the library** by member + source sweeps — the actual point of all this.
+2. **Default `Triage = Tracked` filter deliberately NOT enabled** — it would hide
    the pile mid-triage. Small addition to the `!isAdmin` block in
    `PhotocardLibraryPage.jsx` once triage is done.
-4. Then: triage all ~10k by member + source.
+3. Cosmetic: `_check_status_conflict`'s 400 message reads "already has a Owned
+   copy" (article not inflected) — inherited from the original string.
 
 ### 2026-07-17 (US CDT) — Photocard bulk-create + imageless catalog + batch-image window + /pcs uploads DEPLOYED + LIVE
 
