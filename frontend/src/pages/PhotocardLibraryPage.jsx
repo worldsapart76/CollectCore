@@ -61,7 +61,21 @@ const DEFAULT_FILTERS = {
   version: emptySection(),
   ownership: emptySection(),
   imageStatus: emptySection(),
+  triage: emptySection(),
 };
+
+// Standing triage decisions (admin/photocards only). A card is "tracked" when it
+// has at least one copy that is NOT one of these — i.e. a real possession fact.
+// Deliberately card-level rather than an `ownership` exclusion: applySection's
+// exclude is card-wide, so excluding `not_wanted` there would also hide a
+// {not_wanted + trade} card and drop active trade inventory out of view.
+const TRIAGE_STATUS_CODES = ["undecided", "not_wanted"];
+
+function isCardTracked(card, triageStatusIds) {
+  return (card.copies || []).some(
+    (cp) => !triageStatusIds.has(cp.ownership_status_id)
+  );
+}
 
 const SORT_OPTIONS = [
   { value: "default", label: "Default" },
@@ -82,7 +96,12 @@ export default function PhotocardLibraryPage() {
   const [error, setError] = useState("");
 
   // Filter / view state — initialized from module store for cross-tab persistence
-  const [filters, setFilters] = useState(() => libraryState.filters ?? DEFAULT_FILTERS);
+  // Spread over DEFAULT_FILTERS so a session persisted before a new filter
+  // section existed still gets a valid (empty) section for it.
+  const [filters, setFilters] = useState(() => ({
+    ...DEFAULT_FILTERS,
+    ...(libraryState.filters ?? {}),
+  }));
   const [sortMode, setSortMode] = useState(libraryState.sortMode);
   const [viewMode, setViewMode] = useState(libraryState.viewMode);
   const [sizeMode, setSizeMode] = useState(libraryState.sizeMode);
@@ -286,6 +305,26 @@ export default function PhotocardLibraryPage() {
     );
   }, [cards]);
 
+  // Triage status ids, resolved by status_code — ids are DB-assigned and differ
+  // between environments, so they can never be hardcoded.
+  const triageStatusIds = useMemo(
+    () =>
+      new Set(
+        ownershipStatuses
+          .filter((s) => TRIAGE_STATUS_CODES.includes(s.status_code))
+          .map((s) => s.ownership_status_id)
+      ),
+    [ownershipStatuses]
+  );
+
+  // Admin-only: how many cards carry a real possession fact. Meaningless on
+  // /pcs/, where the triage statuses don't exist and every catalog card holds a
+  // synthetic Catalog copy — every card would count as tracked.
+  const trackedCount = useMemo(() => {
+    if (!isAdmin || triageStatusIds.size === 0) return null;
+    return cards.filter((c) => isCardTracked(c, triageStatusIds)).length;
+  }, [cards, triageStatusIds]);
+
   // Apply filters
   const filteredCards = useMemo(() => {
     let result = cards;
@@ -344,6 +383,14 @@ export default function PhotocardLibraryPage() {
       });
     }
 
+    if (sectionActive(filters.triage)) {
+      result = result.filter((c) =>
+        applySection(filters.triage, [
+          isCardTracked(c, triageStatusIds) ? "tracked" : "untracked",
+        ])
+      );
+    }
+
     if (filters.notesSearch?.trim()) {
       const q = filters.notesSearch.toLowerCase();
       result = result.filter(
@@ -359,7 +406,7 @@ export default function PhotocardLibraryPage() {
     }
 
     return result;
-  }, [cards, filters]);
+  }, [cards, filters, triageStatusIds]);
 
   // Apply sort
   const sortedCards = useMemo(() => {
@@ -614,7 +661,17 @@ export default function PhotocardLibraryPage() {
         </div>
 
         <div style={styles.controlsRight}>
+          {/* Triage progress readout. Desktop only — library management happens
+              on PC and the narrow mobile header shouldn't carry extra numbers.
+              Keeping the filtered count labelled "cards" (rather than renaming it
+              "showing") makes the extra numbers a pure prefix, so the mobile
+              string is unchanged and no wording is breakpoint-conditional. */}
           <span style={styles.cardCount}>
+            <span className="desktop-only">
+              {cards.length} total
+              {trackedCount !== null ? ` · ${trackedCount} tracked` : ""}
+              {" · "}
+            </span>
             {sortedCards.length} cards
             {selectMode && selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ""}
           </span>
@@ -670,6 +727,7 @@ export default function PhotocardLibraryPage() {
           filters={filters}
           onSectionChange={handleSectionChange}
           onClearAll={handleClearAll}
+          showTriage={isAdmin && triageStatusIds.size > 0}
         />
 
         {/* Grid area */}

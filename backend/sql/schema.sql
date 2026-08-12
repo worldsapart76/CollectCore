@@ -524,6 +524,14 @@ INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_or
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('pending_incoming',  'Pending - Incoming', 7);
 -- Catalog status is scoped to photocards only (seeded below via targeted xref insert, not the cross-join).
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('catalog',          'Catalog',          8);
+-- Triage decisions: photocards only, same targeted-xref treatment as 'catalog'.
+-- These record a standing decision about a CARD ("have I decided to collect it?"),
+-- as opposed to a possession fact about a COPY. At most one per card; the decision
+-- outlives the copies, so 'not_wanted' may co-exist with a 'trade' copy.
+-- sort_order 9/10 deliberately places them last, behind the sidebar's "+N more"
+-- fold — they are set once per card, unlike the frequently-changed statuses above.
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('undecided',        'Undecided',        9);
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('not_wanted',       'Not Wanted',      10);
 
 
 -- ============================================================

@@ -11,6 +11,7 @@
  *   version       — { mode, include, exclude }  (version string)
  *   ownership     — { mode, include, exclude }  (ownership_status_id)
  *   imageStatus   — { mode, include, exclude }  ("missing_front" | "missing_back")
+ *   triage        — { mode, include, exclude }  ("tracked" | "untracked")
  *
  * Props:
  *   groups            — array of { group_id, group_name }
@@ -22,6 +23,8 @@
  *   filters           — current filter state object
  *   onSectionChange   — callback(filterKey, value)
  *   onClearAll        — callback to reset all filters
+ *   showTriage        — render the Triage section (admin only; the triage
+ *                       statuses don't exist on /pcs/)
  */
 import {
   FilterSidebarShell,
@@ -40,6 +43,7 @@ export default function PhotocardFilters({
   filters,
   onSectionChange,
   onClearAll,
+  showTriage = false,
 }) {
   const hasFilters =
     filters.notesSearch?.trim() ||
@@ -50,7 +54,8 @@ export default function PhotocardFilters({
     sectionActive(filters.cardType) ||
     sectionActive(filters.version) ||
     sectionActive(filters.ownership) ||
-    sectionActive(filters.imageStatus);
+    sectionActive(filters.imageStatus) ||
+    sectionActive(filters.triage);
 
   return (
     <FilterSidebarShell
@@ -137,6 +142,22 @@ export default function PhotocardFilters({
         section={filters.imageStatus}
         onChange={(s) => onSectionChange("imageStatus", s)}
       />
+
+      {/* Card-level triage state. Separate from Ownership on purpose: a
+          {Not Wanted + Trade} card is Tracked (you hold a copy), which an
+          Ownership exclusion could not express — applySection's exclude is
+          card-wide and would hide it. "Untracked" is the triage queue. */}
+      {showTriage && (
+        <TriStateFilterSection
+          title="Triage"
+          items={[
+            { id: "tracked", label: "Tracked" },
+            { id: "untracked", label: "Untracked" },
+          ]}
+          section={filters.triage}
+          onChange={(s) => onSectionChange("triage", s)}
+        />
+      )}
     </FilterSidebarShell>
   );
 }

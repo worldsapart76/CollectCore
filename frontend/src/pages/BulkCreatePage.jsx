@@ -123,10 +123,12 @@ export default function BulkCreatePage() {
         setCategoryId((prev) =>
           c.some((x) => String(x.top_level_category_id) === prev) ? prev : (c.length ? String(c[0].top_level_category_id) : "")
         );
-        // Ownership is fixed to Wanted (admin's own annotation, invisible to
-        // /pcs/) — no dropdown. Resolve the id by status_code, fall back to first.
-        const wanted = os.find((x) => x.status_code === "wanted") || os[0];
-        setOwnershipStatusId(wanted ? String(wanted.ownership_status_id) : "");
+        // Ownership is fixed to Undecided (admin's own annotation, invisible to
+        // /pcs/) — no dropdown. New cards are untriaged by definition: stamping
+        // them Wanted is what made the wanted list meaningless in the first
+        // place. Resolve the id by status_code, fall back to first.
+        const intake = os.find((x) => x.status_code === "undecided") || os[0];
+        setOwnershipStatusId(intake ? String(intake.ownership_status_id) : "");
       })
       .catch((err) => setLookupError(err.message || "Failed to load data"))
       .finally(() => setLoadingLookups(false));

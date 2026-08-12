@@ -184,13 +184,15 @@ def _seed_status_visibility_xref(conn) -> None:
             INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
             SELECT s.ownership_status_id, c.collection_type_id
             FROM lkup_ownership_statuses s, lkup_collection_types c
-            WHERE s.is_active = 1 AND c.is_active = 1 AND s.status_code != 'catalog'
+            WHERE s.is_active = 1 AND c.is_active = 1
+              AND s.status_code NOT IN ('catalog', 'undecided', 'not_wanted')
         """)
         raw.execute("""
             INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
             SELECT s.ownership_status_id, c.collection_type_id
             FROM lkup_ownership_statuses s, lkup_collection_types c
-            WHERE s.status_code = 'catalog' AND c.collection_type_code = 'photocards'
+            WHERE s.status_code IN ('catalog', 'undecided', 'not_wanted')
+              AND c.collection_type_code = 'photocards'
         """)
         logger.info("Seeded xref_ownership_status_modules (fresh DB)")
 

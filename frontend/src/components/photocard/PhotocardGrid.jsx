@@ -56,6 +56,8 @@ const STATUS_LETTERS = {
   "Pending - Outgoing": "P",
   Borrowed: "B",
   "Pending - Incoming": "I",
+  Undecided: "U",
+  "Not Wanted": "N",
 };
 
 // Letter → neon color mapping
@@ -67,10 +69,16 @@ const BADGE_LETTER_COLORS = {
   P: "var(--badge-pending-out)",
   B: "var(--badge-borrowed)",
   I: "var(--badge-pending-in)",
+  U: "var(--badge-undecided)",
+  N: "var(--badge-not-wanted)",
 };
 
-// Render order for non-Owned/non-Wanted statuses (bottom-right)
+// Render order for statuses that don't take the primary slot (bottom-right)
 const OTHER_STATUS_ORDER = ["T", "P", "I", "B", "F"];
+
+// Primary slot (bottom-left) precedence. Owned wins because possession is the
+// most salient fact; below it the mutually-exclusive triage decisions.
+const PRIMARY_STATUS_ORDER = ["O", "W", "N", "U"];
 
 function resolveCardSrc(path) {
   if (!path) return null;
@@ -88,15 +96,16 @@ function getCopyBadges(copies) {
     counts[letter] = (counts[letter] || 0) + 1;
   }
 
-  // Primary badge (bottom-left) — O or W, mutually exclusive, always singular
+  // Primary badge (bottom-left) — first match wins, always singular
   let primary = null;
-  if (counts.O) {
-    primary = { label: "O", neonColor: BADGE_LETTER_COLORS.O };
-  } else if (counts.W) {
-    primary = { label: "W", neonColor: BADGE_LETTER_COLORS.W };
+  for (const letter of PRIMARY_STATUS_ORDER) {
+    if (counts[letter]) {
+      primary = { label: letter, neonColor: BADGE_LETTER_COLORS[letter] };
+      break;
+    }
   }
 
-  // Other statuses badge (bottom-right) — everything except O and W
+  // Other statuses badge (bottom-right) — everything not in the primary slot
   let other = null;
   const otherParts = [];
   for (const letter of OTHER_STATUS_ORDER) {

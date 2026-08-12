@@ -68,6 +68,10 @@
   --badge-formerly-owned: #607d8b;
   --badge-pending-out:    #ff9900;
   --badge-pending-in:     #00bfff;
+  /* Triage decisions — deliberately muted: these are "not part of the
+     collection" states and should recede against the neon possession badges. */
+  --badge-undecided:      #9aa0a6;
+  --badge-not-wanted:     #a05252;
   --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 
@@ -188,6 +192,9 @@
   --badge-formerly-owned: #607d8b;
   --badge-pending-out:    #ff9900;
   --badge-pending-in:     #00bfff;
+  /* Triage decisions — see the light-theme block for rationale. */
+  --badge-undecided:      #9aa0a6;
+  --badge-not-wanted:     #a05252;
   --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 
