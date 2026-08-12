@@ -74,6 +74,23 @@
 ### Removed
 - subcategory (replaced by source_origin + version)
 
+### Binder Designer tables
+Admin-only photocard binder layout planner (`/binder-designer`).
+Full design: `docs/photocard_binder_designer_plan.md`.
+
+- **tbl_binders** — binder_id, binder_name, layout_code
+  (`2x2`/`3x2`/`3x3`/`4x3`, read **across × down** — `4x3` is the 12-pocket
+  page), notes, created_at, updated_at
+- **tbl_binder_pages** — page_id, binder_id, page_index (0-based),
+  UNIQUE(binder_id, page_index)
+- **tbl_binder_slots** — slot_id, page_id, slot_index (row-major, 0-based),
+  item_id, UNIQUE(page_id, slot_index), **UNIQUE(item_id)**
+
+`UNIQUE(item_id)` is global: a card lives in at most one pocket of one binder.
+Because FK cascades don't fire (see Key Schema Decisions), deleting a photocard
+must free its slot explicitly — `_delete_binder_slots_for_items` in
+`routers/photocards.py`, called from both delete paths.
+
 ---
 
 ### Books module schema (Phase 1 — implemented)
@@ -184,6 +201,17 @@ All three collection modules are fully implemented.
 - GET /photocards/source-origins
 - POST /photocards/source-origins
 
+### Binders (admin-only)
+- GET /binders
+- POST /binders
+- GET /binders/placements — every placed card → its binder. Declared *before*
+  `/{binder_id}` so the literal path isn't parsed as an int
+- GET /binders/{id}
+- PATCH /binders/{id} — layout changes rejected (400) while the binder holds cards
+- DELETE /binders/{id}
+- PUT /binders/{id}/pages — full replace of pages+slots in one transaction;
+  **409** with conflicting item_ids if a card is already in another binder
+
 ### Ingest (photocards)
 - GET /ingest/inbox
 - POST /ingest/upload
@@ -239,6 +267,13 @@ All three collection modules are fully implemented.
   `WHERE item_id = ...` (the pre-2026-08-12 behaviour) flattened every copy on
   the card, destroying trade stacks. Full rationale:
   `docs/photocard_triage_statuses_plan.md`.
+- **SQLite foreign keys are never enforced at runtime** (2026-08-12).
+  `PRAGMA foreign_keys = ON` is issued only on `init_db`'s own connection
+  (`db.py`); the SQLAlchemy pool's per-connection pragmas set WAL + busy_timeout
+  and nothing else, and the sqlite dialect leaves FK enforcement off. Every
+  `FOREIGN KEY` clause in `schema.sql` is therefore **documentation only** —
+  nothing cascades, nothing is rejected. Delete paths must remove child rows
+  explicitly, which is what `bulk_delete_photocards` has always done by hand.
 
 ---
 

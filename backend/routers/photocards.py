@@ -150,6 +150,27 @@ DECISION_CODES = ("undecided", "wanted", "not_wanted")
 WANTED_EXCLUSIVE_WITH = ("owned", "trade")
 
 
+def _delete_binder_slots_for_items(db, item_ids):
+    """Free any Binder Designer pockets holding the cards about to be deleted.
+
+    tbl_binder_slots.item_id is UNIQUE across the table, so a slot left behind
+    by a deleted card would block that item_id forever. FK cascades can't do
+    this — `PRAGMA foreign_keys` is off on request sessions (db.py) — so it's
+    explicit, mirroring the pcs_card_copies cleanup below. Guarded on table
+    existence because the binder feature is dev-only: a prod DB that predates
+    the schema block simply skips it.
+    """
+    if not item_ids:
+        return
+    has_binders = db.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tbl_binder_slots' LIMIT 1")
+    ).fetchone()
+    if not has_binders:
+        return
+    placeholders = ",".join(str(int(i)) for i in item_ids)
+    db.execute(text(f"DELETE FROM tbl_binder_slots WHERE item_id IN ({placeholders})"))
+
+
 def _status_lookup(db):
     """{status_code: {"id":, "name":}} for ownership statuses.
 
@@ -469,6 +490,7 @@ def delete_photocard(item_id: int, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail="Photocard not found.")
 
     files_to_delete = delete_attachment_files(db, item_id)
+    _delete_binder_slots_for_items(db, [item_id])
     db.execute(
         text("DELETE FROM tbl_photocard_copies WHERE item_id = :item_id"),
         {"item_id": item_id},
@@ -665,6 +687,8 @@ def bulk_delete_photocards(payload: BulkDeletePayload, db=Depends(get_db)):
             text(f"SELECT catalog_item_id FROM tbl_items WHERE item_id IN ({placeholders}) AND catalog_item_id IS NOT NULL"),
         ).fetchall()
     ]
+
+    _delete_binder_slots_for_items(db, payload.item_ids)
 
     all_files = []
     for item_id in payload.item_ids:

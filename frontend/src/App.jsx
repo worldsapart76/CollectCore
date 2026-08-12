@@ -29,6 +29,11 @@ import TradesPage from "./pages/TradesPage";
 // the main admin bundle on initial load.
 const TradePage = lazy(() => import("./pages/TradePage"));
 
+// Binder Designer — route-split because it's a heavier page most sessions never
+// open, and only admin builds link to it at all.
+// See docs/photocard_binder_designer_plan.md.
+const BinderDesignerPage = lazy(() => import("./pages/BinderDesignerPage"));
+
 // Guest debug page is dev-only. The `import.meta.env.DEV ? ... : null`
 // constant-folds at build time, so in a production bundle Rollup eliminates
 // both the lazy() call and the dynamic import — meaning the sqlite-wasm
@@ -108,6 +113,15 @@ function AppRoot() {
         <Route path="/boardgames/library" element={<BoardgamesLibraryPage />} />
         <Route path="/ttrpg/add" element={<TTRPGIngestPage />} />
         <Route path="/ttrpg/library" element={<TTRPGLibraryPage />} />
+        {/* Binder Designer — photocard binder layout planner (admin only). */}
+        <Route
+          path="/binder-designer"
+          element={
+            <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+              <BinderDesignerPage />
+            </Suspense>
+          }
+        />
         {/* Guest webview debug — dev-only. Promoted/replaced when guest UI lands. */}
         {import.meta.env.DEV && (
           <Route

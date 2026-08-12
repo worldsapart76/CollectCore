@@ -12,10 +12,16 @@ import PhotocardDetailModal from "../components/photocard/PhotocardDetailModal";
 import PhotocardBulkEdit from "../components/photocard/PhotocardBulkEdit";
 import TradeCreateModal from "../components/photocard/TradeCreateModal";
 import {
-  emptySection,
-  sectionActive,
-  applySection,
-} from "../components/library/FilterSidebar";
+  DEFAULT_FILTERS,
+  SORT_OPTIONS,
+  TRIAGE_STATUS_CODES,
+  applyPhotocardFilters,
+  deriveFilterMembers,
+  deriveFilterSourceOrigins,
+  deriveFilterVersions,
+  isCardTracked,
+  sortPhotocards,
+} from "../components/photocard/photocardFiltering";
 import { libraryState, persistMobileCardsPerRow } from "../photocardPageState";
 import { COLLECTION_TYPE_IDS } from "../constants/collectionTypes";
 import { usePageActions } from "../contexts/PageActionsContext";
@@ -38,53 +44,6 @@ const GuestPhotocardBulkAdd = import.meta.env.VITE_IS_ADMIN === "true"
       : lazy(() => import("../guest/GuestPhotocardBulkAdd")));
 
 const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
-
-// Stray Kids canonical member order — cards with multiple members sort to bottom
-const MEMBER_ORDER = [
-  "Bang Chan", "Lee Know", "Changbin", "Hyunjin",
-  "Han", "Felix", "Seungmin", "I.N",
-];
-function memberSortKey(card) {
-  const members = card.members || [];
-  if (members.length !== 1) return MEMBER_ORDER.length; // multi → bottom
-  const idx = MEMBER_ORDER.indexOf(members[0]);
-  return idx === -1 ? MEMBER_ORDER.length - 0.5 : idx;
-}
-
-const DEFAULT_FILTERS = {
-  notesSearch: "",
-  group: emptySection(),
-  member: emptySection(),
-  category: emptySection(),
-  sourceOrigin: emptySection(),
-  cardType: emptySection(),
-  version: emptySection(),
-  ownership: emptySection(),
-  imageStatus: emptySection(),
-  triage: emptySection(),
-};
-
-// Standing triage decisions (admin/photocards only). A card is "tracked" when it
-// has at least one copy that is NOT one of these — i.e. a real possession fact.
-// Deliberately card-level rather than an `ownership` exclusion: applySection's
-// exclude is card-wide, so excluding `not_wanted` there would also hide a
-// {not_wanted + trade} card and drop active trade inventory out of view.
-const TRIAGE_STATUS_CODES = ["undecided", "not_wanted"];
-
-function isCardTracked(card, triageStatusIds) {
-  return (card.copies || []).some(
-    (cp) => !triageStatusIds.has(cp.ownership_status_id)
-  );
-}
-
-const SORT_OPTIONS = [
-  { value: "default", label: "Default" },
-  { value: "id_asc", label: "ID ↑" },
-  { value: "id_desc", label: "ID ↓" },
-  { value: "member", label: "Member" },
-  { value: "category", label: "Category" },
-  { value: "group", label: "Group" },
-];
 
 export default function PhotocardLibraryPage() {
   // Data
@@ -245,65 +204,16 @@ export default function PhotocardLibraryPage() {
   }, []);
 
   // Member list for filter sidebar — sorted by canonical MEMBER_ORDER
-  const filterMembers = useMemo(() => {
-    const memberMap = new Map();
-    for (const card of cards) {
-      if (card.members) {
-        for (const name of card.members) {
-          if (!memberMap.has(name)) {
-            memberMap.set(name, { member_id: name, member_name: name });
-          }
-        }
-      }
-    }
-    return [...memberMap.values()].sort((a, b) => {
-      const ai = MEMBER_ORDER.indexOf(a.member_name);
-      const bi = MEMBER_ORDER.indexOf(b.member_name);
-      const aIdx = ai === -1 ? MEMBER_ORDER.length : ai;
-      const bIdx = bi === -1 ? MEMBER_ORDER.length : bi;
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      return a.member_name.localeCompare(b.member_name);
-    });
-  }, [cards]);
+  const filterMembers = useMemo(() => deriveFilterMembers(cards), [cards]);
 
-  // Version list for filter sidebar — sorted alphabetically. Scoped to the
-  // selected source origin(s): versions are free-text per card and, post-canon,
-  // live under a specific source origin, so only surface versions that appear in
-  // the currently-selected origins (one-way, origin → version). No source
-  // origin selected → all versions.
-  const filterVersions = useMemo(() => {
-    const originFilterActive = sectionActive(filters.sourceOrigin);
-    const seen = new Map();
-    for (const card of cards) {
-      if (!card.version || seen.has(card.version)) continue;
-      if (
-        originFilterActive &&
-        !applySection(filters.sourceOrigin, [String(card.source_origin_id)])
-      ) {
-        continue;
-      }
-      seen.set(card.version, { id: card.version, label: card.version });
-    }
-    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [cards, filters.sourceOrigin]);
+  // Version list for filter sidebar, scoped to the selected source origin(s)
+  const filterVersions = useMemo(
+    () => deriveFilterVersions(cards, filters.sourceOrigin),
+    [cards, filters.sourceOrigin]
+  );
 
   // Source origins for filter sidebar — derive from cards
-  const filterSourceOrigins = useMemo(() => {
-    const soMap = new Map();
-    for (const card of cards) {
-      if (card.source_origin_id && card.source_origin) {
-        if (!soMap.has(card.source_origin_id)) {
-          soMap.set(card.source_origin_id, {
-            source_origin_id: card.source_origin_id,
-            source_origin_name: card.source_origin,
-          });
-        }
-      }
-    }
-    return [...soMap.values()].sort((a, b) =>
-      a.source_origin_name.localeCompare(b.source_origin_name)
-    );
-  }, [cards]);
+  const filterSourceOrigins = useMemo(() => deriveFilterSourceOrigins(cards), [cards]);
 
   // Triage status ids, resolved by status_code — ids are DB-assigned and differ
   // between environments, so they can never be hardcoded.
@@ -326,123 +236,16 @@ export default function PhotocardLibraryPage() {
   }, [cards, triageStatusIds]);
 
   // Apply filters
-  const filteredCards = useMemo(() => {
-    let result = cards;
-
-    if (sectionActive(filters.group)) {
-      result = result.filter((c) =>
-        applySection(filters.group, [String(c.group_id)])
-      );
-    }
-
-    if (sectionActive(filters.member)) {
-      // member IDs in this sidebar are member names (derived from card data)
-      result = result.filter((c) =>
-        applySection(filters.member, c.members || [])
-      );
-    }
-
-    if (sectionActive(filters.category)) {
-      result = result.filter((c) =>
-        applySection(filters.category, [String(c.top_level_category_id)])
-      );
-    }
-
-    if (sectionActive(filters.sourceOrigin)) {
-      result = result.filter((c) =>
-        applySection(filters.sourceOrigin, [String(c.source_origin_id)])
-      );
-    }
-
-    if (sectionActive(filters.cardType)) {
-      result = result.filter((c) =>
-        applySection(filters.cardType, [c.is_special ? "special" : "regular"])
-      );
-    }
-
-    if (sectionActive(filters.version)) {
-      result = result.filter((c) =>
-        applySection(filters.version, [c.version || ""])
-      );
-    }
-
-    if (sectionActive(filters.ownership)) {
-      result = result.filter((c) =>
-        applySection(filters.ownership, (c.copies || []).map((cp) => String(cp.ownership_status_id)))
-      );
-    }
-
-    if (sectionActive(filters.imageStatus)) {
-      result = result.filter((c) => {
-        // A card emits a token for each side it's MISSING. Cards with both
-        // images emit no tokens, so any active include filters them out.
-        const missing = [];
-        if (!c.front_image_path) missing.push("missing_front");
-        if (!c.back_image_path) missing.push("missing_back");
-        return applySection(filters.imageStatus, missing);
-      });
-    }
-
-    if (sectionActive(filters.triage)) {
-      result = result.filter((c) =>
-        applySection(filters.triage, [
-          isCardTracked(c, triageStatusIds) ? "tracked" : "untracked",
-        ])
-      );
-    }
-
-    if (filters.notesSearch?.trim()) {
-      const q = filters.notesSearch.toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.notes?.toLowerCase().includes(q) ||
-          c.copies?.some((cp) => cp.notes?.toLowerCase().includes(q)) ||
-          c.members?.some((m) => m.toLowerCase().includes(q)) ||
-          c.source_origin?.toLowerCase().includes(q) ||
-          c.version?.toLowerCase().includes(q) ||
-          c.category?.toLowerCase().includes(q) ||
-          c.group_name?.toLowerCase().includes(q)
-      );
-    }
-
-    return result;
-  }, [cards, filters, triageStatusIds]);
+  const filteredCards = useMemo(
+    () => applyPhotocardFilters(cards, filters, triageStatusIds),
+    [cards, filters, triageStatusIds]
+  );
 
   // Apply sort
-  const sortedCards = useMemo(() => {
-    const result = [...filteredCards];
-    switch (sortMode) {
-      case "id_desc":
-        return result.sort((a, b) => b.item_id - a.item_id);
-      case "member":
-        return result.sort((a, b) => memberSortKey(a) - memberSortKey(b));
-      case "category":
-        return result.sort((a, b) =>
-          (a.category || "").localeCompare(b.category || "")
-        );
-      case "group":
-        return result.sort((a, b) =>
-          (a.group_name || "").localeCompare(b.group_name || "")
-        );
-      case "id_asc":
-        return result.sort((a, b) => a.item_id - b.item_id);
-      case "default":
-      default:
-        return result.sort((a, b) => {
-          const g = (a.group_name || "").localeCompare(b.group_name || "");
-          if (g !== 0) return g;
-          const c = (a.category || "").localeCompare(b.category || "");
-          if (c !== 0) return c;
-          const so = (a.source_origin || "").localeCompare(b.source_origin || "");
-          if (so !== 0) return so;
-          const ct = (a.is_special ? 1 : 0) - (b.is_special ? 1 : 0);
-          if (ct !== 0) return ct;
-          const v = (a.version || "").localeCompare(b.version || "");
-          if (v !== 0) return v;
-          return memberSortKey(a) - memberSortKey(b);
-        });
-    }
-  }, [filteredCards, sortMode]);
+  const sortedCards = useMemo(
+    () => sortPhotocards(filteredCards, sortMode),
+    [filteredCards, sortMode]
+  );
 
   function handleSectionChange(key, value) {
     setFilters((prev) => ({ ...prev, [key]: value }));

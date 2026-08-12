@@ -127,6 +127,20 @@ def _run_migrations(conn) -> None:
             raw.execute("ALTER TABLE tbl_video_details ADD COLUMN on_media_server INTEGER NOT NULL DEFAULT 0")
             logger.info("Migration: added tbl_video_details.on_media_server")
 
+    # Migration: binder layout codes now read ACROSS x DOWN consistently.
+    # The 6- and 12-pocket layouts were first stored with rows and columns
+    # swapped ('2x3', '3x4'). Idempotent — matches nothing after the first run.
+    # Note this transposes the sheet, so any card already placed in one of those
+    # binders lands in a different pocket; only ever ran against empty dev rows.
+    if "tbl_binders" in tables:
+        for old, new in (("2x3", "3x2"), ("3x4", "4x3")):
+            cur = raw.execute(
+                "UPDATE tbl_binders SET layout_code = ? WHERE layout_code = ?",
+                (new, old),
+            )
+            if cur.rowcount > 0:
+                logger.info("Migration: binder layout %s -> %s (%d rows)", old, new, cur.rowcount)
+
     # Migration: tbl_video_season_copies (per-season multi-format copies)
     if "tbl_video_seasons" in tables and "tbl_video_season_copies" not in tables:
         raw.execute("""

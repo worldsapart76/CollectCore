@@ -287,6 +287,91 @@ export async function deletePhotocardCopy(itemId, copyId) {
   return handleJsonResponse(res, "Failed to delete copy");
 }
 
+// --- Binder Designer (dev-only feature; see docs/photocard_binder_designer_plan.md) ---
+
+export async function listBinders() {
+  const res = await fetch(`${API}/binders`);
+  return handleJsonResponse(res, "Failed to load binders");
+}
+
+export async function createBinder({ binderName, layoutCode, pageCount = 1, notes = null }) {
+  const res = await fetch(`${API}/binders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      binder_name: binderName,
+      layout_code: layoutCode,
+      page_count: pageCount,
+      notes,
+    }),
+  });
+  return handleJsonResponse(res, "Failed to create binder");
+}
+
+export async function updateBinder(binderId, { binderName, layoutCode, notes } = {}) {
+  const body = {};
+  if (binderName !== undefined) body.binder_name = binderName;
+  if (layoutCode !== undefined) body.layout_code = layoutCode;
+  if (notes !== undefined) body.notes = notes;
+  const res = await fetch(`${API}/binders/${encodeURIComponent(binderId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, "Failed to update binder");
+}
+
+export async function deleteBinder(binderId) {
+  const res = await fetch(`${API}/binders/${encodeURIComponent(binderId)}`, {
+    method: "DELETE",
+  });
+  return handleJsonResponse(res, "Failed to delete binder");
+}
+
+export async function getBinder(binderId) {
+  const res = await fetch(`${API}/binders/${encodeURIComponent(binderId)}`);
+  return handleJsonResponse(res, "Failed to load binder");
+}
+
+// Every placed card across every binder, keyed by item_id — drives the
+// "a card lives in one binder only" rule in the designer's card tray.
+export async function fetchBinderPlacements() {
+  const res = await fetch(`${API}/binders/placements`);
+  return handleJsonResponse(res, "Failed to load binder placements");
+}
+
+/**
+ * Full replace of a binder's page/slot structure.
+ *   pages: [{ slots: [{ slot_index, item_id }] }]  — array position = page_index
+ *
+ * Rolls its own error handling rather than using handleJsonResponse: a 409
+ * carries a structured list of cards another binder already holds, and the UI
+ * needs those ids to explain the clash. The thrown Error gets a `.conflicts`
+ * array in that case.
+ */
+export async function saveBinderPages(binderId, pages) {
+  const res = await fetch(`${API}/binders/${encodeURIComponent(binderId)}/pages`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pages }),
+  });
+  if (res.ok) return res.json();
+
+  const raw = await res.text();
+  let detail = raw;
+  try {
+    detail = JSON.parse(raw).detail ?? raw;
+  } catch {
+    // Non-JSON body (proxy error page) — fall through with the raw text.
+  }
+  if (res.status === 409 && detail && typeof detail === "object") {
+    const err = new Error(detail.message || "Some cards are already placed in another binder.");
+    err.conflicts = detail.conflicts || [];
+    throw err;
+  }
+  throw new Error(typeof detail === "string" ? detail : "Failed to save binder");
+}
+
 // --- Ingest ---
 
 export async function fetchInbox() {

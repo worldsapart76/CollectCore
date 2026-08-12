@@ -134,6 +134,53 @@ CREATE INDEX IF NOT EXISTS idx_tbl_trades_expires
 
 
 -- ============================================================
+-- BINDER DESIGNER  (dev-only feature)
+-- ============================================================
+-- Digital representation of a physical photocard binder: a named binder with
+-- one pocket layout, an ordered list of sheets, and a card in each pocket.
+-- The UI is gated behind import.meta.env.DEV and never reaches a production
+-- bundle, so these tables exist but stay empty in prod. Design:
+-- docs/photocard_binder_designer_plan.md
+--
+-- NOTE the FOREIGN KEY clauses below are documentation only. `PRAGMA
+-- foreign_keys = ON` is issued on init_db's connection alone (db.py), never on
+-- request sessions, so nothing cascades — every delete path cleans up
+-- explicitly, the way bulk_delete_photocards already does.
+
+CREATE TABLE IF NOT EXISTS tbl_binders (
+    binder_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    binder_name  TEXT NOT NULL,
+    layout_code  TEXT NOT NULL,              -- '2x2' | '2x3' | '3x3' | '3x4' (cols x rows)
+    notes        TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tbl_binder_pages (
+    page_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    binder_id   INTEGER NOT NULL,
+    page_index  INTEGER NOT NULL,            -- 0-based sheet order
+    UNIQUE (binder_id, page_index),
+    FOREIGN KEY (binder_id) REFERENCES tbl_binders(binder_id)
+);
+
+-- UNIQUE (item_id) is what enforces "a card lives in at most one pocket, in at
+-- most one binder" — a physical card can only be in one place.
+CREATE TABLE IF NOT EXISTS tbl_binder_slots (
+    slot_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id     INTEGER NOT NULL,
+    slot_index  INTEGER NOT NULL,            -- row-major within the page
+    item_id     INTEGER NOT NULL,
+    UNIQUE (page_id, slot_index),
+    UNIQUE (item_id),
+    FOREIGN KEY (page_id) REFERENCES tbl_binder_pages(page_id),
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_binder_pages_binder ON tbl_binder_pages(binder_id);
+CREATE INDEX IF NOT EXISTS idx_binder_slots_page   ON tbl_binder_slots(page_id);
+
+
+-- ============================================================
 -- PHOTOCARD TABLES
 -- ============================================================
 

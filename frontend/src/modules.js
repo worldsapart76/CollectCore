@@ -8,6 +8,10 @@ export const MODULE_DEFS = {
       { label: 'Inbox',        to: '/inbox', adminOnly: true },
       { label: 'Bulk Create',  to: '/bulk-create', adminOnly: true },
       { label: 'Batch Images', to: '/batch-images', adminOnly: true },
+      // Route is '/binder-designer', not '/binders': the latter is the API
+      // prefix, and Vite's dev proxy matches on prefix — sharing it would make
+      // a page load and the list endpoint indistinguishable.
+      { label: 'Binders',      to: '/binder-designer', adminOnly: true },
       { label: 'Library',      to: '/library' },
       { label: 'Trades',       to: '/trades' },
     ],
@@ -103,6 +107,6 @@ export function getActiveModuleId(pathname) {
   if (pathname.startsWith('/video')) return 'video';
   if (pathname.startsWith('/boardgames')) return 'boardgames';
   if (pathname.startsWith('/ttrpg')) return 'ttrpg';
-  if (['/inbox', '/bulk-create', '/batch-images', '/library', '/trades', '/trade'].some(p => pathname.startsWith(p))) return 'photocards';
+  if (['/inbox', '/bulk-create', '/batch-images', '/binder-designer', '/library', '/trades', '/trade'].some(p => pathname.startsWith(p))) return 'photocards';
   return null;
 }

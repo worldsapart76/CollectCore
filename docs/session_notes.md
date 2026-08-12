@@ -6,6 +6,69 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-12 (US CDT) — Binder Designer BUILT (admin tier, not committed)
+
+New photocard tab for laying out physical binders on screen: create a named
+binder, pick a pocket layout, add/remove pages, drag cards from a filtered tray
+into pockets. Design doc: `docs/photocard_binder_designer_plan.md`
+(authoritative).
+
+- Built dev-gated first, then **un-gated the same session** — binders have to
+  track the real collection (dev vs prod card tracking have diverged badly), and
+  the page needs to work on a phone while filling binders physically.
+- **SPA route is `/binder-designer`, not `/binders`.** Vite proxies by path
+  prefix, so sharing the API's prefix would make the page load and the list
+  endpoint two indistinguishable GETs.
+- **Layout codes read across × down** — `3x2` is the 6-pocket page, `4x3` the
+  12-pocket. First written transposed; `db.py` rewrites stored codes on startup
+  (idempotent, logged) and the frontend maps legacy codes defensively.
+- **Sheets are measured, not preset.** A ResizeObserver feeds `fitPocketWidth()`,
+  which returns the largest pocket that fits both axes for the current layout and
+  sheet count. The S/M/L toggle is gone. The sheet area is `overflow: hidden` on
+  purpose — a scrollbar there means the measurement was wrong. Measured 186×258px
+  pockets at 1600×1000, 88% of canvas height, zero overflow.
+- **Phone support.** Forced single-page view, tray becomes a horizontal strip,
+  filters reuse the existing off-canvas drawer. Tapping is the full editing
+  model: tap a card then a pocket to place, tap a filled pocket to pick it up,
+  tap another to move it — HTML5 drag events never fire on touch.
+- **`UNIQUE(item_id)` on `tbl_binder_slots`** enforces "a card lives in one
+  binder only" at the DB level; the save returns 409 naming the holding binder.
+- **Spread view is a true open binder** — left = sheet N backs (columns
+  mirrored, read-only), right = sheet N+1 fronts.
+- **The available tray is derived**, not a stored list, which is what makes
+  "a removed card returns to its sort position" true by construction. Required
+  extracting the library's filter/sort logic (`photocardFiltering.js`) and badge
+  vocabulary (`cardBadges.js`) — pure moves, library verified unchanged.
+- **Post-save Wanted sweep** (opt-in) reuses `PATCH /photocards/bulk`; cards with
+  no decision row get a new Wanted copy instead, since the bulk UPDATE would
+  match zero rows and skip them silently.
+
+**Found along the way:** SQLite **FK cascades never fire** in this app —
+`PRAGMA foreign_keys = ON` is only issued on `init_db`'s connection, so every
+`FOREIGN KEY` in `schema.sql` is documentation. Photocard deletion now frees
+binder slots explicitly (both delete paths); recorded in CLAUDE.md + summary as
+a general rule, since it applies to any future table.
+
+**Verified** with curl (backend) and a Chrome DevTools Protocol driver against
+`npm run dev` (Node 24's built-in WebSocket — no new dependencies) — 50 checks
+across three rounds covering drag/move/swap/remove, tap-to-place and tap-to-move,
+sort restoration, spread mirroring, fit-to-space sizing at three viewport sizes,
+save, 409 conflicts, the sweep applied and rolled back, and slot cleanup on both
+photocard delete paths. One bug found and fixed: a stale `binder.lastBinderId` in
+localStorage produced a sticky full-page error.
+
+**Next / open:**
+1. **Not committed / not deployed** — review in `npm run dev`, then build + push.
+   First prod load creates the three (empty) binder tables automatically.
+2. Page reordering (dragging whole sheets) deferred; add/insert/delete only.
+
+**Not an issue:** a couple of dev cards (6121, 6129) render as broken images
+because the dev DB's `tbl_attachments.file_path` names an R2 object that no
+longer exists — probably superseded by a re-publish, whose sweep removed the old
+key. **Prod renders both fine**, so this is a stale-snapshot artifact of the dev
+DB, not a data gap. Binder slots fall back to an "Image missing" placeholder
+regardless, which is still worth having for cards awaiting a scan.
+
 ### 2026-08-12 (US CDT) — Photocard triage statuses (Undecided / Not Wanted) BUILT + DEPLOYED + LIVE
 
 Split the meaningless Wanted pile into an explicit collecting decision. Commits

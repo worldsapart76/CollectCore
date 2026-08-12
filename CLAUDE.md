@@ -41,6 +41,13 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
   `WHERE item_id = ...` flattens trade stacks. See the triage plan doc.
 - Intentional simplifications (no virtualization, inline styles, photocard-only
   export) are deliberate — **don't "fix" them unprompted**
+- **Binder Designer** SPA route is `/binder-designer`, never `/binders` — that
+  prefix belongs to the API and Vite's dev proxy matches on prefix, so sharing
+  it makes a page load and the list endpoint indistinguishable. Layout codes
+  read **across × down** (`4x3` = 12 pockets). Admin-only. See the plan doc.
+- SQLite **FK cascades never fire** — `PRAGMA foreign_keys = ON` is only issued
+  on `init_db`'s connection. Every delete path must clean up child rows
+  explicitly; `FOREIGN KEY` clauses in `schema.sql` are documentation.
 
 ## UI Design Principles
 
@@ -59,6 +66,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/deployment_and_auth.md` | Hosting, Cloudflare Access auth, multi-user tier mechanics |
 | `docs/image_handling.md` | Photocard image pipeline, R2 conventions, render helpers |
 | `docs/photocard_triage_statuses_plan.md` | **Authoritative** — Undecided/Not Wanted triage statuses: decision-vs-possession split, co-occurrence rules, sweep semantics |
+| `docs/photocard_binder_designer_plan.md` | **Authoritative** — Binder Designer: layouts, spread/mirroring, one-binder-per-card rule, fit-to-space sizing, Wanted sweep |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |

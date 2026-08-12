@@ -31,6 +31,10 @@ const PROXY_PATHS = [
   '/shutdown',
   '/catalog',
   '/pcs',
+  // Binder Designer API (dev-only feature). The SPA route is deliberately
+  // '/binder-designer', not '/binders' — a shared prefix would make the SPA
+  // page and the list endpoint two GETs on one path, indistinguishable here.
+  '/binders',
 ]
 
 // Frontend sub-paths that share a prefix with backend routes.
