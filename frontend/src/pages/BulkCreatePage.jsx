@@ -127,7 +127,13 @@ export default function BulkCreatePage() {
         // /pcs/) — no dropdown. New cards are untriaged by definition: stamping
         // them Wanted is what made the wanted list meaningless in the first
         // place. Resolve the id by status_code, fall back to first.
-        const intake = os.find((x) => x.status_code === "undecided") || os[0];
+        // Fall back to Wanted, never to os[0]: the list is sort_order-ordered,
+        // so os[0] is Owned — a missing status would silently claim ownership of
+        // every bulk-created card.
+        const intake =
+          os.find((x) => x.status_code === "undecided") ||
+          os.find((x) => x.status_code === "wanted") ||
+          os[0];
         setOwnershipStatusId(intake ? String(intake.ownership_status_id) : "");
       })
       .catch((err) => setLookupError(err.message || "Failed to load data"))
