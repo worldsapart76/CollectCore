@@ -43,6 +43,15 @@
 - Shared lookup
 - Values:
   - Owned, Wanted, Trade, Formerly Owned, Pending, Borrowed (added for books)
+  - Catalog (photocards only; synthetic on `/pcs/`)
+  - **Undecided, Not Wanted** (photocards only; added 2026-08-12) —
+    `sort_order` 9/10, appended so they sit behind the filter sidebar's
+    "+N more" fold. Visibility is per-module via
+    `xref_ownership_status_modules`, same targeted treatment as Catalog.
+- **Ids are DB-assigned and differ per environment** (dev seeded Undecided as
+  2429; prod differs) — resolve by `status_code`, never hardcode. The literals
+  in `constants.py` (`OWNED_STATUS_ID`, `WANTED_STATUS_ID`) only work because
+  those rows were seeded first.
 
 ### lkup_photocard_groups
 - Photocard-specific lookup
@@ -167,7 +176,8 @@ All three collection modules are fully implemented.
 - GET /photocards/{id}
 - PUT /photocards/{id}
 - DELETE /photocards/{id}
-- PATCH /photocards/bulk
+- PATCH /photocards/bulk — ownership changes are row-scoped to the decision row;
+  response adds `ownership: {updated, skipped}` when ownership was in the payload
 - POST /photocards/bulk-delete
 - GET /photocards/groups
 - GET /photocards/groups/{group_id}/members
@@ -213,6 +223,22 @@ All three collection modules are fully implemented.
 - Tags: book-specific tags implemented (`lkup_book_tags`). Cross-collection
   tag architecture remains deferred — **do not add tags to new modules
   without explicit decision.**
+- **Photocard `ownership_status_id` carries two orthogonal facts** (2026-08-12):
+  - a standing **decision** about the card — `undecided` / `wanted` /
+    `not_wanted`. At most one per card, and it *outlives the copies*.
+  - a **possession** fact about a copy — `owned` / `trade` / `pending_*` /
+    `formerly_owned` / `borrowed`. Zero or more per card.
+
+  Co-occurrence: at most one decision per card; `wanted` excludes `owned` and
+  `trade`; **`not_wanted` + `trade` is legal on purpose** — the trade copy row
+  is deleted when a trade completes and the "don't collect this" record has to
+  survive it. Enforced by `_check_status_conflict` in `routers/photocards.py`.
+- **Bulk ownership sweeps are row-scoped to the decision row** — possession
+  copies are never touched in bulk, and cards whose target would conflict are
+  excluded and reported as `skipped` rather than corrupted. A card-scoped
+  `WHERE item_id = ...` (the pre-2026-08-12 behaviour) flattened every copy on
+  the card, destroying trade stacks. Full rationale:
+  `docs/photocard_triage_statuses_plan.md`.
 
 ---
 

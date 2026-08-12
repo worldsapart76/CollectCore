@@ -6,6 +6,57 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-12 (US CDT) — Photocard triage statuses (Undecided / Not Wanted) BUILT + DEPLOYED (prod DB not yet migrated)
+
+Split the meaningless Wanted pile into an explicit collecting decision. Commits
+`f4facd1` (feature), `72951ec` (bulk-create fallback fix), `0298649` (CLAUDE.md).
+Design doc: `docs/photocard_triage_statuses_plan.md` (authoritative).
+
+**Motivator:** `wanted` had come to mean "this card exists in my library", not
+"I want this" — the 2026-04 import and BulkCreatePage both stamped it on every
+card, leaving 9,314 of 10,024 (93%) Wanted. Goal is to hand-triage all ~10k by
+member + source sweeps with individual curation.
+
+- **Two new statuses, photocards-only** (`sort_order` 9/10, appended — no
+  existing row renumbered, so other modules are untouched and the sidebar's
+  visible five are unchanged). Deliberately behind the "+N more" fold: they're
+  set once per card, unlike the frequently-changed possession statuses.
+- **Decision vs possession.** `ownership_status_id` now carries two orthogonal
+  facts. `not_wanted` + `trade` is legal on purpose — the trade copy row is
+  deleted when a trade completes and the record must survive it. Enforced by
+  `_check_status_conflict` (replaces `_check_owned_wanted_conflict`).
+- **Bulk sweep rewritten.** Was card-scoped (`WHERE item_id = ...`), which
+  rewrote *every* copy on the card — 84 cards with trade stacks would have been
+  flattened by the very sweeps planned for triage. Now row-scoped to the
+  decision row, conflicting cards excluded and counted, and collapsed from a
+  per-item loop to one statement (**1.60s → 0.004s** over the full 10k library).
+- **Frontend:** badge letters U/N (muted `#9aa0a6` / `#a05252`); primary badge
+  slot is now an ordered chain `O → W → N → U`; BulkCreatePage defaults to
+  Undecided; card-level **Triage** filter section (Tracked / Untracked);
+  desktop-only header prefix `N total · N tracked` (mobile string unchanged).
+- **Why Triage is a card-level section, not an Ownership exclusion:**
+  `applySection`'s `exclude` is card-wide, so excluding `not_wanted` there would
+  also hide `{not_wanted + trade}` cards — dropping live trade inventory out of
+  view. Same predicate backs the header's `tracked` count.
+- **Deploy is purely additive by design.** `_seed_status_visibility_xref` only
+  seeds a *fresh* DB, so an existing DB never gets the xref rows; a simulated
+  prod deploy confirmed the statuses stay invisible, no copy row is touched, and
+  nothing one-shot runs at startup (restarts can't alter data). Caught that the
+  old `os.find(undecided) || os[0]` fallback would have stamped new bulk-created
+  cards **Owned** — now falls back to Wanted (`72951ec`).
+
+**Next / open:**
+1. **Prod DB is not migrated.** Two manual steps: (a) Admin → Status Visibility,
+   tick Undecided + Not Wanted for Photocards; (b) library → filter Ownership =
+   Wanted → Select All → Bulk Edit → Undecided. `backend/migrate_triage_statuses.py`
+   scripts both but needs volume access; the UI route avoids that.
+2. **Dev DB already migrated** (9,314 rows; Wanted = 0) — dev and prod differ
+   until step 1 runs.
+3. **Default `Triage = Tracked` filter deliberately NOT enabled** — it would hide
+   the pile mid-triage. Small addition to the `!isAdmin` block in
+   `PhotocardLibraryPage.jsx` once triage is done.
+4. Then: triage all ~10k by member + source.
+
 ### 2026-07-17 (US CDT) — Photocard bulk-create + imageless catalog + batch-image window + /pcs uploads DEPLOYED + LIVE
 
 All 4 phases of `docs/photocard_bulk_create_and_batch_images_plan.md` **built,
