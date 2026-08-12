@@ -33,6 +33,12 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
 - `subcategory` is removed and `member` is an xref (`xref_photocard_members`),
   not a scalar — **do not reintroduce either**
 - **No tags on new modules** without an explicit decision
+- Photocard `ownership_status_id` holds **two orthogonal facts**: a standing
+  *decision* about the card (`undecided`/`wanted`/`not_wanted`, at most one, and
+  it outlives the copies) and *possession* facts about copies (`owned`/`trade`/
+  `pending_*`). `not_wanted` + `trade` is legal on purpose. Bulk ownership
+  sweeps must stay **row-scoped to the decision row** — a card-scoped
+  `WHERE item_id = ...` flattens trade stacks. See the triage plan doc.
 - Intentional simplifications (no virtualization, inline styles, photocard-only
   export) are deliberate — **don't "fix" them unprompted**
 
@@ -52,6 +58,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/catalog_architecture.md` | Catalog/guest-sync internals (delta endpoints, guest schema, backup format) |
 | `docs/deployment_and_auth.md` | Hosting, Cloudflare Access auth, multi-user tier mechanics |
 | `docs/image_handling.md` | Photocard image pipeline, R2 conventions, render helpers |
+| `docs/photocard_triage_statuses_plan.md` | **Authoritative** — Undecided/Not Wanted triage statuses: decision-vs-possession split, co-occurrence rules, sweep semantics |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |
