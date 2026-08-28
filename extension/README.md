@@ -28,9 +28,16 @@ That is the whole workflow.
 
 1. Go to `chrome://extensions`
 2. Click the **↻ reload** icon on the CollectCore card
-3. **Refresh the Mercari tab** (content scripts only reload with the page)
+3. **Refresh every open Mercari tab**
 
-Skipping step 3 is the usual reason a change "didn't work."
+**Step 3 is required after *any* reload**, not just when content-script files
+changed. Reloading the extension orphans the content script already running in
+an open page: the capture dots it drew stay on screen, but its connection to the
+extension is severed, so clicking one does nothing at all.
+
+The page now says so rather than failing silently — a red bar appears across the
+top reading *"CollectCore was reloaded — refresh this page to resume
+capturing"*, and clicking it reloads the page.
 
 ## Using it
 

@@ -11,8 +11,38 @@
   const DOT_CLASS = 'cc-capture-dot';
 
   let active = false;
+  let orphaned = false;
   let captured = new Set();
   let observer = null;
+
+  // Reloading the extension orphans this script: the DOM it injected survives,
+  // but its chrome.runtime connection is severed, so every message throws and
+  // clicking a dot silently does nothing. Surfacing it beats leaving someone to
+  // wonder why a button stopped working.
+  async function send(message) {
+    if (orphaned) return null;
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (err) {
+      if (String(err).includes('Extension context invalidated')) showOrphaned();
+      return null;
+    }
+  }
+
+  function showOrphaned() {
+    if (orphaned) return;
+    orphaned = true;
+    document.querySelectorAll(`.${DOT_CLASS}`).forEach((d) => {
+      d.classList.add('cc-error');
+      d.title = 'Extension was reloaded — refresh this page';
+    });
+    const bar = document.createElement('div');
+    bar.className = 'cc-orphan-bar';
+    bar.textContent =
+      'CollectCore was reloaded — refresh this page to resume capturing.';
+    bar.addEventListener('click', () => location.reload());
+    document.body.appendChild(bar);
+  }
 
   // --- Extraction ----------------------------------------------------------
 
@@ -99,7 +129,7 @@
 
       const key = keyFor(id);
       if (captured.has(key)) {
-        await chrome.runtime.sendMessage({ type: 'UNCAPTURE', key });
+        await send({ type: 'UNCAPTURE', key });
         captured.delete(key);
         syncDot(dot);
         return;
@@ -112,7 +142,7 @@
         return;
       }
 
-      await chrome.runtime.sendMessage({
+      const res = await send({
         type: 'CAPTURE',
         payload: {
           item,
@@ -121,6 +151,7 @@
           searchQuery: searchQuery(),
         },
       });
+      if (!res) return; // orphaned, or the worker refused it
       captured.add(key);
       syncDot(dot);
     });
@@ -153,7 +184,7 @@
     active = true;
     document.documentElement.classList.add('cc-active');
 
-    const res = await chrome.runtime.sendMessage({ type: 'GET_KEYS' });
+    const res = await send({ type: 'GET_KEYS' });
     captured = new Set(res?.keys || []);
 
     decorateAll();
@@ -180,7 +211,7 @@
   function onKeydown(e) {
     if (e.key !== 'Escape' || !active) return;
     disable();
-    chrome.runtime.sendMessage({ type: 'DEACTIVATE' }).catch(() => {});
+    send({ type: 'DEACTIVATE' });
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -189,7 +220,8 @@
       else disable();
     }
     if (msg.type === 'STORE_CHANGED' && active) {
-      chrome.runtime.sendMessage({ type: 'GET_KEYS' }).then((res) => {
+      send({ type: 'GET_KEYS' }).then((res) => {
+        if (!res) return;
         captured = new Set(res?.keys || []);
         syncAllDots();
       });
@@ -197,10 +229,7 @@
   });
 
   // A reload of an already-active tab should come back up capturing.
-  chrome.runtime
-    .sendMessage({ type: 'IS_ACTIVE' })
-    .then((res) => {
-      if (res?.active) enable();
-    })
-    .catch(() => {});
+  send({ type: 'IS_ACTIVE' }).then((res) => {
+    if (res?.active) enable();
+  });
 })();

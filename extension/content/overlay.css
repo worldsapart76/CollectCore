@@ -43,3 +43,16 @@
   outline-offset: -3px;
   border-radius: 4px;
 }
+
+/* Shown when the extension was reloaded out from under this page. */
+.cc-orphan-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 2147483647;
+  padding: 9px 14px;
+  background: #b91c1c;
+  color: #fff;
+  font: 600 13px/1.4 system-ui, sans-serif;
+  text-align: center;
+  cursor: pointer;
+}
