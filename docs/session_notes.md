@@ -6,6 +6,65 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-28 (US CDT) — Photocard market intel DESIGNED (extension + resale ledger)
+
+Design session only — no code. Resurfaced the parked listing tracker and
+redesigned it around browser-extension capture plus a resale ledger, written up
+as `docs/photocard_market_intel_plan.md` (authoritative). Driven by two real
+needs: research prices while browsing hundreds of listings without copy/pasting
+URLs, and track spend/revenue on a small number of resale cards riding along in
+Neokyo boxes already being bought for personal collecting.
+
+- **Extension replaces server-side Playwright.** v3's biggest exposure was
+  Chromium on Railway behind datacenter IPs, with a documented split-deployment
+  fallback for when Mercari blocked it. Capturing from the real browser removes
+  the risk rather than mitigating it — and the whole contingency branch with it.
+- **Card-level observations replace per-URL tracking.** The need is "Card A cost
+  X on Neokyo on this date, listed at Z on Mercari US on that date," dozens of
+  rows per card. So `listing_snapshots`, the refresh engine, cooldowns,
+  `refresh_lock_until`, and the in-process scheduler sweep are all **dropped**.
+  What survives from v3 is a plain buy shortlist — saved Neokyo URLs, no
+  lifecycle.
+- **Active and sold are both captured, tagged, never blended.** Sold comps alone
+  miss a fluctuating market. The trade sides read different series: buy is
+  inherently active-only (you can only purchase a live listing), sell leans
+  sold. Falls out for free: **supply depth**, which predicts days-to-sell better
+  than price.
+- **One listing carries N lines** — cards, non-card items (album/magazine/merch),
+  and unidentified cards, each labelled. This is one feature serving two
+  consumers: on comps it yields the **implied per-card price** on lots (the
+  arbitrage thesis, quantified); on purchases it is the allocation basis.
+  Partial identification is a complete record, not a draft.
+- **Allocation needs two bases, not one.** Weight for international shipping
+  (cards ~5g and near-uniform; an album correctly eats a huge share), per-item
+  or value for service fees. A single basis gives wrong per-card costs the
+  moment a heavy non-card item is in the box. Overrides reuse the
+  tier-XOR-custom pattern from `tbl_photocard_pricing` deliberately.
+- **Full box costs allocate across every line, kept and flipped alike.** Letting
+  resale freeload on shipping the personal purchase paid for is the exact false
+  signal that would justify scaling into a dedicated box on an accounting
+  artifact. `kept` is a first-class outcome and a transfer at allocated cost —
+  the mechanism that makes "resale net ≥ landed cost of cards kept" computable.
+- **Auth:** Option C (local IndexedDB export, no API) while the extension is
+  shaped, Option B (CF Access service token scoped to `/ingest/*`, append-only)
+  for the real build. A service token validates at the edge, so **the app still
+  gains zero auth code**. CORS preflight from the extension origin — not the
+  cookie — is the fiddly half either way.
+- **Scope held down deliberately.** An earlier proposal for a multi-week
+  sell-through measurement program was rejected as disproportionate; those
+  numbers accrue on their own from `date_listed` / `date_sold` once the ledger
+  is in use.
+- CLAUDE.md updated: reference-table row for the new plan, roadmap entry, and
+  the v3 listing tracker marked **superseded for photocards** (still the
+  reference if another module ever needs listing tracking).
+
+**Next / open:** the ~30 min check on what Mercari US's search response actually
+carries — it decides whether the enrich tier is optional or required, and it
+gates finalizing the capture design. Then the Mercari US capture extension,
+whose first payoff needs no purchases at all: comps to price the existing trade
+shelf. Left loose until a real box lands: value-weight class multipliers and
+grams-per-line-type defaults.
+
 ### 2026-08-27 (US CDT) — Lomo/Fanmade ownership status (`/pcs/` request)
 
 A `/pcs/` user asked for a status for unofficial fan-printed cards. Added as a

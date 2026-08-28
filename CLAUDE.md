@@ -80,7 +80,8 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |
 | `docs/guest_deploy_runbook.md` | Deploy-time checklist for `/guest/` (CF bypass, smoke test, rollback) |
-| `docs/listing_tracker_design_plan_v3.md` / `_dev_plan.md` | **Authoritative** listing-tracker design + phased plan (not built) |
+| `docs/photocard_market_intel_plan.md` | **Authoritative** — browser-extension price capture + resale ledger (box/purchase/line allocation). Supersedes the listing tracker for photocards (not built) |
+| `docs/listing_tracker_design_plan_v3.md` / `_dev_plan.md` | Listing-tracker design + phased plan (not built). **Superseded for photocards** by `photocard_market_intel_plan.md`; still the reference for cross-module listing tracking |
 | `docs/guest_cloud_accounts_plan.md` | **Authoritative** `/pcs/` tier replacing `/guest/` WASM (not built) |
 | `docs/release-guide.md`, `plans\pure-inventing-whisper.md`, `plans\fancy-stirring-hollerith.md` | Historical/superseded — consult only for back-history |
 
@@ -133,9 +134,15 @@ Desktop installer is retired — admins use the bookmark; no `.exe`.
 
 Plan docs are authoritative — read before starting; don't duplicate decisions here.
 
-- **Listing tracker** — price/listing tracking. `docs/listing_tracker_design_plan_v3.md`
-  + `_dev_plan.md`. Phase 0A done; **Phase 1 (schema & core backend) is the first
-  open item**; depends on `/pcs/` first.
+- **Photocard market intel** — browser-extension price capture (Mercari US +
+  Neokyo) and a resale ledger with box → purchase → line cost allocation.
+  `docs/photocard_market_intel_plan.md`. **First open item: the ~30 min Mercari
+  US search-response check, then the Mercari US capture extension.** Admin-only,
+  `mkt_*` tables, no `/pcs/` dependency.
+- **Listing tracker** — cross-module price/listing tracking.
+  `docs/listing_tracker_design_plan_v3.md` + `_dev_plan.md`. Phase 0A done.
+  **Superseded for photocards** by the market-intel plan (which drops the
+  Playwright/refresh-engine design); dormant unless another module needs it.
 - **Guest access overhaul** — `/pcs/` authenticated tier replacing `/guest/` WASM
   (photocard-only). `docs/guest_cloud_accounts_plan.md`.
 
