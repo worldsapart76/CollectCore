@@ -15,8 +15,8 @@ letter and one CSS variable were the only code the tiers needed.
 - **`lomo_fanmade` / "Lomo/Fanmade", `sort_order` 11, photocards only.** A
   *possession* fact held **instead of** Owned, so it takes the primary
   (bottom-left) badge slot as **L**, directly below `O` in
-  `PRIMARY_STATUS_ORDER`. New `--badge-lomo` (#00e5c0) in both themes — a hue
-  no other badge uses, so an L never reads as an O at thumbnail size.
+  `PRIMARY_STATUS_ORDER`. New `--badge-lomo` (#ffffff) in both themes — white
+  rather than a neon of its own, so it never competes with the green O.
 - **Deliberately no co-occurrence rule and no derived behaviour**, per the
   request: it blocks nothing and nothing blocks it. `_conflicting_codes`
   returns `[]` for it. Owned + Lomo/Fanmade on one card is legal, just unusual;
