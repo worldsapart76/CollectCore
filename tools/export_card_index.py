@@ -14,6 +14,16 @@ Usage:
     python tools/export_card_index.py [--db PATH] [--out PATH]
 
 Read-only. Touches nothing.
+
+**The dev DB lags production.** Cards and whole eras present in prod can be
+missing from dev, or sit there as placeholder rows. An index exported from dev
+is fine for developing the picker and tuning the matcher; it is NOT fit to
+actually sweep against, because cards you own will fail to match and get pushed
+down the create-the-card path for no reason.
+
+For real use, source from prod — either a downloaded prod backup
+(Admin -> Backup & Restore) passed via --db, or the admin card-index endpoint
+once that exists.
 """
 
 from __future__ import annotations

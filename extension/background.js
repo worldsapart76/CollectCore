@@ -16,6 +16,7 @@ import {
 } from './lib/db.js';
 
 const ACTIVE_TABS = 'activeTabs';
+const ARMED_CARD = 'armedCard';
 
 // Mirror of the persisted set, readable SYNCHRONOUSLY.
 //
@@ -134,6 +135,21 @@ chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   }
 });
 
+// --- Armed card ------------------------------------------------------------
+
+// Mode 2: a card is set, and every tile click seeds line 1 with it. Session
+// storage, not memory — the worker dies between clicks.
+async function getArmed() {
+  const got = await chrome.storage.session.get(ARMED_CARD);
+  return got[ARMED_CARD] || null;
+}
+
+async function setArmed(card) {
+  if (card) await chrome.storage.session.set({ [ARMED_CARD]: card });
+  else await chrome.storage.session.remove(ARMED_CARD);
+  return card || null;
+}
+
 // --- Capture ---------------------------------------------------------------
 
 function bigThumb(url) {
@@ -188,6 +204,7 @@ function looksLikeLot(name) {
 }
 
 async function capture({ item, pageUrl, searchQuery, marketplace }) {
+  const armed = await getArmed();
   const key = obsKey(marketplace, item.id);
   const existing = await getObservation(key);
 
@@ -235,7 +252,12 @@ async function capture({ item, pageUrl, searchQuery, marketplace }) {
     // a Confirm lots list rather than branching the fast path at click time.
     isLot: false,
     suspectedLot: looksLikeLot(item.name),
-    lines: [],
+    // An armed click means the listing CONTAINS the card, not that it IS the
+    // card — so this is line 1, not the whole story. A bundle keeps the
+    // association and gains its other lines later.
+    lines: armed
+      ? [{ lineType: 'card', cardId: armed.id, label: armed.label, qty: 1 }]
+      : [],
     sightings: [sighting],
   };
 
@@ -272,6 +294,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       }
+      case 'ASSOCIATE': {
+        const rec = await getObservation(msg.key);
+        if (rec) {
+          rec.lines = rec.lines || [];
+          if (!rec.lines.some((l) => l.cardId === msg.card.id)) {
+            rec.lines.push({
+              lineType: 'card',
+              cardId: msg.card.id,
+              label: msg.card.label,
+              qty: 1,
+            });
+          }
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
+      case 'UNASSOCIATE': {
+        const rec = await getObservation(msg.key);
+        if (rec) {
+          rec.lines = (rec.lines || []).filter((l) => l.cardId !== msg.cardId);
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
+      case 'SET_LOT': {
+        const rec = await getObservation(msg.key);
+        if (rec) {
+          rec.isLot = !!msg.isLot;
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
+      case 'SET_ARMED':
+        sendResponse({ ok: true, armed: await setArmed(msg.card) });
+        chrome.runtime.sendMessage({ type: 'ARMED_CHANGED' }).catch(() => {});
+        break;
+      case 'GET_ARMED':
+        sendResponse({ ok: true, armed: await getArmed() });
+        break;
       case 'GET_KEYS':
         sendResponse({ ok: true, keys: await allKeys() });
         break;

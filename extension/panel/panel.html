@@ -7,25 +7,83 @@
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
-    <header class="bar">
-      <div>
-        <strong>Market Capture</strong>
-        <span class="hint">Esc exits</span>
+    <!-- LIST VIEW -->
+    <section id="view-list">
+      <header class="bar">
+        <div>
+          <strong>Market Capture</strong>
+          <span class="hint">Esc exits</span>
+        </div>
+        <div class="count"><span id="count">0</span> captured</div>
+      </header>
+
+      <div id="armed-row" class="armed-row">
+        <span class="armed-label">Mode</span>
+        <button id="arm" type="button" class="armed-chip" title="Set a card to auto-associate every capture">
+          Collecting — click to arm a card
+        </button>
       </div>
-      <div class="count"><span id="count">0</span> captured</div>
-    </header>
 
-    <div class="actions">
-      <button id="export" type="button">Export JSON</button>
-      <button id="clear" type="button" class="danger">Clear all</button>
-    </div>
+      <div class="actions">
+        <button id="export" type="button">Export JSON</button>
+        <button id="import" type="button">Import index</button>
+        <button id="clear" type="button" class="danger">Clear all</button>
+        <input id="import-file" type="file" accept="application/json" hidden />
+      </div>
 
-    <p id="empty" class="empty">
-      Nothing captured yet. Click the <strong>+</strong> on any search result to
-      capture it.
-    </p>
+      <p id="index-status" class="status"></p>
 
-    <ul id="list" class="list"></ul>
+      <p id="empty" class="empty">
+        Nothing captured yet. Click the <strong>+</strong> on any search result
+        to capture it.
+      </p>
+
+      <ul id="list" class="list"></ul>
+    </section>
+
+    <!-- ASSOCIATE VIEW -->
+    <section id="view-associate" hidden>
+      <header class="bar">
+        <button id="back" type="button" class="link">← Back</button>
+        <div class="count" id="assoc-progress"></div>
+      </header>
+
+      <div class="listing">
+        <img id="assoc-img" class="listing-img" alt="" />
+        <div class="listing-meta">
+          <div id="assoc-name" class="name"></div>
+          <div id="assoc-facts" class="meta"></div>
+          <a id="assoc-open" class="open" target="_blank" rel="noreferrer">
+            Open listing ↗
+          </a>
+        </div>
+      </div>
+
+      <div class="assoc-actions">
+        <label class="lot-toggle">
+          <input id="assoc-lot" type="checkbox" />
+          This is a lot / bundle
+        </label>
+      </div>
+
+      <div id="assoc-lines" class="lines"></div>
+
+      <div class="chips-row">
+        <span class="chips-label">Matched</span>
+        <div id="assoc-chips" class="chips"></div>
+      </div>
+
+      <input
+        id="assoc-search"
+        type="search"
+        class="search"
+        placeholder="Search all cards…"
+        autocomplete="off"
+      />
+
+      <p id="assoc-summary" class="status"></p>
+      <div id="assoc-grid" class="grid"></div>
+    </section>
 
     <script type="module" src="panel.js"></script>
   </body>

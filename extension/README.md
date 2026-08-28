@@ -42,8 +42,51 @@ anything else looks completely normal — no overlays, no panel.
 | **Turn on** | Click the toolbar icon. The side panel opens; capture dots appear on results. |
 | **Capture** | Click the **+** on any result tile. It turns green. |
 | **Un-capture** | Click the **✓** again. |
+| **Identify** | *Identify →* on a captured row, then click the matching card. |
+| **Arm a card** | The Mode button. Every capture then auto-associates to it. |
 | **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
 | **Export** | *Export JSON* in the panel. |
+
+## The card index (required for the picker)
+
+The picker needs a local copy of your library. Generate it, then import it once:
+
+```
+python tools/export_card_index.py --db <path to a PROD database copy>
+```
+
+Then *Import index* in the panel and choose `data/card-index.json`.
+
+**Source it from production, not the dev DB.** Dev lags prod, so a dev-built
+index makes cards you actually own fail to match. Get a prod copy from
+Admin → Backup & Restore.
+
+Re-export and re-import whenever you have catalogued enough new cards to notice.
+
+### Two capture modes
+
+**Collecting** (default) — a broad search where each result might be a different
+card. Click the interesting ones, then work the *Identify* queue afterward. The
+listing title pre-filters the picker: matched tokens show as chips you can click
+off, and the candidate list is never empty — chips get dropped rather than
+returning nothing.
+
+**Armed** — a targeted sweep for one card. Arm it, then every tile click
+captures *and* associates in one action. An armed click means the listing
+**contains** the card, not that it *is* the card, so a bundle keeps the
+association and you add its other cards from the panel.
+
+Titles matching bundle signals (`bundle`, `lot`, `set`, `PC's`, `まとめ売り`, and
+similar) are flagged **possible lot?** rather than interrupting the sweep to
+ask. Confirm them with the *This is a lot / bundle* checkbox — it matters
+because **a card's price series only counts listings where that card is the
+sole line**, so a 12-card bundle at $27 must never register as that card
+selling for $27.
+
+Cards with no image are shown with a hatched placeholder and are still
+pickable — that state is usually a short window between cataloguing a card and
+its scan landing, and hiding them would make the newest era unpickable exactly
+when you are sweeping it.
 
 **The panel is literally the switch.** It holds an open port to the service
 worker, so capture is on exactly while the panel is open — closing it by any

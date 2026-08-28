@@ -1,0 +1,120 @@
+// Local copy of the photocard library, and the search over it.
+//
+// Lives in the panel rather than the service worker: the worker is ephemeral
+// and rebuilding a 10k-card inverted index on every wake would be absurd. The
+// panel holds it for as long as it is open, which is exactly the window in
+// which anyone is picking cards.
+
+import { buildIndex, matchTitle, tokenize } from './matcher.js';
+
+const DB_NAME = 'collectcore-cards';
+const DB_VERSION = 1;
+const STORE = 'index';
+const KEY = 'current';
+
+let cached = null; // { meta, cards, index }
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function tx(mode, fn) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const t = db.transaction(STORE, mode);
+        const req = fn(t.objectStore(STORE));
+        t.oncomplete = () => resolve(req && req.result);
+        t.onerror = () => reject(t.error);
+      })
+  );
+}
+
+/** Persist a freshly imported index and make it live. */
+export async function save(payload) {
+  const cards = payload?.cards;
+  if (!Array.isArray(cards) || cards.length === 0) {
+    throw new Error('not a card index: expected a non-empty "cards" array');
+  }
+  const record = {
+    cards,
+    importedAt: new Date().toISOString(),
+    count: cards.length,
+  };
+  await tx('readwrite', (s) => s.put(record, KEY));
+  cached = null;
+  return record;
+}
+
+/** Load and index the stored library. Built once per panel session. */
+export async function load() {
+  if (cached) return cached;
+  const record = await tx('readonly', (s) => s.get(KEY));
+  if (!record) return null;
+  cached = {
+    meta: { importedAt: record.importedAt, count: record.count },
+    cards: record.cards,
+    index: buildIndex(record.cards),
+  };
+  return cached;
+}
+
+export async function clear() {
+  await tx('readwrite', (s) => s.delete(KEY));
+  cached = null;
+}
+
+/**
+ * Candidates for a listing, narrowed by its title.
+ *
+ * `drop` carries the tokens whose chips the user switched off, so removing a
+ * chip re-runs the same match minus that constraint.
+ */
+export async function suggest(title, { drop = [], limit = 60 } = {}) {
+  const store = await load();
+  if (!store) return null;
+  return matchTitle(title, store.index, { drop, limit });
+}
+
+/**
+ * Free-text search, for when the title inferred nothing useful and the card has
+ * to be found by hand. Ranked by how many query tokens each card matches, so
+ * partial memory ("hyunjin karma") still lands.
+ */
+export async function search(query, { limit = 60 } = {}) {
+  const store = await load();
+  if (!store) return [];
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return store.cards.slice(0, limit);
+
+  const scored = [];
+  for (const card of store.cards) {
+    const hay = [
+      ...(card.members || []),
+      card.origin || '',
+      card.version || '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    let score = 0;
+    for (const t of tokens) if (hay.includes(t)) score++;
+    if (score === tokens.length) scored.push({ card, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.card.id - b.card.id);
+  return scored.slice(0, limit).map((s) => s.card);
+}
+
+export function cardLabel(card) {
+  const members = (card.members || []).join(' + ') || '—';
+  return [members, card.origin, card.version].filter(Boolean).join(' · ');
+}
