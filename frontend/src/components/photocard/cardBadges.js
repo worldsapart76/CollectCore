@@ -17,6 +17,7 @@ export const STATUS_LETTERS = {
   "Pending - Incoming": "I",
   Undecided: "U",
   "Not Wanted": "N",
+  "Lomo/Fanmade": "L",
 };
 
 // Letter → neon color mapping
@@ -30,14 +31,18 @@ export const BADGE_LETTER_COLORS = {
   I: "var(--badge-pending-in)",
   U: "var(--badge-undecided)",
   N: "var(--badge-not-wanted)",
+  L: "var(--badge-lomo)",
 };
 
 // Render order for statuses that don't take the primary slot (bottom-right)
 export const OTHER_STATUS_ORDER = ["T", "P", "I", "B", "F"];
 
 // Primary slot (bottom-left) precedence. Owned wins because possession is the
-// most salient fact; below it the mutually-exclusive triage decisions.
-export const PRIMARY_STATUS_ORDER = ["O", "W", "N", "U"];
+// most salient fact; Lomo/Fanmade sits right below it as the other possession
+// letter (it is held INSTEAD of Owned, so the two rarely co-occur -- but if a
+// card carries both, the official copy is the more salient fact); then the
+// mutually-exclusive triage decisions.
+export const PRIMARY_STATUS_ORDER = ["O", "L", "W", "N", "U"];
 
 export function getCopyBadges(copies) {
   if (!copies || copies.length === 0) return { primary: null, other: null };

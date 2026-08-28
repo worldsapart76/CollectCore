@@ -170,6 +170,36 @@ def _run_migrations(conn) -> None:
         """)
         logger.info("Migration: created tbl_video_season_copies and backfilled from tbl_video_seasons")
 
+    # Migration: 'lomo_fanmade' ownership status (Lomo/Fanmade), photocards only.
+    # Requested by a /pcs/ user: a possession fact for an unofficial fan-printed
+    # card, held INSTEAD of Owned. Appended (sort_order 11) so no existing status
+    # is renumbered -- these rows are shared with every other module's sidebar.
+    #
+    # Runs at most once: migrations execute BEFORE schema.sql, so on the first
+    # boot after this deploy the status is absent and both rows are written; on
+    # every later boot the guard is false, which is what lets an admin turn the
+    # status off again in Admin > Status Visibility without it coming back.
+    # (_seed_status_visibility_xref can't do this -- it only seeds a fresh DB.)
+    if "lkup_ownership_statuses" in tables and "xref_ownership_status_modules" in tables:
+        already = raw.execute(
+            "SELECT 1 FROM lkup_ownership_statuses WHERE status_code = 'lomo_fanmade'"
+        ).fetchone()
+        if not already:
+            raw.execute(
+                "INSERT INTO lkup_ownership_statuses "
+                "(status_code, status_name, sort_order, is_active) "
+                "VALUES ('lomo_fanmade', 'Lomo/Fanmade', 11, 1)"
+            )
+            raw.execute("""
+                INSERT OR IGNORE INTO xref_ownership_status_modules
+                    (ownership_status_id, collection_type_id)
+                SELECT s.ownership_status_id, c.collection_type_id
+                FROM lkup_ownership_statuses s, lkup_collection_types c
+                WHERE s.status_code = 'lomo_fanmade'
+                  AND c.collection_type_code = 'photocards'
+            """)
+            logger.info("Migration: added 'lomo_fanmade' ownership status (photocards)")
+
 
 def _seed_status_visibility_xref(conn) -> None:
     """Idempotent maintenance for status-visibility xref tables.
@@ -199,13 +229,13 @@ def _seed_status_visibility_xref(conn) -> None:
             SELECT s.ownership_status_id, c.collection_type_id
             FROM lkup_ownership_statuses s, lkup_collection_types c
             WHERE s.is_active = 1 AND c.is_active = 1
-              AND s.status_code NOT IN ('catalog', 'undecided', 'not_wanted')
+              AND s.status_code NOT IN ('catalog', 'undecided', 'not_wanted', 'lomo_fanmade')
         """)
         raw.execute("""
             INSERT OR IGNORE INTO xref_ownership_status_modules (ownership_status_id, collection_type_id)
             SELECT s.ownership_status_id, c.collection_type_id
             FROM lkup_ownership_statuses s, lkup_collection_types c
-            WHERE s.status_code IN ('catalog', 'undecided', 'not_wanted')
+            WHERE s.status_code IN ('catalog', 'undecided', 'not_wanted', 'lomo_fanmade')
               AND c.collection_type_code = 'photocards'
         """)
         logger.info("Seeded xref_ownership_status_modules (fresh DB)")

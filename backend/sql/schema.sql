@@ -625,6 +625,11 @@ INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_or
 -- fold — they are set once per card, unlike the frequently-changed statuses above.
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('undecided',        'Undecided',        9);
 INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('not_wanted',       'Not Wanted',      10);
+-- Lomo / fanmade possession: a copy of an UNOFFICIAL card (fan-printed lomo
+-- card), held instead of 'owned'. Photocards only, same targeted-xref treatment
+-- as the rows above. No co-occurrence rules -- it is set by hand and carries no
+-- derived behaviour: any status may co-exist with it, and it blocks none.
+INSERT OR IGNORE INTO lkup_ownership_statuses (status_code, status_name, sort_order) VALUES ('lomo_fanmade',     'Lomo/Fanmade',    11);
 
 
 -- ============================================================

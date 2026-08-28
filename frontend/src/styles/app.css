@@ -72,6 +72,9 @@
      collection" states and should recede against the neon possession badges. */
   --badge-undecided:      #9aa0a6;
   --badge-not-wanted:     #a05252;
+  /* Lomo/Fanmade -- a possession letter, so neon like Owned, but a hue no
+     other badge uses so an L never reads as an O at thumbnail size. */
+  --badge-lomo:           #00e5c0;
   --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 
@@ -195,6 +198,9 @@
   /* Triage decisions — see the light-theme block for rationale. */
   --badge-undecided:      #9aa0a6;
   --badge-not-wanted:     #a05252;
+  /* Lomo/Fanmade -- a possession letter, so neon like Owned, but a hue no
+     other badge uses so an L never reads as an O at thumbnail size. */
+  --badge-lomo:           #00e5c0;
   --badge-back:           #bf00ff;
   --badge-default:        #ffffff;
 

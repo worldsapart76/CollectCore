@@ -48,6 +48,13 @@
     `sort_order` 9/10, appended so they sit behind the filter sidebar's
     "+N more" fold. Visibility is per-module via
     `xref_ownership_status_modules`, same targeted treatment as Catalog.
+  - **Lomo/Fanmade** (`lomo_fanmade`, photocards only; added 2026-08-27) —
+    `sort_order` 11, same targeted xref treatment. A *possession* fact for an
+    unofficial fan-printed card, held **instead of** Owned. Requested by a
+    `/pcs/` user; set by hand only. Deliberately carries **no co-occurrence
+    rule and no derived behaviour** — nothing blocks it and it blocks nothing
+    (a card holding both Owned and Lomo/Fanmade is legal, just unusual).
+    Badge letter **L**, primary (bottom-left) slot directly below `O`.
 - **Ids are DB-assigned and differ per environment** (dev seeded Undecided as
   2429; prod differs) — resolve by `status_code`, never hardcode. The literals
   in `constants.py` (`OWNED_STATUS_ID`, `WANTED_STATUS_ID`) only work because
@@ -306,12 +313,15 @@ its own query and never sees prices.
   - a standing **decision** about the card — `undecided` / `wanted` /
     `not_wanted`. At most one per card, and it *outlives the copies*.
   - a **possession** fact about a copy — `owned` / `trade` / `pending_*` /
-    `formerly_owned` / `borrowed`. Zero or more per card.
+    `formerly_owned` / `borrowed` / `lomo_fanmade`. Zero or more per card.
 
   Co-occurrence: at most one decision per card; `wanted` excludes `owned` and
   `trade`; **`not_wanted` + `trade` is legal on purpose** — the trade copy row
   is deleted when a trade completes and the "don't collect this" record has to
   survive it. Enforced by `_check_status_conflict` in `routers/photocards.py`.
+  `lomo_fanmade` is deliberately outside all of it — it conflicts with nothing,
+  so `_conflicting_codes` returns `[]` for it and it never blocks another
+  status.
 - **Bulk ownership sweeps are row-scoped to the decision row** — possession
   copies are never touched in bulk, and cards whose target would conflict are
   excluded and reported as `skipped` rather than corrupted. A card-scoped

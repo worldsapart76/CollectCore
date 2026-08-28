@@ -6,6 +6,110 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-27 (US CDT) — Lomo/Fanmade ownership status (`/pcs/` request)
+
+A `/pcs/` user asked for a status for unofficial fan-printed cards. Added as a
+seed row, not a feature: statuses are data-driven end to end, so the badge
+letter and one CSS variable were the only code the tiers needed.
+
+- **`lomo_fanmade` / "Lomo/Fanmade", `sort_order` 11, photocards only.** A
+  *possession* fact held **instead of** Owned, so it takes the primary
+  (bottom-left) badge slot as **L**, directly below `O` in
+  `PRIMARY_STATUS_ORDER`. New `--badge-lomo` (#00e5c0) in both themes — a hue
+  no other badge uses, so an L never reads as an O at thumbnail size.
+- **Deliberately no co-occurrence rule and no derived behaviour**, per the
+  request: it blocks nothing and nothing blocks it. `_conflicting_codes`
+  returns `[]` for it. Owned + Lomo/Fanmade on one card is legal, just unusual;
+  `O` wins the badge slot if it happens.
+- **Appended rather than slotted in.** These lookup rows are shared with every
+  other module's sidebar, so renumbering to place it under Owned would have
+  shifted Books/Music/etc. too. Cost: it sits behind the sidebar's "+N more"
+  fold, like Undecided/Not Wanted.
+- **Migration guard is the once-only kind.** `_run_migrations` writes the status
+  + xref rows only when the status is absent, and migrations run BEFORE
+  `schema.sql` — so it fires on exactly one boot, which is what lets an admin
+  switch it off in Admin > Status Visibility without it returning on restart.
+  `_seed_status_visibility_xref` couldn't do this: it only seeds a fresh DB.
+- Verified on a copy of the dev DB: one status row + one xref row, stable across
+  three consecutive boots; fresh DB seeds it photocards-only.
+
+**Known wrinkles (accepted, not bugs):**
+- Admin **bulk edit** rewrites a card's *decision* row only, so sweeping to
+  Lomo/Fanmade converts the decision to a possession copy and skips cards with
+  no decision row — identical to picking Owned or Trade there today. The
+  `/pcs/` bulk update has no such wrinkle: it sets every copy on the card.
+- Trade share pages count a lomo copy as neither owned nor wanted, so it reads
+  as "in catalog" to a viewer. Correct as far as it goes — it isn't the
+  official card.
+
+**Next / open:** nothing outstanding for this change. Roadmap is unchanged:
+`/pcs/` cloud accounts, then listing tracker Phase 1.
+
+### 2026-08-17 (US CDT) — Photocard price tiers + trade CSV export BUILT
+
+Both halves of `docs/photocard_pricing_and_trade_export_plan.md` (authoritative),
+all six phases, driven by starting to sell on Mercari: price many cards in one
+sweep, then get the trade shelf out as a paste-ready worksheet.
+
+- **Tier XOR custom price, enforced by a CHECK**, not by application code. Three
+  states: no row = unpriced, `price_tier_id` = tiered, `price_cents` = custom.
+  Setting a custom price drops the card out of its tier so a later sweep over
+  that tier can't silently reset it.
+- **Effective price is derived on read and never denormalized** — so editing
+  Tier 3's amount reprices every tier-3 card with no sweep and no migration, and
+  leaves custom-priced cards alone. That is the whole point of tiers.
+- **Pricing is a side table (`tbl_photocard_pricing`), not columns on
+  `tbl_photocard_details`.** `catalog.py` (`SELECT *`) and `seed_builder.py`
+  (PRAGMA-driven copy) reflect the detail table, so a column there would ship to
+  the catalog delta and the guest seed with nothing in the diff to warn you.
+  Verified: catalog delta carries no price fields, and the seed's table list is
+  explicit. Prices never reach `/pcs/` or `/guest/`.
+- **Listing titles branch on the version text.** 1,444 `version` values already
+  contain "Photocard", so appending the phrase unconditionally is both redundant
+  and over Mercari's **80-char cap**. Two templates in `tbl_app_settings`
+  (settings, not code — listing conventions get tuned constantly). Measured
+  across the 89 trade cards: **42–74 chars, median 58, zero over 80.**
+- **The client drives the export.** The notes search is client-side and covers
+  copy notes, so a server-side "all trade copies" query would be blind to
+  "search `for sale` → export what I see". Same shape as the trade-page flow;
+  zero new filtering logic on the backend.
+- **Bulk re-sweeps report `replaced_custom`** — assigning a tier genuinely wipes
+  a custom price in the selection, which is intended but would otherwise be a
+  silent loss. The Admin tier editor likewise confirms with the card count
+  before a price edit ("This reprices 214 cards").
+- Deleting an in-use tier **409s** rather than dangling `price_tier_id` values
+  (FK cascades don't fire); retiring is `is_active = 0`. Both photocard delete
+  paths now clean up `tbl_photocard_pricing`.
+
+**Deviations from the plan** (both recorded at the top of the plan doc): tier
+`POST` derives `tier_code` from the name, and the CSV's `notes` column draws
+from all copies rather than only trade ones — scoping it to trade copies would
+drop the note that caused the search match.
+
+**Verified** with a 38-check script against a *copy* of the dev DB (`TestClient`,
+scratchpad `COLLECTCORE_DATA_DIR`), covering plan verification items 1–15 plus
+bad input, the unprice sentinel, and non-trade/unknown ids: CHECK rejects both
+illegal states, tier→custom→re-sweep round trip with `replaced_custom: 1`, tier
+edit repricing 9 cards while the custom card holds at $15, delete guard, both
+delete paths, BOM, one row per card with 34 stacks counted, 81 unpriced rows
+exporting blank. Then live against uvicorn. Admin/guest/pcs bundles all build;
+zero new lint findings.
+
+**Found along the way:** `/export` was missing from `vite.config.js`'s
+`PROXY_PATHS`, so the CSV POST would have returned `index.html` in dev — exactly
+what that file's comment warns about. Added.
+
+**Next / open:**
+1. ~~Not committed / not deployed.~~ **Committed + pushed 2026-08-27**, in the
+   same push as the Lomo/Fanmade status below. No manual prod step: the tables,
+   the four tier seeds and the three template settings are all in `schema.sql`,
+   so `init_db` lays them down on the deploy's first boot.
+   `backend/migrate_photocard_pricing.py` stays as belt-and-braces only.
+2. **Your dev backend on :8001 predates these routes** — restart it or
+   `/photocards/price-tiers` 422s against the `{item_id}` route.
+3. Then do the actual work the feature exists for: price the 89 trade cards
+   (bulk sweeps first, custom prices for the outliers), then export.
+
 ### 2026-08-12 (US CDT) — Binder Designer BUILT (admin tier, not committed)
 
 New photocard tab for laying out physical binders on screen: create a named
