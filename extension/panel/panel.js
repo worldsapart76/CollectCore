@@ -18,6 +18,12 @@ let current = null;
 let dropped = new Set();
 let armed = null;
 
+// 'associate' ties a listing to cards; 'arm' picks the card to arm. Both use
+// the same view and the same grid, so the mode has to live here rather than in
+// a listener bolted onto individual tiles — re-rendering the grid (which
+// typing in the search box does on every keystroke) would throw those away.
+let viewMode = 'associate';
+
 // --- Activation ------------------------------------------------------------
 
 // Opening this panel turns capture on; closing it turns capture off. The port
@@ -196,7 +202,9 @@ function cardTile(card) {
 
   el.title = `#${card.id} ${cardIndex.cardLabel(card)}`;
   el.append(img, label);
-  el.addEventListener('click', () => associate(card));
+  el.addEventListener('click', () =>
+    viewMode === 'arm' ? armCard(card) : associate(card)
+  );
   return el;
 }
 
@@ -211,10 +219,13 @@ async function renderCandidates() {
 
   const query = $('assoc-search').value.trim();
 
-  if (query) {
+  // Arming has no listing title to match against, so it is search-only.
+  if (viewMode === 'arm' || query) {
     const cards = await cardIndex.search(query);
     $('assoc-chips').replaceChildren();
-    $('assoc-summary').textContent = `${cards.length} match "${query}"`;
+    $('assoc-summary').textContent = query
+      ? `${cards.length} match "${query}"`
+      : 'Search for the card to arm.';
     $('assoc-grid').replaceChildren(...cards.map(cardTile));
     return;
   }
@@ -258,6 +269,7 @@ function renderLines() {
 }
 
 async function associate(card) {
+  if (!current) return;
   await send({
     type: 'ASSOCIATE',
     key: current.key,
@@ -277,8 +289,13 @@ async function associate(card) {
 }
 
 function openAssociate(rec) {
+  viewMode = 'associate';
   current = rec;
   dropped = new Set();
+
+  $('assoc-img').hidden = false;
+  $('assoc-open').hidden = false;
+  $('assoc-lot').closest('.assoc-actions').hidden = false;
 
   $('assoc-img').src = rec.thumbnailUrl || '';
   $('assoc-name').textContent = rec.name || '(untitled)';
@@ -300,6 +317,7 @@ function openAssociate(rec) {
 }
 
 function closeAssociate() {
+  viewMode = 'associate';
   current = null;
   $('view-associate').hidden = true;
   $('view-list').hidden = false;
@@ -339,37 +357,29 @@ async function toggleArmed() {
   openArmPicker();
 }
 
+async function armCard(card) {
+  armed = { id: card.id, label: cardIndex.cardLabel(card) };
+  await send({ type: 'SET_ARMED', card: armed });
+  renderArmed();
+  closeAssociate();
+}
+
 function openArmPicker() {
-  $('assoc-img').src = '';
+  viewMode = 'arm';
+  current = null;
+  dropped = new Set();
+
+  $('assoc-img').hidden = true;
   $('assoc-name').textContent = 'Arm a card';
   $('assoc-facts').textContent =
     'Every capture will associate to this card until you disarm.';
-  $('assoc-open').href = '#';
+  $('assoc-open').hidden = true;
+  $('assoc-lot').closest('.assoc-actions').hidden = true;
   $('assoc-search').value = '';
   $('assoc-lines').replaceChildren();
-  $('assoc-chips').replaceChildren();
   $('assoc-progress').textContent = '';
 
-  cardIndex.search('').then((cards) => {
-    $('assoc-summary').textContent = 'Search for the card to arm.';
-    $('assoc-grid').replaceChildren(
-      ...cards.slice(0, 60).map((card) => {
-        const tile = cardTile(card);
-        tile.addEventListener(
-          'click',
-          async (e) => {
-            e.stopImmediatePropagation();
-            armed = { id: card.id, label: cardIndex.cardLabel(card) };
-            await send({ type: 'SET_ARMED', card: armed });
-            renderArmed();
-            closeAssociate();
-          },
-          true
-        );
-        return tile;
-      })
-    );
-  });
+  renderCandidates();
 
   $('view-list').hidden = true;
   $('view-associate').hidden = false;
