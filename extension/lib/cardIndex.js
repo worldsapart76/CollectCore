@@ -74,6 +74,70 @@ export async function clear() {
   cached = null;
 }
 
+// --- Refresh from production ----------------------------------------------
+
+const API_BASE = 'https://api.collectcoreapp.com';
+
+// Anything older than this gets refreshed automatically when the panel opens.
+// A stale index does not merely inconvenience: a card catalogued yesterday
+// fails to match, gets pushed down the create-the-card path, and invites a
+// duplicate of a card already owned. Remembering to refresh cannot be the
+// mechanism that prevents that.
+const MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+export async function age() {
+  const store = await load();
+  if (!store) return null;
+  return Date.now() - new Date(store.meta.importedAt).getTime();
+}
+
+/**
+ * Pull the live index from prod.
+ *
+ * The panel is an extension page, so `host_permissions` grants it cross-origin
+ * reads without a CORS preflight, and `credentials: 'include'` carries the
+ * Cloudflare Access cookie from the browser's jar. Nothing to configure — but
+ * the cookie does expire, and CF answers an expired one with a redirect to
+ * Google that this request cannot follow.
+ *
+ * @returns {{ok: true, count: number} | {ok: false, reason: string}}
+ */
+export async function refreshFromServer() {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/admin/card-index`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+  } catch {
+    // A cross-origin redirect to the identity provider surfaces as a network
+    // failure, so this is far more often an expired session than an outage.
+    return { ok: false, reason: 'signin' };
+  }
+
+  if (!res.ok) return { ok: false, reason: `http ${res.status}` };
+
+  const type = res.headers.get('content-type') || '';
+  if (!type.includes('application/json')) {
+    // A login page rendered where JSON was expected.
+    return { ok: false, reason: 'signin' };
+  }
+
+  try {
+    const saved = await save(await res.json());
+    return { ok: true, count: saved.count };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
+/** Refresh if stale or absent; stay quiet when the stored copy is fine. */
+export async function refreshIfStale() {
+  const current = await age();
+  if (current !== null && current < MAX_AGE_MS) return { ok: true, skipped: true };
+  return refreshFromServer();
+}
+
 /**
  * Candidates for a listing, narrowed by its title.
  *

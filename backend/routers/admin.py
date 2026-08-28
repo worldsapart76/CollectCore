@@ -554,6 +554,94 @@ def publish_admin_images():
         raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
 
 
+# ---------- Admin: card index (capture extension) ----------
+
+
+@router.get("/admin/card-index")
+def card_index(db=Depends(get_db)):
+    """
+    Compact photocard library for the market-capture browser extension.
+
+    The extension matches Mercari listing titles against this to narrow its
+    card picker, so it has to reflect **live** production data. Working from a
+    periodically-exported copy is not merely inconvenient: a card catalogued
+    after the last export silently fails to match and gets pushed down the
+    create-the-card path, inviting a duplicate of a card already owned.
+
+    Identity fields only. No ownership, no pricing, no notes — the extension
+    needs to know which cards exist and what they look like, nothing more.
+
+    Mirrors tools/export_card_index.py, which stays as the offline path for
+    working against a backup.
+    """
+    type_row = db.execute(
+        text(
+            "SELECT collection_type_id FROM lkup_collection_types "
+            "WHERE collection_type_code = 'photocards'"
+        )
+    ).fetchone()
+    if type_row is None:
+        raise HTTPException(status_code=500, detail="photocards type missing")
+
+    members: dict[int, list[str]] = {}
+    for item_id, name in db.execute(
+        text(
+            "SELECT x.item_id, m.member_name "
+            "FROM xref_photocard_members x "
+            "JOIN lkup_photocard_members m ON m.member_id = x.member_id "
+            "ORDER BY x.item_id, m.sort_order"
+        )
+    ):
+        members.setdefault(item_id, []).append(name)
+
+    images = {
+        item_id: path
+        for item_id, path in db.execute(
+            text(
+                "SELECT item_id, file_path FROM tbl_attachments "
+                "WHERE attachment_type = 'front' "
+                "ORDER BY item_id, display_order DESC"
+            )
+        )
+    }
+
+    # source_origin_id is nullable — LEFT JOIN it, always.
+    rows = db.execute(
+        text(
+            "SELECT d.item_id, g.group_name, g.group_code, "
+            "       so.source_origin_name, d.version, d.is_special "
+            "FROM tbl_photocard_details d "
+            "JOIN tbl_items i ON i.item_id = d.item_id "
+            "JOIN lkup_photocard_groups g ON g.group_id = d.group_id "
+            "LEFT JOIN lkup_photocard_source_origins so "
+            "       ON so.source_origin_id = d.source_origin_id "
+            "WHERE i.collection_type_id = :type_id "
+            "ORDER BY d.item_id"
+        ),
+        {"type_id": type_row[0]},
+    ).fetchall()
+
+    cards = [
+        {
+            "id": item_id,
+            "group": group_name,
+            "groupCode": group_code,
+            "members": members.get(item_id, []),
+            "origin": origin,
+            "version": version,
+            "special": bool(is_special),
+            "image": images.get(item_id),
+        }
+        for item_id, group_name, group_code, origin, version, is_special in rows
+    ]
+
+    return {
+        "version": 1,
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+        "cards": cards,
+    }
+
+
 # ---------- Frontend static files (production) ----------
 # Serve the pre-built React app so the frontend dev server is not needed.
 # The /assets mount and /vite.svg route must be registered before the catch-all

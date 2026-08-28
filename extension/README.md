@@ -47,21 +47,35 @@ anything else looks completely normal — no overlays, no panel.
 | **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
 | **Export** | *Export JSON* in the panel. |
 
-## The card index (required for the picker)
+## The card index
 
-The picker needs a local copy of your library. Generate it, then import it once:
+The picker matches against a local copy of your library, pulled straight from
+production.
+
+**It refreshes itself.** The panel fetches a fresh copy on open whenever the
+stored one is more than 12 hours old, and *Refresh cards* forces it. There is
+nothing to remember and nothing to keep in sync by hand — a stale index would
+silently fail to match cards catalogued since the last refresh and push them
+down the create-the-card path, which is how duplicates get made.
+
+It reads `GET /admin/card-index` on `api.collectcoreapp.com`. The panel is an
+extension page, so `host_permissions` lets it read cross-origin and the
+Cloudflare Access cookie rides along from the browser.
+
+If the status line says **sign-in expired**, open `collectcoreapp.com` in a tab
+to renew the Access session, then hit *Refresh cards*. Capture keeps working
+throughout — only the picker needs the index.
+
+### Offline fallback
+
+*Import index* loads a file produced by:
 
 ```
-python tools/export_card_index.py --db <path to a PROD database copy>
+python tools/export_card_index.py --db <path to a database>
 ```
 
-Then *Import index* in the panel and choose `data/card-index.json`.
-
-**Source it from production, not the dev DB.** Dev lags prod, so a dev-built
-index makes cards you actually own fail to match. Get a prod copy from
-Admin → Backup & Restore.
-
-Re-export and re-import whenever you have catalogued enough new cards to notice.
+For working against a backup, or when the server is unreachable. Source it from
+prod: dev lags, so a dev-built index makes cards you own fail to match.
 
 ### Two capture modes
 
@@ -142,14 +156,16 @@ tile at all.
 |---|---|
 | `manifest.json` | MV3 manifest, permissions, content-script matches |
 | `background.js` | Service worker — activation state, capture writes, image fetch |
-| `lib/db.js` | IndexedDB wrapper (service worker is the single writer) |
+| `lib/db.js` | IndexedDB wrapper for captures (service worker is the single writer) |
+| `lib/cardIndex.js` | Local card library — storage, server refresh, search |
+| `lib/matcher.js` | Title → candidate cards. Pure; `node tools/test_matcher.mjs` exercises it |
 | `content/fiber.js` | **Page world** (`"world": "MAIN"`) — reads React's fiber, stamps `data-cc-item` on tiles |
 | `content/capture.js` | Isolated world — tile overlay, reads the stamp. Standalone: content scripts cannot import modules |
 | `content/overlay.css` | Capture dot styling |
-| `panel/` | Side panel — session list and export |
+| `panel/` | Side panel — capture list, associate view, armed mode |
 
 ## Not built yet
 
-Card association, the lexicon pre-filter, the armed mode, lot line entry, and
-sync to `api.collectcoreapp.com`. This slice proves the capture loop:
-browse → click → stored → exported.
+Lot line entry beyond a card list (quantities, non-card items, unidentified
+placeholders), Neokyo capture, and pushing captures to the server — everything
+still leaves via *Export JSON*.

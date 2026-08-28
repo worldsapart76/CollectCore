@@ -99,11 +99,56 @@ async function renderList() {
   $('empty').hidden = records.length > 0;
   $('list').replaceChildren(...records.map(row));
 
+  await renderIndexStatus(todo);
+}
+
+function ago(ms) {
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+async function renderIndexStatus(todo = null, note = '') {
   const store = await cardIndex.load();
-  $('index-status').textContent = store
-    ? `${store.meta.count.toLocaleString()} cards indexed` +
-      (todo ? ` · ${todo} need identifying` : '')
-    : 'No card index imported yet — Import index to enable the picker.';
+  if (!store) {
+    $('index-status').textContent =
+      note || 'No cards yet — Refresh cards to pull them from the server.';
+    return;
+  }
+  const parts = [
+    `${store.meta.count.toLocaleString()} cards`,
+    ago(Date.now() - new Date(store.meta.importedAt).getTime()),
+  ];
+  if (todo) parts.push(`${todo} need identifying`);
+  if (note) parts.push(note);
+  $('index-status').textContent = parts.join(' · ');
+}
+
+const SIGNIN_HINT =
+  'Sign-in expired — open collectcoreapp.com in a tab, then Refresh cards.';
+
+async function refreshCards({ silent = false } = {}) {
+  if (!silent) $('index-status').textContent = 'Refreshing from server…';
+  const res = await cardIndex.refreshFromServer();
+  if (res.ok) {
+    await renderIndexStatus(null, 'refreshed');
+    return;
+  }
+  if (silent) {
+    // Auto-refresh failing is not worth interrupting for — the stored copy is
+    // still usable, just older than we would like.
+    await renderIndexStatus(
+      null,
+      res.reason === 'signin' ? 'refresh needs sign-in' : 'refresh failed'
+    );
+    return;
+  }
+  await renderIndexStatus(
+    null,
+    res.reason === 'signin' ? SIGNIN_HINT : `refresh failed: ${res.reason}`
+  );
 }
 
 // --- Associate view --------------------------------------------------------
@@ -332,6 +377,7 @@ function openArmPicker() {
 
 // --- Import / export -------------------------------------------------------
 
+$('refresh').addEventListener('click', () => refreshCards());
 $('import').addEventListener('click', () => $('import-file').click());
 
 $('import-file').addEventListener('change', async (e) => {
@@ -392,3 +438,11 @@ send({ type: 'GET_ARMED' }).then((res) => {
   renderArmed();
 });
 renderList();
+
+// Pull a fresh library on open when the stored copy has aged out, so the picker
+// matches what is actually catalogued rather than whatever was current the last
+// time anyone thought to refresh. Silent on failure — the stored copy still
+// works, and an outage should not block a sweep.
+cardIndex.refreshIfStale().then((res) => {
+  if (!res.skipped) renderList();
+});
