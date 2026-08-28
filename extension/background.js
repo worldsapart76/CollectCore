@@ -203,7 +203,14 @@ function looksLikeLot(name) {
   return LOT_SIGNALS.some((re) => re.test(name || ''));
 }
 
-async function capture({ item, pageUrl, searchQuery, marketplace }) {
+async function capture({
+  item,
+  pageUrl,
+  searchQuery,
+  marketplace,
+  currency,
+  listingUrl,
+}) {
   const armed = await getArmed();
   const key = obsKey(marketplace, item.id);
   const existing = await getObservation(key);
@@ -229,10 +236,12 @@ async function capture({ item, pageUrl, searchQuery, marketplace }) {
     key,
     marketplace,
     externalId: item.id,
-    listingUrl: `https://www.mercari.com/us/item/${item.id}/`,
+    // Built by the content script from its own site config — this worker
+    // should not know any marketplace's URL shape.
+    listingUrl: listingUrl || null,
     name: item.name || '',
     priceCents: item.price,
-    currency: 'USD',
+    currency: currency || 'USD',
     rawStatus: item.status,
     listingState: sighting.listingState,
     itemCondition: item.itemCondition || null,

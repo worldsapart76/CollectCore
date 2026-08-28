@@ -6,8 +6,34 @@
 // Renders NOTHING until activated (plan doc -> Dormant by default).
 
 (() => {
-  const MARKETPLACE = 'mercari_us';
-  const TILE_SELECTOR = 'a[href*="/item/m"]';
+  // Supported sources, keyed by hostname.
+  //
+  // ADDING A SITE: add an entry here, add its host to `matches` in both
+  // content_scripts blocks in manifest.json, and add the same selector to
+  // content/fiber.js. If the site is not React, fiber.js finds nothing and the
+  // DOM fallback in this file carries it — which is why `price` has to be
+  // extractable from the tile.
+  //
+  // Content scripts cannot import modules, so this registry lives inline
+  // rather than in lib/. Keep it in step with lkup_mkt_marketplaces.
+  const SITES = {
+    'www.mercari.com': {
+      code: 'mercari_us',
+      currency: 'USD',
+      tiles: 'a[href*="/item/m"]',
+      idFrom: (href) => href.match(/\/item\/(m\d+)/)?.[1] || null,
+      urlFor: (id) => `https://www.mercari.com/us/item/${id}/`,
+      queryParam: 'keyword',
+    },
+    // Not built yet — see docs/photocard_market_intel_plan.md:
+    //   neokyo      (JPY, buy side, server-rendered so no fiber read)
+    //   pocamarket  (KRW)
+    //   ebay        (USD)
+  };
+
+  const SITE = SITES[location.hostname];
+  if (!SITE) return; // not a supported source; stay entirely inert
+
   const DOT_CLASS = 'cc-capture-dot';
 
   let active = false;
@@ -64,7 +90,7 @@
   // Fallback for when React internals move under us. Gets less, but keeps the
   // extension working rather than failing silently on a Mercari deploy.
   function itemFromDom(anchor) {
-    const id = anchor.getAttribute('href')?.match(/\/item\/(m\d+)/)?.[1];
+    const id = idFromHref(anchor);
     if (!id) return null;
     const text = anchor.textContent || '';
     const dollars = text.match(/\$\s?([\d,]+(?:\.\d{2})?)/)?.[1];
@@ -87,15 +113,16 @@
   }
 
   function idFromHref(anchor) {
-    return anchor.getAttribute('href')?.match(/\/item\/(m\d+)/)?.[1] || null;
+    const href = anchor.getAttribute('href');
+    return href ? SITE.idFrom(href) : null;
   }
 
   function keyFor(id) {
-    return `${MARKETPLACE}:${id}`;
+    return `${SITE.code}:${id}`;
   }
 
   function searchQuery() {
-    return new URLSearchParams(location.search).get('keyword') || null;
+    return new URLSearchParams(location.search).get(SITE.queryParam) || null;
   }
 
   // --- Overlay -------------------------------------------------------------
@@ -146,7 +173,9 @@
         type: 'CAPTURE',
         payload: {
           item,
-          marketplace: MARKETPLACE,
+          marketplace: SITE.code,
+          currency: SITE.currency,
+          listingUrl: SITE.urlFor(id),
           pageUrl: location.href,
           searchQuery: searchQuery(),
         },
@@ -166,7 +195,7 @@
   }
 
   function decorateAll() {
-    document.querySelectorAll(TILE_SELECTOR).forEach(decorate);
+    document.querySelectorAll(SITE.tiles).forEach(decorate);
   }
 
   function syncAllDots() {

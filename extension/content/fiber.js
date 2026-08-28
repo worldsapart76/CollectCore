@@ -10,7 +10,12 @@
 // This file must not use any chrome.* API: the page world has no access.
 
 (() => {
-  const TILE = 'a[href*="/item/m"]';
+  // Keep in step with SITES in content/capture.js.
+  const TILES = {
+    'www.mercari.com': 'a[href*="/item/m"]',
+  };
+  const TILE = TILES[location.hostname];
+  if (!TILE) return; // not a React source we know how to read
 
   function itemFromFiber(anchor) {
     const fiberKey = Object.keys(anchor).find((k) =>

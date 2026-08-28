@@ -188,8 +188,42 @@ Comps are then available at `GET /market/comps` (every card with data) and
 single-card prices** and returned separately as `excluded_lots` — a three-card
 bundle at $60 is real market signal, it just is not that card selling for $60.
 
+## Sources and currency
+
+`marketplace` is recorded on every listing, and the DB knows four sources —
+`mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD). Only
+Mercari US has a capture parser so far; the rest are declared so the schema,
+comps, and currency handling are ready.
+
+**Adding a site** means: an entry in `SITES` at the top of
+`content/capture.js`, its host in `matches` in *both* content-script blocks in
+`manifest.json`, and its tile selector in `content/fiber.js`. Nothing else in
+the extension knows any marketplace's URL shape.
+
+### Currency
+
+**The native amount is the record; USD is derived and labelled.** Prices are
+stored in the source's own currency and converted for comparison, never
+replaced — so a JPY comp can be re-derived at a different rate later, which
+matters because "what would this have cost me then" and "what should I pay
+now" are different questions that disagree whenever a currency moves.
+
+- Rates are set per currency with an effective date via `PUT /market/fx`, kept
+  as history rather than one mutable current value.
+- `POST /market/fx/backfill` fills USD on sightings captured before a rate
+  existed. A capture is never blocked on a missing rate.
+- When a site does its own conversion (Neokyo shows USD beside the yen), that
+  figure wins — it is what actually gets charged.
+- `GET /market/fx` lists rates and names any currency with **no rate on file**,
+  so a gap is visible rather than silently dropping those sightings out of
+  comps.
+
+Amounts are stored in **minor units of their currency** — USD $40.00 is 4000,
+but ¥2500 is 2500, because JPY has no subdivision. Dividing by 100 to display
+is a USD-only assumption.
+
 ## Not built yet
 
-Lot line entry beyond a card list (quantities, non-card items, unidentified
-placeholders), Neokyo capture, automatic sync, and any comp UI inside
-CollectCore itself.
+Capture parsers for Neokyo, Pocamarket, and eBay. Lot line entry beyond a
+card list (quantities, non-card items, unidentified placeholders). Automatic
+sync. Any comp UI inside CollectCore itself.

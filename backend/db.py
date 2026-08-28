@@ -127,6 +127,21 @@ def _run_migrations(conn) -> None:
             raw.execute("ALTER TABLE tbl_video_details ADD COLUMN on_media_server INTEGER NOT NULL DEFAULT 0")
             logger.info("Migration: added tbl_video_details.on_media_server")
 
+    # Migration: mkt_sighting USD conversion columns.
+    # The native amount stays the record; USD is derived and labelled, so these
+    # are nullable — a JPY sighting captured before any rate was on file is
+    # still a valid record of what the listing actually cost in yen.
+    if "mkt_sighting" in tables:
+        cols = {r[1] for r in raw.execute("PRAGMA table_info(mkt_sighting)").fetchall()}
+        for col, ddl in (
+            ("price_usd", "ALTER TABLE mkt_sighting ADD COLUMN price_usd INTEGER"),
+            ("fx_rate", "ALTER TABLE mkt_sighting ADD COLUMN fx_rate REAL"),
+            ("fx_source", "ALTER TABLE mkt_sighting ADD COLUMN fx_source TEXT"),
+        ):
+            if col not in cols:
+                raw.execute(ddl)
+                logger.info("Migration: added mkt_sighting.%s", col)
+
     # Migration: binder layout codes now read ACROSS x DOWN consistently.
     # The 6- and 12-pocket layouts were first stored with rows and columns
     # swapped ('2x3', '3x4'). Idempotent — matches nothing after the first run.

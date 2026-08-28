@@ -1986,6 +1986,41 @@ CREATE TABLE IF NOT EXISTS pcs_user_meta (
 -- in the library, and that is a normal state.
 -- ============================================================================
 
+-- Sources captures can come from. Currency lives here so it is declared per
+-- marketplace rather than guessed per row; a listing may still override it.
+CREATE TABLE IF NOT EXISTS lkup_mkt_marketplaces (
+    marketplace_code TEXT PRIMARY KEY,
+    marketplace_name TEXT NOT NULL,
+    currency         TEXT NOT NULL,
+    side             TEXT,              -- 'buy' | 'sell' | 'both'
+    sort_order       INTEGER NOT NULL DEFAULT 0,
+    is_active        INTEGER NOT NULL DEFAULT 1
+);
+
+INSERT OR IGNORE INTO lkup_mkt_marketplaces
+    (marketplace_code, marketplace_name, currency, side, sort_order) VALUES
+    ('mercari_us', 'Mercari US',  'USD', 'both', 10),
+    ('neokyo',     'Neokyo',      'JPY', 'buy',  20),
+    ('pocamarket', 'Pocamarket',  'KRW', 'both', 30),
+    ('ebay',       'eBay',        'USD', 'both', 40);
+
+-- USD conversion rates, by currency and effective date.
+--
+-- The NATIVE amount is always the record; USD is derived and labelled. Storing
+-- only USD would destroy the ability to re-derive when the question changes:
+-- "what would this have cost me then" wants the rate at observation, while
+-- "what should I pay now" wants today's rate over native prices. Both are
+-- legitimate and they disagree whenever a currency moves.
+CREATE TABLE IF NOT EXISTS mkt_fx_rate (
+    currency      TEXT NOT NULL,
+    as_of_date    TEXT NOT NULL,         -- ISO date the rate takes effect
+    usd_per_unit  REAL NOT NULL,         -- 1 unit of `currency` in USD
+    source        TEXT,                  -- 'manual' | 'marketplace' | ...
+    note          TEXT,
+
+    PRIMARY KEY (currency, as_of_date)
+);
+
 CREATE TABLE IF NOT EXISTS mkt_listing (
     listing_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     marketplace     TEXT NOT NULL,          -- 'mercari_us', later 'neokyo'
@@ -2044,6 +2079,14 @@ CREATE TABLE IF NOT EXISTS mkt_sighting (
     -- display is a USD assumption and will be wrong for Neokyo.
     price_cents   INTEGER,
     currency      TEXT NOT NULL DEFAULT 'USD',
+    -- USD at the time of observation. Nullable: a JPY sighting captured with
+    -- no rate on file is still a valid record of the native price.
+    price_usd     INTEGER,
+    fx_rate       REAL,
+    -- 'marketplace' when the site did the conversion itself (Neokyo shows a
+    -- USD figure, and it is the one actually charged, so it beats any rate we
+    -- would look up), 'table' when derived from mkt_fx_rate.
+    fx_source     TEXT,
 
     UNIQUE (listing_id, observed_at),
     FOREIGN KEY (listing_id) REFERENCES mkt_listing(listing_id)
