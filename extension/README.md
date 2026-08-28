@@ -52,7 +52,8 @@ anything else looks completely normal — no overlays, no panel.
 | **Identify** | *Identify →* on a captured row, then click the matching card. |
 | **Arm a card** | The Mode button. Every capture then auto-associates to it. |
 | **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
-| **Export** | *Export JSON* in the panel. |
+| **Sync** | *Sync* pushes captures to CollectCore. Safe to press repeatedly. |
+| **Export** | *Export JSON* — local backup / offline handoff. |
 
 ## The card index
 
@@ -164,6 +165,7 @@ tile at all.
 | `manifest.json` | MV3 manifest, permissions, content-script matches |
 | `background.js` | Service worker — activation state, capture writes, image fetch |
 | `lib/db.js` | IndexedDB wrapper for captures (service worker is the single writer) |
+| `lib/api.js` | Talking to CollectCore — CF Access cookie, sign-in detection |
 | `lib/cardIndex.js` | Local card library — storage, server refresh, search |
 | `lib/matcher.js` | Title → candidate cards. Pure; `node tools/test_matcher.mjs` exercises it |
 | `content/fiber.js` | **Page world** (`"world": "MAIN"`) — reads React's fiber, stamps `data-cc-item` on tiles |
@@ -171,8 +173,23 @@ tile at all.
 | `content/overlay.css` | Capture dot styling |
 | `panel/` | Side panel — capture list, associate view, armed mode |
 
+## Syncing to CollectCore
+
+*Sync* posts every capture to `POST /market/captures`. **Idempotent** — listings
+key on `(marketplace, external_id)` and sightings on `(listing, observed_at)`, so
+pressing it twice updates rather than duplicates, and there is no need to track
+what has already gone up.
+
+Nothing is deleted locally on success. Until syncing is automatic, the local
+copy stays the safety net.
+
+Comps are then available at `GET /market/comps` (every card with data) and
+`GET /market/comps/{item_id}` (one card's full series). **Lots are excluded from
+single-card prices** and returned separately as `excluded_lots` — a three-card
+bundle at $60 is real market signal, it just is not that card selling for $60.
+
 ## Not built yet
 
 Lot line entry beyond a card list (quantities, non-card items, unidentified
-placeholders), Neokyo capture, and pushing captures to the server — everything
-still leaves via *Export JSON*.
+placeholders), Neokyo capture, automatic sync, and any comp UI inside
+CollectCore itself.

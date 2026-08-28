@@ -6,6 +6,7 @@
 // which anyone is picking cards.
 
 import { buildIndex, matchTitle, tokenize } from './matcher.js';
+import { apiFetch } from './api.js';
 
 const DB_NAME = 'collectcore-cards';
 const DB_VERSION = 1;
@@ -76,8 +77,6 @@ export async function clear() {
 
 // --- Refresh from production ----------------------------------------------
 
-const API_BASE = 'https://api.collectcoreapp.com';
-
 // Anything older than this gets refreshed automatically when the panel opens.
 // A stale index does not merely inconvenience: a card catalogued yesterday
 // fails to match, gets pushed down the create-the-card path, and invites a
@@ -91,40 +90,12 @@ export async function age() {
   return Date.now() - new Date(store.meta.importedAt).getTime();
 }
 
-/**
- * Pull the live index from prod.
- *
- * The panel is an extension page, so `host_permissions` grants it cross-origin
- * reads without a CORS preflight, and `credentials: 'include'` carries the
- * Cloudflare Access cookie from the browser's jar. Nothing to configure — but
- * the cookie does expire, and CF answers an expired one with a redirect to
- * Google that this request cannot follow.
- *
- * @returns {{ok: true, count: number} | {ok: false, reason: string}}
- */
+/** Pull the live index from prod. */
 export async function refreshFromServer() {
-  let res;
+  const res = await apiFetch('/admin/card-index');
+  if (!res.ok) return res;
   try {
-    res = await fetch(`${API_BASE}/admin/card-index`, {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-  } catch {
-    // A cross-origin redirect to the identity provider surfaces as a network
-    // failure, so this is far more often an expired session than an outage.
-    return { ok: false, reason: 'signin' };
-  }
-
-  if (!res.ok) return { ok: false, reason: `http ${res.status}` };
-
-  const type = res.headers.get('content-type') || '';
-  if (!type.includes('application/json')) {
-    // A login page rendered where JSON was expected.
-    return { ok: false, reason: 'signin' };
-  }
-
-  try {
-    const saved = await save(await res.json());
+    const saved = await save(res.data);
     return { ok: true, count: saved.count };
   } catch (err) {
     return { ok: false, reason: err.message };

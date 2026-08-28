@@ -5,6 +5,7 @@
 // writer, reached by message.
 
 import * as cardIndex from '../lib/cardIndex.js';
+import { apiFetch, SIGNIN_HINT } from '../lib/api.js';
 
 const $ = (id) => document.getElementById(id);
 const usd = (cents) => (cents == null ? '—' : `$${(cents / 100).toFixed(2)}`);
@@ -131,9 +132,6 @@ async function renderIndexStatus(todo = null, note = '') {
   if (note) parts.push(note);
   $('index-status').textContent = parts.join(' · ');
 }
-
-const SIGNIN_HINT =
-  'Sign-in expired — open collectcoreapp.com in a tab, then Refresh cards.';
 
 async function refreshCards({ silent = false } = {}) {
   if (!silent) $('index-status').textContent = 'Refreshing from server…';
@@ -386,6 +384,36 @@ function openArmPicker() {
 }
 
 // --- Import / export -------------------------------------------------------
+
+// Push captures to CollectCore. Safe to press repeatedly: the server keys
+// listings on (marketplace, external_id) and sightings on (listing, time), so
+// a re-sync updates rather than duplicates. Nothing is deleted locally on
+// success — until sync is automatic, the local copy stays the safety net.
+$('sync').addEventListener('click', async () => {
+  const got = await send({ type: 'GET_ALL' });
+  const captures = got?.records || [];
+  if (!captures.length) {
+    $('index-status').textContent = 'Nothing to sync.';
+    return;
+  }
+
+  $('index-status').textContent = `Syncing ${captures.length}…`;
+  const res = await apiFetch('/market/captures', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ captures }),
+  });
+
+  if (!res.ok) {
+    $('index-status').textContent =
+      res.reason === 'signin' ? SIGNIN_HINT : `Sync failed: ${res.reason}`;
+    return;
+  }
+  const d = res.data;
+  $('index-status').textContent =
+    `Synced ${d.received} — ${d.listings_new} new listings, ` +
+    `${d.sightings_new} new sightings.`;
+});
 
 $('refresh').addEventListener('click', () => refreshCards());
 $('import').addEventListener('click', () => $('import-file').click());

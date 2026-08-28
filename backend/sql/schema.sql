@@ -1969,3 +1969,86 @@ CREATE TABLE IF NOT EXISTS pcs_user_meta (
     PRIMARY KEY (user_id, key),
     FOREIGN KEY (user_id) REFERENCES pcs_users(user_id)
 );
+
+-- ============================================================================
+-- Market intel — captures from the browser extension (admin only)
+--
+-- Design: docs/photocard_market_intel_plan.md
+--
+-- Split three ways rather than the plan's two, because a listing is seen more
+-- than once. Identity and contents belong to the LISTING; price and state
+-- belong to each SIGHTING. Folding them together would duplicate a listing's
+-- title, thumbnail, and card lines on every re-capture and make "which lines
+-- does this listing have" ambiguous.
+--
+-- Nothing here touches tbl_photocard_details, the catalog, or /pcs/. The link
+-- to the library is a NULLABLE item_id — most captured listings are not cards
+-- in the library, and that is a normal state.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS mkt_listing (
+    listing_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    marketplace     TEXT NOT NULL,          -- 'mercari_us', later 'neokyo'
+    external_id     TEXT NOT NULL,          -- native listing id from the URL
+    listing_url     TEXT,
+    title_raw       TEXT,                   -- original, untranslated
+    item_condition  TEXT,
+    category        TEXT,
+    category_id     INTEGER,
+    brand           TEXT,
+    thumbnail_url   TEXT,
+    search_query    TEXT,                   -- what was being searched
+    -- Explicit, never derived from line count: the common case is one
+    -- identified card and N unknowns never entered, which looks single.
+    is_lot          INTEGER NOT NULL DEFAULT 0,
+    suspected_lot   INTEGER NOT NULL DEFAULT 0,
+    -- True when the page-world fiber read failed and the DOM scrape carried
+    -- the capture, so degraded rows are auditable rather than silent.
+    via_fallback    INTEGER NOT NULL DEFAULT 0,
+    first_seen_at   TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+
+    UNIQUE (marketplace, external_id)
+);
+
+-- Contents of a listing: catalog cards, non-card items, unidentified cards.
+-- This is also the lot decomposition.
+CREATE TABLE IF NOT EXISTS mkt_listing_line (
+    line_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id         INTEGER NOT NULL,
+    line_type          TEXT NOT NULL DEFAULT 'card',  -- card|non_card|unidentified
+    -- Nullable on purpose. LEFT JOIN it, and scope by collection_type_id:
+    -- item ids are global across all 8 modules.
+    item_id            INTEGER,
+    collection_type_id INTEGER,
+    label              TEXT,
+    qty                INTEGER NOT NULL DEFAULT 1,
+    notes              TEXT,
+
+    FOREIGN KEY (listing_id) REFERENCES mkt_listing(listing_id)
+);
+
+-- One row per time a listing was seen. Price history accrues from ordinary
+-- browsing rather than from a scheduled refresh.
+CREATE TABLE IF NOT EXISTS mkt_sighting (
+    sighting_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id    INTEGER NOT NULL,
+    observed_at   TEXT NOT NULL,
+    -- Derived from the item's own `status` field, NEVER from which search
+    -- filter was running: Mercari's default search mixes sold rows in with
+    -- on-sale ones, so inferring from context corrupts the active series.
+    listing_state TEXT NOT NULL,           -- active | sold
+    raw_status    TEXT,                    -- on_sale | trading | sold_out
+    -- MINOR units of `currency`, not literally cents. USD 36.00 -> 3600;
+    -- JPY has no subdivision, so 4000 yen -> 4000. Dividing by 100 to
+    -- display is a USD assumption and will be wrong for Neokyo.
+    price_cents   INTEGER,
+    currency      TEXT NOT NULL DEFAULT 'USD',
+
+    UNIQUE (listing_id, observed_at),
+    FOREIGN KEY (listing_id) REFERENCES mkt_listing(listing_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mkt_line_listing ON mkt_listing_line(listing_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_line_item    ON mkt_listing_line(item_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_sighting_lst ON mkt_sighting(listing_id, observed_at);

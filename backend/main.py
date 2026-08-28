@@ -184,6 +184,7 @@ from routers import (
     trades,
     pcs,
     binders,
+    market,
 )
 
 app.include_router(shared.router)
@@ -205,6 +206,7 @@ app.include_router(pcs.router)
 # Binder Designer — dev-only feature (the UI is gated behind import.meta.env.DEV
 # and never ships), so in prod these endpoints exist but nothing calls them.
 app.include_router(binders.router)
+app.include_router(market.router)
 
 # ---------- Frontend SPA (must be last) ----------
 admin.register_frontend_static(app)
