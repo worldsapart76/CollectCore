@@ -26,6 +26,7 @@ const PROXY_PATHS = [
   '/trade',
   '/admin',
   '/settings',
+  '/export',   // POST /export/photocard-trades.csv (Mercari trade worksheet)
   '/upload-cover',
   '/images',
   '/shutdown',

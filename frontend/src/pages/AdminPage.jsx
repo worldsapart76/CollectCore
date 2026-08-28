@@ -10,6 +10,10 @@ import {
   downloadBackupByToken,
   fetchLookupRegistry,
   fetchLookupRows,
+  fetchPriceTiers,
+  createPriceTier,
+  updatePriceTier,
+  deletePriceTier,
   fetchSettings,
   fetchStatusVisibility,
   mergeLookupRows,
@@ -37,13 +41,14 @@ const GuestAdminPage = (import.meta.env.VITE_IS_ADMIN === "true"
   ? null
   : lazy(() => import("../guest/GuestAdminPage"));
 
-const TAB_IDS = ["modules", "backup", "cleanup", "management", "visibility"];
+const TAB_IDS = ["modules", "backup", "cleanup", "management", "visibility", "pricing"];
 const TAB_LABELS = {
   modules: "Modules",
   backup: "Backup & Restore",
   cleanup: "Lookup Cleanup",
   management: "Lookup Management",
   visibility: "Status Visibility",
+  pricing: "Price Tiers",
 };
 
 const tabBarStyle = { display: "flex", gap: 0, borderBottom: "1px solid #d1d5db", marginBottom: 20 };
@@ -638,6 +643,9 @@ function AdminPageImpl() {
       {/* ── Lookup Management tab ── */}
       {activeTab === "management" && <LookupManagementTab />}
 
+      {/* ── Price Tiers tab ── */}
+      {activeTab === "pricing" && <PriceTiersTab />}
+
       {/* ── Status Visibility tab ── */}
       {activeTab === "visibility" && (
         <section>
@@ -673,6 +681,307 @@ function AdminPageImpl() {
         </section>
       )}
     </PageContainer>
+  );
+}
+
+// ── Price Tiers tab component ────────────────────────────────────────────────
+//
+// Photocard price tiers (docs/photocard_pricing_and_trade_export_plan.md).
+// Cards store a tier reference, never a copied amount, so editing a tier's
+// price here reprices every card on it on the next read — no sweep, no
+// migration. That is the point of tiers, and it is also the one place in the
+// feature where a small edit has library-wide reach, so the save says so
+// before committing.
+
+function centsToDollars(cents) {
+  return (cents / 100).toFixed(2);
+}
+
+function dollarsToCents(text) {
+  const parsed = Number(String(text).trim().replace(/^\$/, ""));
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.round(parsed * 100);
+}
+
+function PriceTiersTab() {
+  const [tiers, setTiers] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [drafts, setDrafts] = useState({});      // tier_id -> { tier_name, price, sort_order }
+  const [rowBusy, setRowBusy] = useState(null);
+  const [addDraft, setAddDraft] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  async function load() {
+    try {
+      const data = await fetchPriceTiers();
+      setTiers(data);
+      setDrafts(Object.fromEntries(data.map(t => [t.tier_id, {
+        tier_name: t.tier_name,
+        price: centsToDollars(t.price_cents),
+        sort_order: String(t.sort_order),
+      }])));
+    } catch (e) {
+      setLoadError(e.message || "Failed to load price tiers.");
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function draftFor(tier) {
+    return drafts[tier.tier_id] ?? {
+      tier_name: tier.tier_name,
+      price: centsToDollars(tier.price_cents),
+      sort_order: String(tier.sort_order),
+    };
+  }
+
+  function setDraft(tierId, patch) {
+    setDrafts(d => ({ ...d, [tierId]: { ...d[tierId], ...patch } }));
+  }
+
+  function isDirty(tier) {
+    const d = draftFor(tier);
+    return d.tier_name !== tier.tier_name
+      || d.price !== centsToDollars(tier.price_cents)
+      || d.sort_order !== String(tier.sort_order);
+  }
+
+  async function saveRow(tier) {
+    const d = draftFor(tier);
+    const name = d.tier_name.trim();
+    if (!name) { setToast({ kind: "error", msg: "Name is required." }); return; }
+    const cents = dollarsToCents(d.price);
+    if (cents === null) { setToast({ kind: "error", msg: "Enter a valid dollar amount." }); return; }
+
+    // The one destructive-by-reach edit in the feature: say what it touches.
+    if (cents !== tier.price_cents && tier.card_count > 0) {
+      const ok = confirm(
+        `Change ${tier.tier_name} to $${centsToDollars(cents)}? ` +
+        `This reprices ${tier.card_count} card${tier.card_count === 1 ? "" : "s"}.`
+      );
+      if (!ok) return;
+    }
+
+    setRowBusy(tier.tier_id);
+    try {
+      await updatePriceTier(tier.tier_id, {
+        tier_name: name,
+        price_cents: cents,
+        sort_order: Number(d.sort_order) || 0,
+      });
+      await load();
+      setToast({ kind: "ok", msg: "Saved." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Save failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function toggleActive(tier) {
+    setRowBusy(tier.tier_id);
+    try {
+      await updatePriceTier(tier.tier_id, { is_active: !tier.is_active });
+      await load();
+      setToast({
+        kind: "ok",
+        msg: tier.is_active
+          ? "Retired — hidden from Bulk Edit; cards on it still resolve."
+          : "Re-activated.",
+      });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Toggle failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function removeTier(tier) {
+    if (!confirm(`Permanently delete "${tier.tier_name}"? This cannot be undone.`)) return;
+    setRowBusy(tier.tier_id);
+    try {
+      await deletePriceTier(tier.tier_id);
+      await load();
+      setToast({ kind: "ok", msg: "Tier deleted." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Delete failed." });
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function saveAdd() {
+    const name = addDraft.tier_name.trim();
+    if (!name) { setToast({ kind: "error", msg: "Name is required." }); return; }
+    const cents = dollarsToCents(addDraft.price);
+    if (cents === null) { setToast({ kind: "error", msg: "Enter a valid dollar amount." }); return; }
+    setAdding(true);
+    try {
+      await createPriceTier({
+        tierName: name,
+        priceCents: cents,
+        sortOrder: addDraft.sort_order === "" ? null : Number(addDraft.sort_order),
+      });
+      await load();
+      setAddDraft(null);
+      setToast({ kind: "ok", msg: "Tier added." });
+    } catch (e) {
+      setToast({ kind: "error", msg: e.message || "Add failed." });
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  if (loadError) return <p style={{ color: "#9b1c1c" }}>{loadError}</p>;
+  if (!tiers) return <p style={{ color: "#444" }}>Loading…</p>;
+
+  const cellStyle = { padding: "4px 8px", fontSize: "0.85rem", textAlign: "left" };
+  const inputStyle = { padding: "3px 6px", fontSize: "0.85rem" };
+  const priced = tiers.reduce((n, t) => n + t.card_count, 0);
+
+  return (
+    <section>
+      <h2 style={{ fontSize: "1rem", fontWeight: 600, margin: "0 0 10px" }}>Price Tiers</h2>
+      <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 12px" }}>
+        Photocard price tiers, assigned in bulk from the library's Bulk Edit panel.
+        Cards reference a tier rather than storing its amount, so changing a tier's
+        price here reprices every card on it immediately — cards given a custom
+        price in their detail modal leave the tier and are not affected.
+        Retiring a tier (Active off) hides it from Bulk Edit while its cards keep
+        resolving; deleting is only possible once no cards use it.
+        {" "}<strong>{priced}</strong> card{priced === 1 ? "" : "s"} currently on a tier.
+      </p>
+
+      {toast && (
+        <div style={{
+          padding: "4px 10px", marginBottom: 8, borderRadius: 3, fontSize: "0.85rem",
+          background: toast.kind === "ok" ? "#dcfce7" : "#fee2e2",
+          color: toast.kind === "ok" ? "#166534" : "#9b1c1c",
+          display: "inline-block",
+        }}>
+          {toast.msg}
+          <button onClick={() => setToast(null)} style={{ marginLeft: 8, border: "none", background: "none", cursor: "pointer" }}>×</button>
+        </div>
+      )}
+
+      <table style={{ borderCollapse: "collapse", marginBottom: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid #d1d5db", color: "#555" }}>
+            <th style={cellStyle}>Name</th>
+            <th style={cellStyle}>Price</th>
+            <th style={cellStyle}>Order</th>
+            <th style={cellStyle}>Cards</th>
+            <th style={cellStyle}>Active</th>
+            <th style={cellStyle}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {tiers.map(tier => {
+            const d = draftFor(tier);
+            const busy = rowBusy === tier.tier_id;
+            return (
+              <tr key={tier.tier_id} style={{ borderBottom: "1px solid #f0f0f0", opacity: tier.is_active ? 1 : 0.55 }}>
+                <td style={cellStyle}>
+                  <input
+                    value={d.tier_name}
+                    onChange={e => setDraft(tier.tier_id, { tier_name: e.target.value })}
+                    style={{ ...inputStyle, width: 150 }}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  $<input
+                    value={d.price}
+                    onChange={e => setDraft(tier.tier_id, { price: e.target.value })}
+                    inputMode="decimal"
+                    style={{ ...inputStyle, width: 70 }}
+                  />
+                </td>
+                <td style={cellStyle}>
+                  <input
+                    type="number"
+                    value={d.sort_order}
+                    onChange={e => setDraft(tier.tier_id, { sort_order: e.target.value })}
+                    style={{ ...inputStyle, width: 55 }}
+                  />
+                </td>
+                <td style={{ ...cellStyle, color: "#555" }}>{tier.card_count}</td>
+                <td style={cellStyle}>
+                  <input
+                    type="checkbox"
+                    checked={tier.is_active}
+                    disabled={busy}
+                    onChange={() => toggleActive(tier)}
+                  />
+                </td>
+                <td style={{ ...cellStyle, whiteSpace: "nowrap" }}>
+                  {isDirty(tier) && (
+                    <button onClick={() => saveRow(tier)} disabled={busy} style={{ padding: "2px 10px", fontSize: "0.8rem", marginRight: 6 }}>
+                      {busy ? "Saving…" : "Save"}
+                    </button>
+                  )}
+                  {/* Deleting an in-use tier 409s by design — offer it only
+                      when it would actually succeed, and point at Active
+                      otherwise, which is the safe way to retire one. */}
+                  {tier.card_count === 0 ? (
+                    <button onClick={() => removeTier(tier)} disabled={busy} style={{ padding: "2px 10px", fontSize: "0.8rem", color: "#9b1c1c" }}>
+                      Delete
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: "0.78rem", color: "#888" }}>in use</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {!addDraft ? (
+        <button onClick={() => setAddDraft({ tier_name: "", price: "", sort_order: "" })} style={{ padding: "4px 10px", fontSize: "0.85rem", cursor: "pointer" }}>
+          + Add tier
+        </button>
+      ) : (
+        <div style={{
+          display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+          padding: 8, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 3,
+        }}>
+          <input
+            autoFocus
+            placeholder="Tier name…"
+            value={addDraft.tier_name}
+            onChange={e => setAddDraft(a => ({ ...a, tier_name: e.target.value }))}
+            onKeyDown={e => { if (e.key === "Enter") saveAdd(); if (e.key === "Escape") setAddDraft(null); }}
+            style={{ ...inputStyle, minWidth: 160 }}
+          />
+          <label style={{ fontSize: "0.8rem", color: "#555" }}>
+            Price:&nbsp;$
+            <input
+              value={addDraft.price}
+              onChange={e => setAddDraft(a => ({ ...a, price: e.target.value }))}
+              inputMode="decimal"
+              style={{ ...inputStyle, width: 70 }}
+            />
+          </label>
+          <label style={{ fontSize: "0.8rem", color: "#555" }}>
+            Sort:&nbsp;
+            <input
+              type="number"
+              value={addDraft.sort_order}
+              onChange={e => setAddDraft(a => ({ ...a, sort_order: e.target.value }))}
+              placeholder="auto"
+              style={{ ...inputStyle, width: 70 }}
+            />
+          </label>
+          <button onClick={saveAdd} disabled={adding} style={{ padding: "3px 10px", fontSize: "0.85rem" }}>
+            {adding ? "Saving…" : "Save"}
+          </button>
+          <button onClick={() => setAddDraft(null)} disabled={adding} style={{ padding: "3px 10px", fontSize: "0.85rem" }}>
+            Cancel
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

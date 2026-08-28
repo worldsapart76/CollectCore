@@ -3,6 +3,7 @@ import {
   fetchPhotocardMembers,
   fetchPhotocardSourceOrigins,
   fetchOwnershipStatuses,
+  fetchPriceTiers,
   bulkUpdatePhotocards,
   bulkDeletePhotocards,
 } from "../../api";
@@ -62,6 +63,10 @@ export default function PhotocardBulkEdit({
   const [updateIsSpecial, setUpdateIsSpecial] = useState(false);
   const [bulkIsSpecial, setBulkIsSpecial] = useState(false);
 
+  const [updatePriceTier, setUpdatePriceTier] = useState(false);
+  const [priceTiers, setPriceTiers] = useState([]);
+  const [priceTierId, setPriceTierId] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -89,6 +94,17 @@ export default function PhotocardBulkEdit({
         }
       } catch (err) {
         setError(err.message || "Failed to load statuses");
+      }
+      try {
+        // Retired tiers stay resolvable on cards that already use them, but
+        // must not be assignable to new ones.
+        const tierData = (await fetchPriceTiers()).filter((t) => t.is_active);
+        setPriceTiers(tierData);
+        if (tierData.length > 0) {
+          setPriceTierId(String(tierData[0].tier_id));
+        }
+      } catch {
+        // Pricing is optional — a failure here shouldn't block the other fields.
       }
     }
     load();
@@ -123,7 +139,7 @@ export default function PhotocardBulkEdit({
   async function handleSave() {
     setError("");
 
-    if (!updateOwnership && !updateCategory && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial) {
+    if (!updateOwnership && !updateCategory && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial && !updatePriceTier) {
       setError("No fields selected to update.");
       return;
     }
@@ -168,11 +184,25 @@ export default function PhotocardBulkEdit({
     if (updateIsSpecial) {
       fields.is_special = bulkIsSpecial;
     }
+    if (updatePriceTier) {
+      fields.price_tier_id = Number(priceTierId); // 0 = unprice
+    }
 
     setSaving(true);
     try {
       const itemIds = selectedCards.map((c) => c.item_id);
-      await bulkUpdatePhotocards(itemIds, fields);
+      const result = await bulkUpdatePhotocards(itemIds, fields);
+      // Assigning a tier wipes any custom price in the selection — the
+      // intended semantics, but a silent loss if we don't say so.
+      const replaced = result?.pricing?.replaced_custom || 0;
+      if (replaced > 0) {
+        const tierName =
+          priceTiers.find((t) => String(t.tier_id) === priceTierId)?.tier_name || "that tier";
+        window.alert(
+          `${itemIds.length} cards set to ${tierName} ` +
+          `(${replaced} custom price${replaced === 1 ? "" : "s"} replaced).`
+        );
+      }
       onSaved();
     } catch (err) {
       setError(err.message || "Failed to bulk update");
@@ -380,9 +410,40 @@ export default function PhotocardBulkEdit({
             </button>
           </div>
         </BulkRow>
+
+        {/* Price Tier — assigning a tier clears any custom price on the card */}
+        <BulkRow
+          label="Price Tier"
+          enabled={updatePriceTier && priceTiers.length > 0}
+          onToggle={() => priceTiers.length > 0 && setUpdatePriceTier((p) => !p)}
+          disabled={priceTiers.length === 0}
+          disabledReason="No active price tiers — add them in Admin"
+        >
+          <select
+            value={priceTierId}
+            onChange={(e) => setPriceTierId(e.target.value)}
+            style={styles.select}
+            disabled={!updatePriceTier}
+          >
+            {priceTiers.map((t) => (
+              <option key={t.tier_id} value={t.tier_id}>
+                {t.tier_name} — {formatCents(t.price_cents)}
+              </option>
+            ))}
+            <option value="0">— Unpriced —</option>
+          </select>
+          <div style={styles.hint}>
+            Replaces any custom price on the selected cards.
+          </div>
+        </BulkRow>
       </div>
     </Modal>
   );
+}
+
+function formatCents(cents) {
+  if (cents === null || cents === undefined) return "—";
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 function BulkRow({ label, enabled, onToggle, disabled, disabledReason, children }) {
@@ -434,6 +495,11 @@ const styles = {
     fontSize: "var(--text-xs)",
     color: "var(--text-muted)",
     fontWeight: "normal",
+  },
+  hint: {
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
+    marginTop: 3,
   },
   select: {
     width: "100%",

@@ -253,6 +253,52 @@ CREATE TABLE IF NOT EXISTS tbl_photocard_copies (
 );
 
 
+-- ------------------------------------------------------------
+-- Photocard pricing  (admin-only; design: docs/photocard_pricing_and_trade_export_plan.md)
+-- ------------------------------------------------------------
+-- Deliberately a SIDE TABLE rather than columns on tbl_photocard_details:
+-- two guest-facing paths copy that table by reflection, not by an explicit
+-- column list (catalog.py's `SELECT *` and seed_builder's PRAGMA-driven copy),
+-- so anything added there ships to the catalog delta endpoint and the guest
+-- seed automatically. A separate table is invisible to both by construction.
+--
+-- NOTE the FOREIGN KEY clauses below are documentation only — `PRAGMA
+-- foreign_keys = ON` is issued on init_db's connection alone (db.py), so
+-- nothing cascades; every delete path cleans up explicitly.
+
+CREATE TABLE IF NOT EXISTS lkup_photocard_price_tiers (
+    tier_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    tier_code   TEXT NOT NULL UNIQUE,
+    tier_name   TEXT NOT NULL,
+    price_cents INTEGER NOT NULL,           -- money is INTEGER cents throughout
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    is_active   INTEGER NOT NULL DEFAULT 1
+);
+
+-- Tier and custom price are mutually exclusive, not layered: editing a card's
+-- price REMOVES it from its tier so a later tier sweep can't silently reset it.
+-- The CHECK is what enforces the three legal states (no row = unpriced,
+-- tier set = tiered, price_cents set = custom).
+CREATE TABLE IF NOT EXISTS tbl_photocard_pricing (
+    item_id       INTEGER PRIMARY KEY,
+    price_tier_id INTEGER,
+    price_cents   INTEGER,
+    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CHECK ((price_tier_id IS NULL) <> (price_cents IS NULL)),
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id),
+    FOREIGN KEY (price_tier_id) REFERENCES lkup_photocard_price_tiers(tier_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_photocard_pricing_tier
+    ON tbl_photocard_pricing (price_tier_id);
+
+INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t1', 'Tier 1',  400, 1);
+INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t2', 'Tier 2',  600, 2);
+INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t3', 'Tier 3',  900, 3);
+INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t4', 'Tier 4', 1200, 4);
+
+
 -- ============================================================
 -- BOOKS LOOKUP TABLES
 -- ============================================================
@@ -1372,6 +1418,22 @@ WHERE key = 'modules_enabled';
 UPDATE tbl_app_settings
 SET value = (SELECT CASE WHEN value LIKE '%"ttrpg"%' THEN value ELSE REPLACE(value, ']', ',"ttrpg"]') END FROM tbl_app_settings WHERE key = 'modules_enabled')
 WHERE key = 'modules_enabled';
+
+-- Mercari listing-title templates for the trade CSV export. Settings rather
+-- than code because listing conventions get tuned constantly once you are
+-- actually selling, and a redeploy per tweak is not worth it.
+--
+-- Two keys, not one template with conditional-token syntax: 1,444 `version`
+-- values already contain the word "Photocard" ("Photocard (Jewel Case
+-- Version)", "Film Photocard Set (POB)"), so appending the phrase
+-- unconditionally reads as redundant AND blows Mercari's 80-character title
+-- cap. `_pc` is used when `version` already says photocard.
+INSERT OR IGNORE INTO tbl_app_settings (key, value)
+VALUES ('photocard_title_template', '{group} {member} {source} {version} Official Photocard');
+INSERT OR IGNORE INTO tbl_app_settings (key, value)
+VALUES ('photocard_title_template_pc', '{group} {member} {source} Official {version}');
+INSERT OR IGNORE INTO tbl_app_settings (key, value)
+VALUES ('photocard_description_template', '{title}. Ships in a toploader and sleeve inside a bubble mailer.');
 
 
 -- ============================================================

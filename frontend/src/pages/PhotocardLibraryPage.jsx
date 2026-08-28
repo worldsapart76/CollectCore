@@ -4,6 +4,7 @@ import {
   fetchPhotocardGroups,
   fetchTopLevelCategories,
   fetchOwnershipStatuses,
+  exportPhotocardTradesCsv,
 } from "../api";
 import { isAdmin } from "../utils/env";
 import PhotocardFilters from "../components/photocard/PhotocardFilters";
@@ -73,6 +74,7 @@ export default function PhotocardLibraryPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showTradeCreate, setShowTradeCreate] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Detail modal
   const [detailCard, setDetailCard] = useState(null);
@@ -302,6 +304,28 @@ export default function PhotocardLibraryPage() {
     [sortedCards, selectedIds]
   );
 
+  // Export the Mercari trade worksheet for what the user is looking at.
+  //
+  // The CLIENT decides the scope — the notes search is client-side and covers
+  // copy notes, so a server-side "all trade copies" query would be blind to
+  // it. Explicit selection wins; with nothing selected we send the whole
+  // filtered set, which is what "search `for sale` then export" needs.
+  async function handleExportCsv() {
+    const source = selectedIds.size > 0 ? selectedCards : sortedCards;
+    if (source.length === 0) return;
+    setExporting(true);
+    try {
+      const { rows } = await exportPhotocardTradesCsv(source.map((c) => c.item_id));
+      if (rows === 0) {
+        window.alert("None of those cards have a Trade copy, so the export is empty.");
+      }
+    } catch (err) {
+      window.alert(err.message || "Failed to export trade CSV");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // Register Sort + Select as TopNav icon buttons on mobile (page-actions context).
   // Guest mode keeps Select (for bulk-add to wanted/owned via guest_card_copies)
   // but hides Sort — filter is the right primitive at 10K+ scale.
@@ -511,6 +535,15 @@ export default function PhotocardLibraryPage() {
               onClick={() => setShowTradeCreate(true)}
             >
               Generate Trade Page
+            </button>
+          )}
+          {/* Mercari worksheet for the trade shelf — selection, or everything
+              currently filtered when nothing is explicitly selected. */}
+          {isAdmin && (
+            <button style={styles.controlBtn} onClick={handleExportCsv} disabled={exporting}>
+              {exporting
+                ? "Exporting…"
+                : `Export CSV (${selectedIds.size > 0 ? selectedIds.size : sortedCards.length})`}
             </button>
           )}
           <button style={styles.controlBtn} onClick={exitSelectMode}>Done</button>
