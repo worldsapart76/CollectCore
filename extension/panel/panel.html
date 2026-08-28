@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectCore Market Capture</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div>
+        <strong>Market Capture</strong>
+        <span class="hint">Esc exits</span>
+      </div>
+      <div class="count"><span id="count">0</span> captured</div>
+    </header>
+
+    <div class="actions">
+      <button id="export" type="button">Export JSON</button>
+      <button id="clear" type="button" class="danger">Clear all</button>
+    </div>
+
+    <p id="empty" class="empty">
+      Nothing captured yet. Click the <strong>+</strong> on any search result to
+      capture it.
+    </p>
+
+    <ul id="list" class="list"></ul>
+
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

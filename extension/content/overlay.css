@@ -1,0 +1,45 @@
+/* Capture dot. Nothing here applies until the content script adds the element,
+   so an inactive extension leaves Mercari visually untouched. */
+
+.cc-capture-dot {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 40;
+
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+
+  background: rgba(17, 17, 17, 0.55);
+  color: #fff;
+  font: 600 15px/1 system-ui, sans-serif;
+
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.cc-capture-dot:hover {
+  background: rgba(17, 17, 17, 0.8);
+  transform: scale(1.1);
+}
+
+.cc-capture-dot.cc-on {
+  background: #1f9d55;
+  border-color: #fff;
+}
+
+/* Neither the page-world stamp nor the DOM scrape could read this tile. */
+.cc-capture-dot.cc-error {
+  background: #b91c1c;
+  border-color: #fff;
+}
+
+/* A thin frame on captured tiles, so a swept page reads at a glance. */
+.cc-active a:has(> .cc-capture-dot.cc-on) {
+  outline: 3px solid #1f9d55;
+  outline-offset: -3px;
+  border-radius: 4px;
+}

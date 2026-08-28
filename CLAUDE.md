@@ -130,6 +130,15 @@ Desktop installer is retired — admins use the bookmark; no `.exe`.
 3. `git commit && git push`
 4. Railway auto-deploys; users refresh
 
+### `extension/` has NO build step
+
+The Chrome extension in `extension/` is plain JS — **never bundled, compiled, or
+built**, and it does **not** deploy to Railway. `npm run build` does not touch
+it. After changing its code the only steps are: reload it at
+`chrome://extensions`, then refresh the Mercari tab. Full instructions live in
+[`extension/README.md`](extension/README.md) — point the user there rather than
+reconstructing the steps.
+
 ## Roadmap (designed, not built)
 
 Plan docs are authoritative — read before starting; don't duplicate decisions here.

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "CollectCore Market Capture",
+  "version": "0.1.0",
+  "description": "Capture photocard listing data from Mercari search results while browsing. Dormant until switched on.",
+  "permissions": ["storage", "sidePanel"],
+  "host_permissions": [
+    "https://www.mercari.com/*",
+    "https://u-mercari-images.mercdn.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "CollectCore Market Capture (click to activate)"
+  },
+  "side_panel": {
+    "default_path": "panel/panel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.mercari.com/*"],
+      "js": ["content/capture.js"],
+      "css": ["content/overlay.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.mercari.com/*"],
+      "js": ["content/fiber.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}
