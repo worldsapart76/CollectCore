@@ -10,7 +10,7 @@ nullable item_id on a line.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -523,3 +523,218 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         "series": [dict(r) for r in series],
         "excluded_lots": [dict(r) for r in lots],
     }
+
+
+# ─────────────────────────── Cost basis ──────────────────────────────────────
+#
+# What a card COST, so the comp view can answer "what would I make on this"
+# rather than only "what does it sell for".
+#
+# Scope: this only means anything for cards actually held FOR SALE. A card in
+# the catalog that was never owned has no basis to speak of, and a card being
+# kept is a collecting cost, not a trading one. SALE_STATUSES is therefore the
+# default population everywhere below — widen it deliberately, not by accident.
+# (The monthly-flow metric will eventually want 'owned' too, for the cost of
+# cards moved to KEEP in a month; that is a later, separate call.)
+#
+# Precedence, derived on read and never denormalized:
+#     real logged purchase  -> exact      (ledger; not built yet)
+#     cost tier / manual    -> ESTIMATED
+#     neither               -> unknown
+
+SALE_STATUSES = ("trade", "pending_outgoing")
+
+# Era boundary: 2020 and earlier is "older", 2021 forward is "current".
+DEFAULT_ERA_CUTOFF = "2020-12-31"
+
+
+def _register_id_word(db) -> None:
+    """Register a word-boundary \\bID\\b test; SQLite has no such operator.
+
+    A real function rather than a LIKE approximation, because the approximation
+    is exactly what goes wrong: measured against the live library,
+    `version LIKE '%ID%'` matches 1,758 cards of which only 288 are ID cards.
+    The other 1,470 are Polaroids ('Polaroid POB', 'Seoul Polaroid POB'), so the
+    shortcut sweeps expensive cards into the cheapest tier — invisibly.
+    """
+    import re
+    raw = db.connection().connection
+    raw.create_function(
+        "cc_is_id_version", 1,
+        lambda v: 1 if v and re.search(r"\bID\b", v, re.I) else 0,
+    )
+
+
+def _basis_rows(db, era_cutoff: str, statuses=SALE_STATUSES):
+    """One row per held copy, tagged with the tier the rules would give it.
+
+    Rule order is priority order, first match wins. Deliberately few and blunt:
+    on a blended basis an individual card's P&L is noise and only the aggregate
+    is sound, so finer tiers would imply precision that isn't there.
+
+    Note is_special — not the version text — identifies a store POB. "POB"
+    covers both store POBs (valuable, flagged) and first-run POBs (ordinary,
+    not flagged), and version naming is inconsistent, so the flag is the more
+    reliable signal.
+    """
+    _register_id_word(db)
+    marks = ", ".join(f"'{s}'" for s in statuses)
+    return db.execute(text(f"""
+        SELECT p.copy_id, p.item_id,
+               TRIM(COALESCE(o.source_origin_name, '?')
+                    || COALESCE(' - ' || NULLIF(d.version, ''), '')) AS card_label,
+               CASE
+                 WHEN d.is_special = 1 THEN 't4'
+                 WHEN cc_is_id_version(d.version) = 1
+                      OR o.source_origin_name = 'Collab: Nacific' THEN 't1'
+                 WHEN o.start_date IS NOT NULL AND o.start_date <= :cutoff THEN 't2'
+                 ELSE 't3'
+               END AS tier_code
+        FROM tbl_photocard_copies p
+        JOIN lkup_ownership_statuses s ON s.ownership_status_id = p.ownership_status_id
+        JOIN tbl_photocard_details d ON d.item_id = p.item_id
+        LEFT JOIN lkup_photocard_source_origins o
+               ON o.source_origin_id = d.source_origin_id
+        WHERE s.status_code IN ({marks})
+    """), {"cutoff": era_cutoff}).fetchall()
+
+
+@router.get("/cost-tiers")
+def list_cost_tiers(db=Depends(get_db)):
+    tiers = [dict(r._mapping) for r in db.execute(text(
+        "SELECT cost_tier_id, tier_code, tier_name, cost_cents, sort_order, is_active "
+        "FROM mkt_cost_tier ORDER BY sort_order"
+    ))]
+    counts = {
+        r[0]: r[1]
+        for r in db.execute(text("""
+            SELECT t.tier_code, COUNT(*) FROM mkt_item_cost c
+            JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id
+            GROUP BY t.tier_code"""))
+    }
+    for t in tiers:
+        t["assigned_cards"] = counts.get(t["tier_code"], 0)
+    return {"tiers": tiers, "era_cutoff": DEFAULT_ERA_CUTOFF}
+
+
+class CostTierIn(BaseModel):
+    tier_name: Optional[str] = None
+    cost_cents: Optional[int] = None
+
+
+@router.put("/cost-tiers/{cost_tier_id}")
+def update_cost_tier(cost_tier_id: int, body: CostTierIn, db=Depends(get_db)):
+    """Edit a tier.
+
+    The effective basis is derived on read, so this reprices every card sitting
+    on the tier. There is no backfill and that is the point — the same reason
+    price tiers work this way.
+    """
+    sets, params = [], {"id": cost_tier_id}
+    if body.tier_name is not None:
+        name = body.tier_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Tier name cannot be empty.")
+        sets.append("tier_name = :n")
+        params["n"] = name
+    if body.cost_cents is not None:
+        if body.cost_cents < 0:
+            raise HTTPException(status_code=400, detail="cost_cents cannot be negative.")
+        sets.append("cost_cents = :c")
+        params["c"] = int(body.cost_cents)
+    if not sets:
+        return {"ok": True, "changed": False}
+
+    res = db.execute(text(
+        f"UPDATE mkt_cost_tier SET {', '.join(sets)} WHERE cost_tier_id = :id"), params)
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"No cost tier {cost_tier_id}.")
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.get("/cost-basis/preview")
+def preview_cost_basis(era_cutoff: str = DEFAULT_ERA_CUTOFF, db=Depends(get_db)):
+    """Dry run: what the rules WOULD assign across the sale pile. Writes nothing.
+
+    Worth actually looking at before assigning. A bad rule sweeps expensive
+    cards into the cheapest tier, and once written the mistake looks exactly
+    like a correct assignment.
+    """
+    rows = _basis_rows(db, era_cutoff)
+    tiers = {
+        r[0]: {"tier_name": r[1], "cost_cents": r[2]}
+        for r in db.execute(text(
+            "SELECT tier_code, tier_name, cost_cents FROM mkt_cost_tier ORDER BY sort_order"))
+    }
+    buckets: Dict[str, Dict[str, Any]] = {
+        code: {"tier_code": code, "tier_name": t["tier_name"],
+               "cost_cents": t["cost_cents"], "copies": 0,
+               "subtotal_cents": 0, "samples": []}
+        for code, t in tiers.items()
+    }
+    for _copy_id, _item_id, item_name, code in rows:
+        b = buckets.get(code)
+        if b is None:
+            continue
+        b["copies"] += 1
+        b["subtotal_cents"] += b["cost_cents"]
+        if len(b["samples"]) < 5:
+            b["samples"].append(item_name)
+
+    total = sum(b["subtotal_cents"] for b in buckets.values())
+    copies = sum(b["copies"] for b in buckets.values())
+    return {
+        "scope": list(SALE_STATUSES),
+        "era_cutoff": era_cutoff,
+        "copies": copies,
+        "total_cents": total,
+        "avg_cents": round(total / copies) if copies else None,
+        "tiers": [buckets[c] for c in tiers],
+    }
+
+
+@router.post("/cost-basis/assign")
+def assign_cost_basis(
+    era_cutoff: str = DEFAULT_ERA_CUTOFF,
+    overwrite_manual: bool = False,
+    db=Depends(get_db),
+):
+    """Apply the rules to the sale pile.
+
+    One row per ITEM, not per copy — two copies of the same card share a basis.
+    Rows whose source is 'manual' are left alone unless overwrite_manual is set,
+    so a hand-corrected basis survives a later sweep.
+    """
+    rows = _basis_rows(db, era_cutoff)
+    tier_ids = {r[0]: r[1] for r in db.execute(text(
+        "SELECT tier_code, cost_tier_id FROM mkt_cost_tier"))}
+
+    seen: set = set()
+    assigned = skipped = 0
+    for _copy_id, item_id, _name, code in rows:
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        tier_id = tier_ids.get(code)
+        if tier_id is None:
+            continue
+        existing = db.execute(text(
+            "SELECT source FROM mkt_item_cost WHERE item_id = :i"), {"i": item_id}).fetchone()
+        if existing and existing[0] == "manual" and not overwrite_manual:
+            skipped += 1
+            continue
+        db.execute(text("""
+            INSERT INTO mkt_item_cost (item_id, cost_tier_id, cost_cents, source, updated_at)
+            VALUES (:i, :t, NULL, 'rule', CURRENT_TIMESTAMP)
+            ON CONFLICT(item_id) DO UPDATE SET
+                cost_tier_id = excluded.cost_tier_id,
+                cost_cents   = NULL,
+                source       = 'rule',
+                updated_at   = CURRENT_TIMESTAMP
+        """), {"i": item_id, "t": tier_id})
+        assigned += 1
+
+    db.commit()
+    return {"ok": True, "cards_assigned": assigned,
+            "manual_rows_preserved": skipped, "era_cutoff": era_cutoff}

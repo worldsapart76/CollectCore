@@ -33,6 +33,7 @@ Registry fields (per entry):
     creatable      If True, new rows can be added via the admin UI (POST).
 """
 
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,6 +44,35 @@ from constants import TTRPG_COLLECTION_TYPE_ID
 from dependencies import get_db
 
 router = APIRouter(tags=["admin"])
+
+
+# ---------- Secondary-column validation ----------
+
+# Secondary columns are free-text by default. These few are not: a malformed
+# ship date would be stored silently and then quietly skew every era comparison
+# that reads it, so it is rejected at the edge instead.
+_DATE_PRECISIONS = ("day", "month", "year")
+
+
+def _validate_secondary(col: str, val: Optional[str]) -> Optional[str]:
+    """Return the value to store, or raise 400. Empty string means 'clear it'."""
+    if val is None or val == "":
+        return None
+    val = val.strip()
+    if col.endswith("_date"):
+        try:
+            date.fromisoformat(val)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{col} must be an ISO date (YYYY-MM-DD); got {val!r}.",
+            )
+    elif col == "date_precision" and val not in _DATE_PRECISIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"date_precision must be one of {', '.join(_DATE_PRECISIONS)}; got {val!r}.",
+        )
+    return val
 
 
 # ---------- Registry ----------
@@ -83,7 +113,7 @@ _LOOKUP_REGISTRY_LIST: List[Dict[str, Any]] = [
         "table": "lkup_photocard_source_origins",
         "pk": "source_origin_id", "name_col": "source_origin_name",
         "sort_col": "sort_order",
-        "secondary_cols": [],
+        "secondary_cols": [("start_date", "Start Date"), ("date_precision", "Precision")],
         "scope": [
             {"col": "group_id", "label": "Group",
              "src_table": "lkup_photocard_groups", "src_pk": "group_id", "src_name": "group_name"},
@@ -643,7 +673,7 @@ def create_lookup_row(table: str, req: LookupCreateRequest, db=Depends(get_db)):
                 raise HTTPException(status_code=400, detail=f"Unknown field: {col}")
             cols.append(col)
             placeholders.append(f":sec_{col}")
-            params[f"sec_{col}"] = val if val != "" else None
+            params[f"sec_{col}"] = _validate_secondary(col, val)
 
     scope_cols = {s["col"] for s in entry["scope"]}
     if scope_cols:
@@ -724,7 +754,7 @@ def patch_lookup_row(table: str, row_id: int, req: LookupPatchRequest, db=Depend
             if col not in valid_secondary:
                 raise HTTPException(status_code=400, detail=f"Unknown field: {col}")
             sets.append(f"{col} = :sec_{col}")
-            params[f"sec_{col}"] = val
+            params[f"sec_{col}"] = _validate_secondary(col, val)
 
     if not sets:
         return {"ok": True, "changed": False}

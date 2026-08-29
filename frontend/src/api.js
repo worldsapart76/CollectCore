@@ -1495,3 +1495,36 @@ export async function backfillFxUsd() {
   const res = await fetch(`${API}/market/fx/backfill`, { method: 'POST' });
   return handleJsonResponse(res, 'Failed to backfill USD');
 }
+
+// ---------- Cost basis ----------
+//
+// What cards COST, so a comp can answer "what would I make on this". Scoped to
+// the sale pile (trade + pending_outgoing) — a card that was never owned has no
+// basis, and a card being kept is a collecting cost, not a trading one.
+
+export async function listCostTiers() {
+  const res = await fetch(`${API}/market/cost-tiers`);
+  return handleJsonResponse(res, 'Failed to load cost tiers');
+}
+
+export async function updateCostTier(tierId, payload) {
+  const res = await fetch(`${API}/market/cost-tiers/${tierId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, 'Failed to save cost tier');
+}
+
+// Dry run — writes nothing. Always the step before assigning.
+export async function previewCostBasis(eraCutoff) {
+  const q = eraCutoff ? `?era_cutoff=${encodeURIComponent(eraCutoff)}` : '';
+  const res = await fetch(`${API}/market/cost-basis/preview${q}`);
+  return handleJsonResponse(res, 'Failed to preview cost basis');
+}
+
+export async function assignCostBasis(eraCutoff) {
+  const q = eraCutoff ? `?era_cutoff=${encodeURIComponent(eraCutoff)}` : '';
+  const res = await fetch(`${API}/market/cost-basis/assign${q}`, { method: 'POST' });
+  return handleJsonResponse(res, 'Failed to assign cost basis');
+}

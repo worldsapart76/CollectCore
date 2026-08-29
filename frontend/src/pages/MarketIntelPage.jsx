@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Button, Alert } from "../components/primitives";
-import { listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd } from "../api";
+import {
+  listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
+  listCostTiers, updateCostTier, previewCostBasis, assignCostBasis,
+} from "../api";
 
 // Price comps from the browser-extension captures.
 // Design: docs/photocard_market_intel_plan.md.
@@ -128,6 +131,8 @@ export default function MarketIntelPage() {
         </Alert>
       )}
 
+      <CostBasisPanel onError={setError} />
+
       {cards === null && <div style={{ color: "#666" }}>Loading…</div>}
 
       {cards?.length === 0 && (
@@ -174,6 +179,178 @@ export default function MarketIntelPage() {
             {selected && !detail && <div style={{ color: "#666" }}>Loading…</div>}
             {detail && <CardDetail detail={detail} />}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Cost basis for the sale pile.
+//
+// Scoped to trade + pending_outgoing on purpose: a card that was never owned
+// has no basis, and a card being kept is a collecting cost, not a trading one.
+//
+// The preview is always on screen and the assign button is the only thing that
+// writes. That ordering is the point — a bad rule sweeps expensive cards into
+// the cheapest tier, and once written the mistake looks exactly like a correct
+// assignment.
+function CostBasisPanel({ onError }) {
+  const [open, setOpen] = useState(false);
+  const [tiers, setTiers] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  async function refresh() {
+    const [t, p] = await Promise.all([listCostTiers(), previewCostBasis()]);
+    setTiers(t.tiers || []);
+    setPreview(p);
+  }
+
+  // Load once, on first expand. Re-running when `tiers` lands is harmless --
+  // the guard turns it into a no-op -- so the deps stay honest rather than
+  // suppressed.
+  useEffect(() => {
+    if (!open || tiers) return;
+    refresh().catch((e) => onError(e.message || "Failed to load cost basis"));
+  }, [open, tiers, onError]);
+
+  async function handleEditAmount(tier) {
+    const entered = prompt(`Cost per card for "${tier.tier_name}" (USD):`,
+      (tier.cost_cents / 100).toFixed(2));
+    if (entered == null) return;
+    const dollars = Number(entered);
+    if (!Number.isFinite(dollars) || dollars < 0) {
+      onError("Amount must be a non-negative number");
+      return;
+    }
+    setBusy(true);
+    try {
+      // Derived on read — this reprices every card on the tier, no backfill.
+      await updateCostTier(tier.cost_tier_id, { cost_cents: Math.round(dollars * 100) });
+      await refresh();
+      setNote(`${tier.tier_name} is now ${usd(Math.round(dollars * 100))} — every card on this tier repriced.`);
+    } catch (e) {
+      onError(e.message || "Failed to save tier");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAssign() {
+    setBusy(true);
+    try {
+      const r = await assignCostBasis();
+      await refresh();
+      setNote(
+        `Assigned ${r.cards_assigned} card${r.cards_assigned === 1 ? "" : "s"}.` +
+        (r.manual_rows_preserved ? ` ${r.manual_rows_preserved} hand-set basis kept.` : "")
+      );
+    } catch (e) {
+      onError(e.message || "Failed to assign");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const assignedTotal = (tiers || []).reduce((n, t) => n + (t.assigned_cards || 0), 0);
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 6, marginBottom: 12 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 10px",
+          background: "#fafafa", border: "none", borderRadius: 6, cursor: "pointer",
+          textAlign: "left", fontSize: 13,
+        }}
+      >
+        <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
+        <strong>Cost basis</strong>
+        <span style={{ color: "#666" }}>
+          {preview
+            ? `${preview.copies} copies for sale · ${usd(preview.total_cents)} estimated`
+            : "what the sale pile cost"}
+        </span>
+        {tiers && assignedTotal === 0 && (
+          <span style={{ marginLeft: "auto", color: "#b45309", fontSize: 12 }}>not assigned yet</span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #eee" }}>
+          {!tiers && <div style={{ color: "#666", fontSize: 13 }}>Loading…</div>}
+
+          {tiers && preview && (
+            <>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+                Scope: cards held for <strong>{preview.scope.join(" / ")}</strong>.
+                Era boundary {preview.era_cutoff} — on or before is older, after is current.
+                Figures are <strong>estimates</strong>; a logged purchase will outrank them.
+              </div>
+
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#666", fontSize: 11 }}>
+                    <th style={{ padding: "3px 6px" }}>Tier</th>
+                    <th style={{ padding: "3px 6px", textAlign: "right" }}>Each</th>
+                    <th style={{ padding: "3px 6px", textAlign: "right" }}>Copies</th>
+                    <th style={{ padding: "3px 6px", textAlign: "right" }}>Subtotal</th>
+                    <th style={{ padding: "3px 6px" }}>Example</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.tiers.map((t) => (
+                    <tr key={t.tier_code} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "4px 6px" }}>{t.tier_name}</td>
+                      <td style={{ padding: "4px 6px", textAlign: "right" }}>{usd(t.cost_cents)}</td>
+                      <td style={{ padding: "4px 6px", textAlign: "right" }}>{t.copies}</td>
+                      <td style={{ padding: "4px 6px", textAlign: "right" }}>{usd(t.subtotal_cents)}</td>
+                      <td style={{ padding: "4px 6px", color: "#666", fontSize: 11 }}>
+                        {t.samples?.[0] || "—"}
+                      </td>
+                      <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                        <Button
+                          size="sm"
+                          disabled={busy}
+                          onClick={() =>
+                            handleEditAmount(tiers.find((x) => x.tier_code === t.tier_code))
+                          }
+                        >
+                          Edit
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: "2px solid #ddd", fontWeight: "bold" }}>
+                    <td style={{ padding: "4px 6px" }}>Total</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "normal", color: "#666" }}>
+                      avg {usd(preview.avg_cents)}
+                    </td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{preview.copies}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{usd(preview.total_cents)}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                <Button disabled={busy} onClick={handleAssign}>
+                  {assignedTotal ? "Re-assign from rules" : "Assign to cards"}
+                </Button>
+                <span style={{ fontSize: 12, color: "#666" }}>
+                  {assignedTotal
+                    ? `${assignedTotal} card${assignedTotal === 1 ? "" : "s"} currently assigned.`
+                    : "Nothing written yet — the table above is a dry run."}
+                </span>
+              </div>
+
+              {note && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#15803d" }}>{note}</div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

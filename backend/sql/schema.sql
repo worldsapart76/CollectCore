@@ -212,6 +212,17 @@ CREATE TABLE IF NOT EXISTS lkup_photocard_source_origins (
     source_origin_name   TEXT NOT NULL,
     sort_order           INTEGER NOT NULL DEFAULT 0,
     is_active            INTEGER NOT NULL DEFAULT 1,
+    -- When this line STARTED SHIPPING (ISO 8601 'YYYY-MM-DD'), not a release
+    -- date: tours, pop-ups and collab series span weeks or months, so this is
+    -- the opening of the window. date_precision ('day'|'month'|'year') says how
+    -- much of it to trust -- month is stored as the 1st, year as Jan 1. Both
+    -- nullable; a new origin is dateless until someone fills it in.
+    -- NOTE: this table is SELECT *'d by catalog.py and copied by seed_builder,
+    -- so these columns ship to the catalog delta and the guest seed. That is
+    -- intended here (a ship date is public fact, unlike pricing), but it means
+    -- a seed regen + guest smoke test is part of changing them.
+    start_date           TEXT,
+    date_precision       TEXT,
 
     FOREIGN KEY (group_id) REFERENCES lkup_photocard_groups(group_id),
     FOREIGN KEY (top_level_category_id) REFERENCES lkup_top_level_categories(top_level_category_id),
@@ -2095,3 +2106,38 @@ CREATE TABLE IF NOT EXISTS mkt_sighting (
 CREATE INDEX IF NOT EXISTS idx_mkt_line_listing ON mkt_listing_line(listing_id);
 CREATE INDEX IF NOT EXISTS idx_mkt_line_item    ON mkt_listing_line(item_id);
 CREATE INDEX IF NOT EXISTS idx_mkt_sighting_lst ON mkt_sighting(listing_id, observed_at);
+
+-- ── Photocard cost basis (admin-only, market intel) ──────────────────────────
+-- What a card COST, as opposed to tbl_photocard_pricing which is what it is
+-- offered at. Deliberately separate from the price tiers: a price tier is a
+-- selling opinion that gets revised, and letting cost ride on it would silently
+-- rewrite cost history. The two share a ranking shape and nothing else.
+--
+-- mkt_* prefix, not tbl_photocard_*, so these never drift into the catalog or
+-- guest paths -- cost is an admin fact and must not ship to /pcs/.
+CREATE TABLE IF NOT EXISTS mkt_cost_tier (
+    cost_tier_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tier_code    TEXT NOT NULL UNIQUE,
+    tier_name    TEXT NOT NULL,
+    cost_cents   INTEGER NOT NULL,
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    is_active    INTEGER NOT NULL DEFAULT 1
+);
+
+-- Per-card basis. Tier XOR explicit amount, the same CHECK pattern used by
+-- tbl_photocard_pricing -- the effective figure is derived on read and never
+-- denormalized, so editing a tier reprices every card sitting on it.
+-- A row here is an ESTIMATE for the backlog; a real logged purchase outranks it
+-- and is resolved at read time, never written back over this.
+CREATE TABLE IF NOT EXISTS mkt_item_cost (
+    item_id      INTEGER PRIMARY KEY,
+    cost_tier_id INTEGER,
+    cost_cents   INTEGER,
+    source       TEXT NOT NULL DEFAULT 'rule',   -- rule|manual
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CHECK ((cost_tier_id IS NULL) <> (cost_cents IS NULL)),
+    FOREIGN KEY (item_id)      REFERENCES tbl_items(item_id),
+    FOREIGN KEY (cost_tier_id) REFERENCES mkt_cost_tier(cost_tier_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mkt_item_cost_tier ON mkt_item_cost(cost_tier_id);

@@ -142,6 +142,25 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_sighting.%s", col)
 
+    # Migration: source-origin ship dates.
+    # Origin-level, not card-level: 88 origin rows date all 11,323 photocards,
+    # and every card has an origin (source_origin_id has no NULLs in prod). The
+    # date lives here rather than on tbl_photocard_details both because that is
+    # the correct normalization and because that table's guest paths make new
+    # columns there a hazard.
+    if "lkup_photocard_source_origins" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(lkup_photocard_source_origins)").fetchall()}
+        for col, ddl in (
+            ("start_date",
+             "ALTER TABLE lkup_photocard_source_origins ADD COLUMN start_date TEXT"),
+            ("date_precision",
+             "ALTER TABLE lkup_photocard_source_origins ADD COLUMN date_precision TEXT"),
+        ):
+            if col not in cols:
+                raw.execute(ddl)
+                logger.info("Migration: added lkup_photocard_source_origins.%s", col)
+
     # Migration: binder layout codes now read ACROSS x DOWN consistently.
     # The 6- and 12-pocket layouts were first stored with rows and columns
     # swapped ('2x3', '3x4'). Idempotent — matches nothing after the first run.
@@ -277,6 +296,76 @@ def _seed_status_visibility_xref(conn) -> None:
         logger.info("Seeded xref_consumption_status_modules (fresh DB)")
 
 
+
+def _seed_origin_start_dates(raw) -> None:
+    """Fill in known origin ship dates. Idempotent and non-destructive.
+
+    Two guards, both load-bearing:
+
+      * Matched on (id AND name). source_origin_id is NOT stable across
+        databases -- in the 2026-08 dev copy id 77 was "This & That" while in
+        prod id 77 is "Season's Greetings 2025 (Japan) Your Hero". Seeding on
+        id alone would silently write the wrong date. Rows whose name does not
+        match are skipped and logged, never guessed at.
+
+      * Only writes where start_date IS NULL, so a date corrected by hand in
+        the admin UI survives every later restart.
+    """
+    from seed_origin_dates import ORIGIN_START_DATES
+
+    applied = 0
+    mismatched: list[str] = []
+    for origin_id, name, start_date, precision in ORIGIN_START_DATES:
+        cur = raw.execute(
+            "UPDATE lkup_photocard_source_origins "
+            "   SET start_date = ?, date_precision = ? "
+            " WHERE source_origin_id = ? AND source_origin_name = ? "
+            "   AND start_date IS NULL",
+            (start_date, precision, origin_id, name),
+        )
+        if cur.rowcount:
+            applied += cur.rowcount
+            continue
+        # Distinguish "already dated" (fine) from "id/name disagree" (loud).
+        row = raw.execute(
+            "SELECT source_origin_name, start_date FROM lkup_photocard_source_origins "
+            " WHERE source_origin_id = ?", (origin_id,)).fetchone()
+        if row is not None and row[0] != name:
+            mismatched.append(f"id {origin_id}: seed={name!r} db={row[0]!r}")
+
+    if applied:
+        logger.info("Seeded %d source-origin start dates", applied)
+    if mismatched:
+        logger.warning(
+            "Origin date seed skipped %d row(s) whose id/name disagree with this "
+            "database -- dates NOT applied: %s",
+            len(mismatched), "; ".join(mismatched),
+        )
+
+
+
+def _seed_cost_tiers(raw) -> None:
+    """Seed the four default cost tiers. Runs after the schema is applied.
+
+    Amounts derive from the album slot weights (ID 2 / album 3 / first-run 3 /
+    store POB 4 over a ~$12 card pool) and are meant to be edited in the UI --
+    the effective basis is derived on read, so changing a tier reprices every
+    card sitting on it. INSERT OR IGNORE keys on tier_code, so an edited amount
+    is never overwritten on restart.
+    """
+    for code, name, cents, order in (
+        ("t1", "ID cards, Nacific, common",   200, 1),
+        ("t2", "Older era (2020 and before)", 250, 2),
+        ("t3", "Current era (2021+)",         300, 3),
+        ("t4", "Store POB",                   400, 4),
+    ):
+        raw.execute(
+            "INSERT OR IGNORE INTO mkt_cost_tier "
+            "(tier_code, tier_name, cost_cents, sort_order) VALUES (?, ?, ?, ?)",
+            (code, name, cents, order),
+        )
+
+
 def init_db() -> None:
     if not SCHEMA_PATH.exists():
         raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
@@ -288,4 +377,9 @@ def init_db() -> None:
         _run_migrations(conn)
         raw_conn = conn.connection
         raw_conn.executescript(schema_sql)
+        # Seeds run AFTER the schema: _run_migrations executes before the
+        # CREATE TABLEs, so anything guarded on a table existing would silently
+        # skip on the first boot that creates it.
+        _seed_cost_tiers(raw_conn)
+        _seed_origin_start_dates(raw_conn)
         _seed_status_visibility_xref(conn)
