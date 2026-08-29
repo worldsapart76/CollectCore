@@ -27,11 +27,13 @@ Two connected needs:
 
 The near-term shape is small: a few resale cards riding along in Neokyo boxes
 already being bought for personal collecting. The end state worth aiming at is
-**resale paying for the collecting habit** — see The Pays-For-Itself Metric.
+**monthly break-even on flow** — this month's selling paying for this month's
+collecting. See The goal.
 
 An immediate third payoff needs no purchase at all: US comp data prices the
-**existing trade shelf** (89 cards carry a `trade` copy per the pricing plan),
-feeding the price tiers and Mercari CSV export that are already built.
+**existing trade shelf**. Note this is a read for the human, not a wiring —
+market intel does not feed `tbl_photocard_pricing` or the Mercari CSV export.
+See Decisions.
 
 ---
 
@@ -661,26 +663,188 @@ Non-card lines (album, magazine, merch) take the same outcomes — they can be
 resold, kept, or absorbed. Allocating a share away from the cards without
 giving it somewhere to land just leaks it.
 
-## The pays-for-itself metric
+## Album purchases — the other acquisition path
 
-The end goal, stated plainly:
+Most cards do not arrive as a Neokyo purchase. They come out of albums bought
+many at a time, and the reason for costing them at all is narrow and specific:
+**assigning a basis to the duplicates that get sold.**
+
+### An album is a lot
+
+Same shape as a Neokyo bundle — one price, several components — so it needs no
+new machinery. It is a purchase with lines:
 
 ```
-resale net profit  ≥  allocated landed cost of cards kept
+This & That · & Version · Withmuu            $15.00
+  album shell   (non_card)  $3.00 fixed  → kept
+  ID card       weight 2                 → $2.00
+  album card    weight 3                 → $3.00
+  first-run POB weight 3                 → $3.00
+  store POB     weight 4                 → $4.00
 ```
 
-Shown per box and rolling. This is what "buying and selling pays for the
-collecting habit" means numerically, and it is computable precisely because
-`kept` is a transfer at allocated cost rather than a write-off.
+**The shell is a line with outcome `kept`**, exactly like a card you keep, so
+card P&L excludes it automatically — not by a special rule, but because that is
+what `kept` already means. There is no separate "residual" concept.
 
-Secondary numbers, all free once the above exists:
+It takes an **explicit amount** rather than a weight (the tier-XOR-custom
+pattern: an explicit amount pulls a line out of the weighted sweep and the
+remainder redistributes). That amount is **per album config, not global** — a
+$25 standard album ships a larger photobook and posters than a $15 member
+version, so its shell really is worth more.
 
-- **Days-to-sell** (`date_listed` → `date_sold`) and **sell-through** (what
-  fraction of listed cards ever sold). Margin without these is how resale
-  hobbies convince people they are profitable.
-- **Return per month of capital tied up** — a card netting $12 in eight months
-  is worse than one netting $5 in a week.
-- **Capital in flight** — cash sitting in unsold inventory and in-transit boxes.
+### Slot weights
+
+Derived from the author's own hand-allocation, which turned out to be one
+consistent system applied twice: $12 across four slots gave $2/$3/$3/$4, and
+$12 across three (no store POB) gave $3/$4.50/$4.50 — the same weights, minus
+one.
+
+| Slot | Weight |
+|---|---|
+| ID card | 2 |
+| Album card | 3 |
+| First-run POB | 3 |
+| Store POB | 4 |
+
+Defaults, not law — older eras shift, and each config can override. Weights beat
+fixed amounts here because a cheaper album shrinks the pool and reprices every
+slot automatically.
+
+### Slots are costed, not cards
+
+Album cards are **random pulls**, so every member had identical expected cost.
+Allocating more to the card you happened to pull would bake luck into the basis
+and hide the very thing worth seeing — a lucky pull showing a fat margin, an
+unlucky one a loss.
+
+This is a deliberate departure from lot allocation, where value-weighting *is*
+right because the cards are identified before purchase. Random draw: split
+evenly. Identified purchase: split by value.
+
+The practical consequence is that **no physical card ever has to be traced to a
+specific album.** Six albums produce six ID slots at $2; selling three consumes
+three. So basis is assigned **at sale time from a pool**, not recorded at pull
+time — which matters, because opening six albums and logging 24 pulls is exactly
+the friction that kills the habit.
+
+**Duplicates are not cheaper.** Three Hyunjin IDs from three albums cost $2
+each; selling one at $5 is a real $3 gain. And dupes that never sell still
+consumed cost.
+
+## Cost basis for the backlog
+
+Cards already in the collection have no receipts — albums bought months ago,
+opened, sorted into keeps and trades. They still need *something*, or every sale
+from the existing pile reads as pure profit.
+
+### Precedence, derived on read
+
+```
+real basis   (logged album or marketplace purchase)  → exact
+cost tier    (backlog estimate)                      → ESTIMATED
+neither                                              → unknown
+```
+
+Mirrors how effective price already works in `tbl_photocard_pricing`: derived on
+read, never denormalized. **Estimated is labelled**, so a blended figure is never
+mistaken for a measured one.
+
+### Blended on purpose, and what that costs
+
+A $15 member version and a $25 standard album with the same card count produce
+very different true costs per card. Against real costs, member-version cards
+show fat margins and standard-album cards show losses; blended, it comes out
+roughly even. For cards already pooled and untraceable, blended is the only
+honest option.
+
+The consequence, which must be visible in the UI: **with a blended basis, an
+individual card's P&L is noise.** Only the aggregate is sound, because the over-
+and under-statements cancel across the pile. Per-card margin is meaningful only
+for cards with a real basis.
+
+### Assignment — use the flag, not the text
+
+Four tiers matching the ranking already in use for sale prices. **The assignment
+is separate from the price-tier assignment** (see Decisions), even though the
+ranking is the same shape.
+
+| Tier | Contents | Selector |
+|---|---|---|
+| 1 | ID cards, common non-album | `\bID\b`, hand-adjusted |
+| 2 | Older-era album cards | era via `source_origin` |
+| 3 | Current-era album + first-run, older-era first-run | era + not special |
+| 4 | **Store POBs** | `is_special = 1` |
+
+**"POB" is a misnomer covering two different things**, and the distinction is
+what tier 4 turns on:
+
+- **Store POB** — a benefit card from a specific retailer. Higher value, varies
+  a lot by issuer (Chinese-store POBs resell high). Flagged `is_special`.
+- **First-run / album POB** — the extra card included during a first press run.
+  Ordinary value. Not flagged.
+
+So `is_special` is the selector for tier 4, and it is **more reliable than the
+version text** — version naming is inconsistent (a store name alone often
+implies POB), while the flag encodes the judgement directly.
+
+> **Do not bulk-assign by substring.** Measured against the real library:
+> `version LIKE '%ID%'` matches **1,758** cards but only **288** are actually ID
+> cards. The other 1,470 are Polaroids — `Polaroid POB`, `Polaroid SKZOO POB`,
+> `Seoul Polaroid POB` — i.e. it sweeps expensive cards into the cheapest tier.
+> Word boundaries, and a preview count before committing.
+
+### The tier is a floor, not an answer
+
+Store POBs vary enormously by issuer, so one tier cannot price them. It does not
+need to: **each store's POB is already a separate card with its own `item_id`**,
+so comps segment by issuer automatically. The tier only fills the gap for cards
+with neither a purchase record nor comp volume, and gets displaced card by card
+as better data arrives.
+
+## The goal — monthly break-even on flow
+
+Not cumulative break-even. The backlog represents years of album spend that will
+never be earned back, and aiming at it would be discouraging and useless.
+
+The goal is **this month's selling paid for this month's collecting**:
+
+```
+for each month:
+  in   = net proceeds from cards SOLD that month
+  out  = allocated cost of cards moved to KEEP that month
+  net  = in - out            break-even when net >= 0
+```
+
+Flow-based and periodic. It ignores the backlog by construction, and it does not
+require every card to sell.
+
+**Schema consequence:** this needs *when* an outcome was set, not just what it
+is. A card kept in March costs March even if bought in January, so
+`mkt_purchase_line` carries `outcome_at`.
+
+### The companion number
+
+This metric cannot see unsold inventory. Sell $50, keep $50 of cards, and it
+reads break-even even while 200 unsold dupes that cost $400 stack up. That is
+not a flaw in the goal — it is what the goal deliberately excludes — so it sits
+beside it rather than inside it:
+
+> **August: +$12** · unsold inventory 214 cards / $438 basis
+
+The headline stays the flow number; the companion stops it becoming a lie.
+
+### Three levels, kept distinct
+
+| | Measures | Role |
+|---|---|---|
+| Monthly flow | sold-that-month net − kept-that-month cost | **The goal** |
+| Card trading P&L | resale net − basis of cards sold | Flatters; ignores dead stock |
+| Total outlay | all cash out vs all revenue | Honest hobby cost; will not break even |
+
+The third exists precisely *because* it will not break even. Album spend is a
+collecting cost, not a trading one, and showing it separately keeps it from
+leaking into a metric that is supposed to be about cards.
 
 ---
 
@@ -875,6 +1039,37 @@ only); automatic sync; any `/pcs/` exposure of price data.
 - **2026-08-28** — No multi-week measurement program. Sell-through and
   days-to-sell accrue as a byproduct of `date_listed` / `date_sold` once the
   ledger is in use.
+- **2026-08-29** — **Album purchases are lots.** The shell is a line with
+  outcome `kept`, taking an explicit per-config amount, so card P&L excludes it
+  because that is what `kept` means — no separate "residual" concept. Slot
+  weights ID 2 / album 3 / first-run 3 / store POB 4, reverse-engineered from
+  the author's own hand-allocation, which proved to be one consistent system
+  applied twice.
+- **2026-08-29** — **Album slots split evenly, unlike lots.** A random pull
+  means every member had identical expected cost; value-weighting would bake
+  luck into the basis. Identified purchases still split by value. Basis is
+  therefore assigned at SALE time from a slot pool — no physical card is ever
+  traced to a specific album, because logging 24 pulls per six albums is the
+  friction that kills the habit.
+- **2026-08-29** — **Backlog gets blended cost tiers, labelled ESTIMATED.**
+  Individual card P&L on a blended basis is noise; only the aggregate is sound,
+  and the UI must say so. Tier 4 selects on `is_special`, which is more reliable
+  than version text: "POB" covers both store POBs (valuable, flagged) and
+  first-run POBs (ordinary, not flagged), and version naming is inconsistent.
+  Substring assignment is banned — `LIKE '%ID%'` matches 1,758 cards of which
+  only 288 are ID cards, sweeping 1,470 Polaroids into the cheapest tier.
+- **2026-08-29** — **The goal is monthly flow break-even**, not cumulative:
+  proceeds from cards sold this month vs allocated cost of cards kept this
+  month. Ignores the backlog by construction. Requires `outcome_at` on the
+  line, and an unsold-inventory companion number, since the metric cannot see
+  dead stock.
+- **2026-08-29** — **No integration with `tbl_photocard_pricing`.** Market
+  intel reads nothing from and writes nothing to it; the only link anywhere
+  remains a nullable `item_id` on a line. Cost and price share a ranking shape
+  but never an assignment: price tiering is a selling opinion that gets revised,
+  and letting cost ride on it would silently rewrite cost history — the same
+  failure rejected for FX rates. Superseding the price tiers entirely is a
+  later decision, not one to make on 43 data points.
 - **2026-08-29** — Built as three tables, not two: a listing is seen more than
   once, so identity/contents belong to the listing and price/state to each
   sighting. Ingest is idempotent on both keys.
