@@ -474,6 +474,81 @@ The diagnostic value of these two sweeps is real (field inventory, `status`
 semantics, contamination rates). Their analytical value is zero, and no price
 figure should be carried forward from them.
 
+## The card index and title matcher
+
+Implementation: `extension/lib/matcher.js` (pure, no chrome/DOM) and
+`extension/lib/cardIndex.js`. Regression harness: `node tools/test_matcher.mjs`.
+
+### The index
+
+`GET /admin/card-index` returns identity fields only — id, group, members,
+origin, version, special flag, front image. No ownership, no pricing. ~11,300
+cards, ~2.4 MB.
+
+The panel caches it in IndexedDB and **refreshes on open whenever the stored
+copy is over 12 hours old**. Working from a hand-exported file was rejected as a
+*correctness* problem, not a convenience one: a card catalogued since the last
+export silently fails to match, gets pushed down the create-the-card path, and
+invites a duplicate of a card already owned. `tools/export_card_index.py`
+remains the offline path, and must be pointed at a **prod** database — dev lags.
+
+### Filters, never selects
+
+Every inference is a removable chip, and **the candidate list is never empty** —
+chips get dropped rather than returning nothing. A filter that hides the right
+card without saying why is worse than no filter.
+
+`lowConfidence` is set when no member matched at all, since that usually means
+the listing is another group entirely (the sample contained P1Harmony and
+ENHYPEN rows).
+
+### Four tuning decisions, each forced by real data
+
+Tuned against real captured Mercari titles. All four are counterintuitive enough
+to be worth recording:
+
+1. **Document frequency decides what may filter** (`MAX_DF_RATIO = 0.15`).
+   `photocard` spans 1,410 cards and discriminates nothing; `withmuu` appears
+   once and pins a card exactly. Frequency, not a hand-maintained stopword list.
+
+2. **Origin outranks version** (`FIELD_BOOST` 2.2 vs 1.0). Without the boost,
+   *"Han KARMA Double Sided"* discarded KARMA to keep the format words and
+   returned Han cards from three unrelated eras — precisely backwards. Origin is
+   identity; version is mostly format.
+
+3. **Joined forms are indexed.** Sellers write `Rockstar` where the library says
+   `Rock Star`. Indexing the concatenation took that case from 212 junk results
+   to 4 correct ones.
+
+4. **Title stopwords, because DF cannot catch them.** `skz` is rare in the
+   library but ubiquitous in listing titles, so it scored as highly
+   discriminating and buried the real signal (`hop`, `hmv`). Words that are
+   generic in *titles* need their own list regardless of library frequency.
+
+### Aliases are the compounding part
+
+`ALIASES` maps fan shorthand to member names — `jisung`, `lino`, `binnie`,
+`innie`. Every confirmed association whose title used an unknown alias is a
+candidate row.
+
+`I.N` is handled by alias only and never by token: it tokenizes to nothing
+usable, and `in` is a preposition that would tag half the library.
+
+**This table is also the seam for Neokyo.** Japanese titles need segmentation
+plus a kana/kanji layer (`ヒョンジン` → Hyunjin, `スキズ` → Stray Kids), which
+plugs in here rather than needing a second matcher.
+
+**Not yet handled: ship names.** `Minsung`, `Hyunlix`, `Seungjin`, `Changlix`
+appear constantly in titles and map to member *pairs*, which the current alias
+format cannot express.
+
+### Measured quality
+
+12/12 correct top-hit origin across the regression corpus, which includes
+deliberately unmatchable cases — a bare `Photocard`, a bundle, and a P1Harmony
+card absent from the library — that must degrade rather than pretend. Rerun
+`tools/test_matcher.mjs` after touching the matcher or adding aliases.
+
 ## Multi-line contents
 
 A listing contains N things. The observation → card relationship is **1:N**,
@@ -504,6 +579,15 @@ The extension writes to **IndexedDB first, always**, and syncs in batches.
 Browsing never blocks on the network, and a sweep is never lost to an API
 hiccup. This is the permanent architecture, not scaffolding — building it
 before the ingest endpoint exists costs nothing later.
+
+**Sync is a button, not automatic** (as built). Safe to press repeatedly: the
+server keys listings on `(marketplace, external_id)` and sightings on
+`(listing, observed_at)`, so a re-sync updates rather than duplicates and the
+extension never has to track what it has already sent. Nothing is deleted
+locally on success — until sync is automatic, the local copy is the safety net.
+
+**Captured image blobs are NOT sent** — see the gap noted under Images. Sync
+posts `thumbnailUrl` only.
 
 The extension also caches a **catalog index** (card identity fields only — no
 ownership, no pricing) to power arming. At ~10k cards a compact index is a
@@ -564,11 +648,30 @@ else. No reads, no deletes, nowhere near photocard data.
 Extension writes to IndexedDB, exports a file, imported through the admin UI in
 a normally authenticated tab. Zero new surface, one manual step per session.
 
-### Decision
+### Decision — AS BUILT: Option A, no service token
 
-**C first** — it dodges the auth and CORS work entirely while the extension is
-being shaped, and the local buffer it needs is permanent architecture anyway.
-**B for the real build.**
+**Option A is what shipped**, for both the card-index read and the capture
+sync. No service token exists and none is needed.
+
+The earlier plan called for C then B because of an expected CORS fight. That
+analysis was wrong in one specific way: **extension *pages* keep cross-origin
+access via `host_permissions`** — a plain `fetch` with `credentials: 'include'`
+carries the Access cookie and faces no preflight negotiation. Only *content
+scripts* lost that privilege in MV3, and the panel is a page.
+
+So the app still gains **zero auth code**: Cloudflare validates at the edge
+exactly as it does for the SPA.
+
+The one wrinkle is expiry. CF answers an expired cookie with a redirect to
+Google that the request cannot follow, which surfaces as a network failure
+rather than an HTTP status — so a thrown fetch is reported as *"sign-in
+expired — open collectcoreapp.com in a tab"* rather than an outage. Capture
+keeps working throughout; only server calls need the session.
+
+**Option B (service token) stays the answer for unattended sync** — a
+background or scheduled push with no human present to renew a session. Not
+needed while syncing is a button someone presses. Option C (file export)
+survives as the offline path.
 
 ---
 
@@ -992,14 +1095,19 @@ only); automatic sync; any `/pcs/` exposure of price data.
    read off the React fiber. See Mercari US — extraction point verified. Enrich
    is **not** needed for comps, but **is** needed for buy decisions
    (`shippingPayerCode` is null in tiles).
-2. **Does the sold filter return items carrying `status: "sold_out"`?** The
-   field is per-item, so this is expected to work — outstanding only because
-   the sold-filtered sweep has not been sampled yet. Low risk.
-3. **Does loading the admin SPA leave a valid Access cookie for the API host?**
-   Only matters if Option A is chosen over B.
-4. **Weight-class defaults** — the initial set of value-weight classes
-   (regular / special / chase?) and their multipliers. Deferred until real
-   boxes show where equal-split is wrong.
+2. ~~**Does the sold filter return `status: "sold_out"`?**~~
+   **RESOLVED 2026-08-28** — no. A sold-filtered sweep returned 24/24
+   `trading`; `sold_out` was never observed in tiles. `trading` is the
+   sold-state marker, and the default search contains it too.
+3. ~~**Does loading the admin SPA leave a valid Access cookie for the API
+   host?**~~ **RESOLVED 2026-08-29** — yes. Both the card-index read and the
+   capture sync work from the panel on the browser's Access cookie, with no
+   service token. Extension *pages* keep cross-origin access via
+   `host_permissions`; only content scripts lost it in MV3.
+4. **Value-weight classes for Neokyo LOTS** — album slot weights are settled
+   (ID 2 / album 3 / first-run 3 / store POB 4), but lots are a different case:
+   the cards are identified before purchase, so they split by value rather than
+   evenly. Deferred until real boxes show where equal-split is wrong.
 5. **Est. grams per line type** — a small default table (card 5g, album 300g,
    photobook 500g) is enough to start; refine against a real box's actual
    shipping charge.
