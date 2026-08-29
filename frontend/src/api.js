@@ -1523,6 +1523,17 @@ export async function previewCostBasis(eraCutoff) {
   return handleJsonResponse(res, 'Failed to preview cost basis');
 }
 
+// Hand-set one card's basis. Send {} to clear it and fall back to the sweep.
+// Marked source='manual', which the rule sweep preserves.
+export async function setItemBasis(itemId, payload) {
+  const res = await fetch(`${API}/market/cost-basis/item/${itemId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, 'Failed to save cost basis');
+}
+
 export async function assignCostBasis(eraCutoff) {
   const q = eraCutoff ? `?era_cutoff=${encodeURIComponent(eraCutoff)}` : '';
   const res = await fetch(`${API}/market/cost-basis/assign${q}`, { method: 'POST' });

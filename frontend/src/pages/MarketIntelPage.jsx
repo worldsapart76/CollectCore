@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Alert } from "../components/primitives";
 import {
   listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
-  listCostTiers, updateCostTier, previewCostBasis, assignCostBasis,
+  listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
 } from "../api";
 
 // Price comps from the browser-extension captures.
@@ -177,7 +177,15 @@ export default function MarketIntelPage() {
           <div style={{ flex: 1, minWidth: 0 }}>
             {!selected && <div style={{ color: "#666", fontSize: 13 }}>Select a card.</div>}
             {selected && !detail && <div style={{ color: "#666" }}>Loading…</div>}
-            {detail && <CardDetail detail={detail} />}
+            {detail && (
+              <CardDetail
+                detail={detail}
+                onChanged={async () => {
+                  setDetail(await getMarketComps(selected));
+                  setCards((await listMarketComps()).cards || []);
+                }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -357,7 +365,102 @@ function CostBasisPanel({ onError }) {
   );
 }
 
-function CardDetail({ detail }) {
+// What you'd clear on this card, against what it cost.
+//
+// Margin is computed against the SOLD median for the same reason the headline
+// is: active asks are what sellers hope for. Pricing a margin off an ask would
+// flatter every card on the page.
+//
+// The estimate is labelled everywhere it appears. On a blended basis an
+// individual card's margin is noise -- only the aggregate is sound -- so the
+// number must never read as measured.
+function BasisLine({ itemId, basis, soldMedian, onChanged }) {
+  const [busy, setBusy] = useState(false);
+
+  async function edit() {
+    const current = basis ? (basis.cost_cents / 100).toFixed(2) : "";
+    const entered = prompt(
+      "Cost for this card in USD.\n" +
+      "Leave blank to clear it and fall back to the tier sweep.",
+      current
+    );
+    if (entered == null) return;
+    const trimmed = entered.trim();
+    setBusy(true);
+    try {
+      if (trimmed === "") {
+        await setItemBasis(itemId, {});
+      } else {
+        const dollars = Number(trimmed);
+        if (!Number.isFinite(dollars) || dollars < 0) {
+          throw new Error("Amount must be a non-negative number");
+        }
+        await setItemBasis(itemId, { cost_cents: Math.round(dollars * 100) });
+      }
+      await onChanged();
+    } catch (e) {
+      alert(e.message || "Failed to save basis");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const margin =
+    basis && soldMedian != null ? soldMedian - basis.cost_cents : null;
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        padding: "6px 10px", marginBottom: 10, borderRadius: 4,
+        background: "#f7f7f7", fontSize: 13,
+      }}
+    >
+      {basis ? (
+        <>
+          <span>
+            cost <strong>{usd(basis.cost_cents)}</strong>
+            <span style={{ color: "#666" }}>
+              {basis.source === "manual"
+                ? " (set by hand)"
+                : basis.tier_name
+                  ? ` (${basis.tier_name})`
+                  : ""}
+            </span>
+          </span>
+          {margin != null ? (
+            <span style={{ color: margin >= 0 ? "#15803d" : "#b91c1c" }}>
+              margin <strong>{usd(margin)}</strong>
+              <span style={{ color: "#666" }}> vs sold median {usd(soldMedian)}</span>
+            </span>
+          ) : (
+            <span style={{ color: "#666" }}>no sales yet — margin unknown</span>
+          )}
+          {basis.estimated && (
+            <span
+              title="Blended estimate from a cost tier. Sound in aggregate, noisy per card."
+              style={{
+                fontSize: 10, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 3,
+                background: "#fde68a", color: "#78350f",
+              }}
+            >
+              ESTIMATED
+            </span>
+          )}
+        </>
+      ) : (
+        <span style={{ color: "#666" }}>
+          No cost basis — assign the tiers above, or set one here.
+        </span>
+      )}
+      <Button size="sm" disabled={busy} onClick={edit} style={{ marginLeft: "auto" }}>
+        {basis ? "Edit cost" : "Set cost"}
+      </Button>
+    </div>
+  );
+}
+
+function CardDetail({ detail, onChanged }) {
   const series = detail.series || [];
   const activeVals = series.filter((r) => r.listing_state === "active" && r.price_usd != null).map((r) => r.price_usd);
   const soldVals = series.filter((r) => r.listing_state === "sold" && r.price_usd != null).map((r) => r.price_usd);
@@ -368,6 +471,13 @@ function CardDetail({ detail }) {
 
   return (
     <div>
+      <BasisLine
+        itemId={detail.item_id}
+        basis={detail.basis}
+        soldMedian={soldStats?.median ?? null}
+        onChanged={onChanged}
+      />
+
       <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: "10px 12px", marginBottom: 12 }}>
         <Spread label="Sold" stats={soldStats} scaleMax={scaleMax} color="#1f7a4d" />
         <Spread label="Asking" stats={activeStats} scaleMax={scaleMax} color="#6b7280" />

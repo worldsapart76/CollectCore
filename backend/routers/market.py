@@ -449,7 +449,18 @@ def comps_summary(db=Depends(get_db)):
             + " GROUP BY ln.item_id ORDER BY n DESC, ln.item_id"
         )
     ).mappings().all()
-    return {"cards": [dict(r) for r in rows]}
+    basis = {
+        r[0]: (r[1] if r[1] is not None else r[2])
+        for r in db.execute(text(
+            "SELECT c.item_id, c.cost_cents, t.cost_cents FROM mkt_item_cost c "
+            "LEFT JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id"))
+    }
+    cards = []
+    for r in rows:
+        d = dict(r)
+        d["basis_cents"] = basis.get(d["item_id"])
+        cards.append(d)
+    return {"cards": cards}
 
 
 @router.get("/comps/{item_id}")
@@ -517,6 +528,7 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     return {
         "item_id": item_id,
         "currency": "USD",
+        "basis": effective_basis(db, item_id),
         "unconverted": unconverted,
         "active": stats(active),
         "sold": stats(sold),
@@ -738,3 +750,85 @@ def assign_cost_basis(
     db.commit()
     return {"ok": True, "cards_assigned": assigned,
             "manual_rows_preserved": skipped, "era_cutoff": era_cutoff}
+
+
+def effective_basis(db, item_id: int) -> Optional[Dict[str, Any]]:
+    """The card's cost basis, resolved on read.
+
+    Precedence, per the plan:
+        real logged purchase  -> exact      (ledger; not built, hence no branch)
+        cost tier / manual    -> ESTIMATED
+        neither               -> None
+
+    Never denormalized: a tier row carries no amount of its own, so editing the
+    tier reprices every card sitting on it. `estimated` is returned rather than
+    inferred by the caller, because a blended figure must never be presented as
+    a measured one.
+    """
+    row = db.execute(text("""
+        SELECT c.cost_cents, c.source, t.tier_code, t.tier_name, t.cost_cents
+        FROM mkt_item_cost c
+        LEFT JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id
+        WHERE c.item_id = :i
+    """), {"i": item_id}).fetchone()
+    if row is None:
+        return None
+    own_cents, source, tier_code, tier_name, tier_cents = row
+    cents = own_cents if own_cents is not None else tier_cents
+    if cents is None:
+        return None
+    return {
+        "cost_cents": cents,
+        "source": source,
+        "tier_code": tier_code,
+        "tier_name": tier_name,
+        # Everything available today is an estimate. When the ledger lands, a
+        # row backed by a real purchase flips this to False.
+        "estimated": True,
+    }
+
+
+class ItemBasisIn(BaseModel):
+    """Tier XOR amount, matching the table's CHECK. Send neither to clear."""
+    cost_tier_id: Optional[int] = None
+    cost_cents: Optional[int] = None
+
+
+@router.put("/cost-basis/item/{item_id}")
+def set_item_basis(item_id: int, body: ItemBasisIn, db=Depends(get_db)):
+    """Hand-set one card's basis, or clear it.
+
+    Marked `source = 'manual'`, which the rule sweep then leaves alone unless
+    explicitly told otherwise — so a correction made against a real comp is not
+    undone by the next re-assign.
+    """
+    if body.cost_tier_id is not None and body.cost_cents is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Set a tier or an amount, not both — they are mutually exclusive.")
+
+    if body.cost_tier_id is None and body.cost_cents is None:
+        db.execute(text("DELETE FROM mkt_item_cost WHERE item_id = :i"), {"i": item_id})
+        db.commit()
+        return {"ok": True, "cleared": True}
+
+    if body.cost_cents is not None and body.cost_cents < 0:
+        raise HTTPException(status_code=400, detail="cost_cents cannot be negative.")
+    if body.cost_tier_id is not None:
+        exists = db.execute(text(
+            "SELECT 1 FROM mkt_cost_tier WHERE cost_tier_id = :t"),
+            {"t": body.cost_tier_id}).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"No cost tier {body.cost_tier_id}.")
+
+    db.execute(text("""
+        INSERT INTO mkt_item_cost (item_id, cost_tier_id, cost_cents, source, updated_at)
+        VALUES (:i, :t, :c, 'manual', CURRENT_TIMESTAMP)
+        ON CONFLICT(item_id) DO UPDATE SET
+            cost_tier_id = excluded.cost_tier_id,
+            cost_cents   = excluded.cost_cents,
+            source       = 'manual',
+            updated_at   = CURRENT_TIMESTAMP
+    """), {"i": item_id, "t": body.cost_tier_id, "c": body.cost_cents})
+    db.commit()
+    return {"ok": True, "basis": effective_basis(db, item_id)}
