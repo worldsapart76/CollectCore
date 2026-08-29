@@ -128,69 +128,84 @@
   // --- Overlay -------------------------------------------------------------
 
   function decorate(anchor) {
-    if (anchor.querySelector(`:scope > .${DOT_CLASS}`)) return;
-    // Only the id is needed to draw the dot. The item payload is read at click
-    // time instead, which sidesteps a race with the page-world script that
-    // stamps it — the dot can appear before the stamp lands.
+    // The anchor's CURRENT href is the only source of truth for which listing
+    // this tile shows. React recycles these nodes: scrolling or paginating
+    // reuses the same <a> for a different item, changing href and children
+    // while any child we appended survives. Caching the id on the dot meant a
+    // recycled tile reported the previous listing — clicking one card
+    // captured a different one.
     const id = idFromHref(anchor);
     if (!id) return;
 
-    // Anchors are usually statically positioned; the dot needs a containing
-    // block. Only touch it when it would otherwise escape the tile.
-    if (getComputedStyle(anchor).position === 'static') {
-      anchor.style.position = 'relative';
+    let dot = anchor.querySelector(`:scope > .${DOT_CLASS}`);
+    if (!dot) {
+      // Anchors are usually statically positioned; the dot needs a containing
+      // block. Only touch it when it would otherwise escape the tile.
+      if (getComputedStyle(anchor).position === 'static') {
+        anchor.style.position = 'relative';
+      }
+
+      dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = DOT_CLASS;
+      dot.title = 'Capture to CollectCore';
+      dot.addEventListener('click', (e) => onDotClick(e, anchor, dot));
+      anchor.appendChild(dot);
     }
 
-    const dot = document.createElement('button');
-    dot.type = 'button';
-    dot.className = DOT_CLASS;
-    dot.dataset.ccId = id;
-    dot.title = 'Capture to CollectCore';
-    syncDot(dot);
-
-    dot.addEventListener('click', async (e) => {
-      // The dot lives inside the listing anchor — without this, capturing
-      // navigates away from the search results.
-      e.preventDefault();
-      e.stopPropagation();
-
-      const key = keyFor(id);
-      if (captured.has(key)) {
-        await send({ type: 'UNCAPTURE', key });
-        captured.delete(key);
-        syncDot(dot);
-        return;
-      }
-
-      const item = readItem(anchor);
-      if (!item) {
-        dot.classList.add('cc-error');
-        dot.title = 'Could not read this listing';
-        return;
-      }
-
-      const res = await send({
-        type: 'CAPTURE',
-        payload: {
-          item,
-          marketplace: SITE.code,
-          currency: SITE.currency,
-          listingUrl: SITE.urlFor(id),
-          pageUrl: location.href,
-          searchQuery: searchQuery(),
-        },
-      });
-      if (!res) return; // orphaned, or the worker refused it
-      captured.add(key);
-      syncDot(dot);
-    });
-
-    anchor.appendChild(dot);
+    syncDot(anchor, dot);
   }
 
-  function syncDot(dot) {
-    const on = captured.has(keyFor(dot.dataset.ccId));
+  async function onDotClick(e, anchor, dot) {
+    // The dot lives inside the listing anchor — without this, capturing
+    // navigates away from the search results.
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Re-read at click time, never from a value captured when the dot was
+    // created: this anchor may have been recycled since.
+    const id = idFromHref(anchor);
+    if (!id) return;
+    const key = keyFor(id);
+
+    if (captured.has(key)) {
+      await send({ type: 'UNCAPTURE', key });
+      captured.delete(key);
+      syncDot(anchor, dot);
+      return;
+    }
+
+    const item = readItem(anchor);
+    if (!item || item.id !== id) {
+      // The page-world stamp belongs to a different listing than this anchor
+      // now shows, so it has not been re-stamped yet. Refusing beats capturing
+      // the wrong card.
+      dot.classList.add('cc-error');
+      dot.title = 'Could not read this listing — scroll away and back';
+      return;
+    }
+
+    const res = await send({
+      type: 'CAPTURE',
+      payload: {
+        item,
+        marketplace: SITE.code,
+        currency: SITE.currency,
+        listingUrl: SITE.urlFor(id),
+        pageUrl: location.href,
+        searchQuery: searchQuery(),
+      },
+    });
+    if (!res) return; // orphaned, or the worker refused it
+    captured.add(key);
+    syncDot(anchor, dot);
+  }
+
+  function syncDot(anchor, dot) {
+    const id = idFromHref(anchor);
+    const on = id ? captured.has(keyFor(id)) : false;
     dot.classList.toggle('cc-on', on);
+    dot.classList.remove('cc-error');
     dot.textContent = on ? '✓' : '+';
   }
 
@@ -199,7 +214,10 @@
   }
 
   function syncAllDots() {
-    document.querySelectorAll(`.${DOT_CLASS}`).forEach(syncDot);
+    document.querySelectorAll(SITE.tiles).forEach((anchor) => {
+      const dot = anchor.querySelector(`:scope > .${DOT_CLASS}`);
+      if (dot) syncDot(anchor, dot);
+    });
   }
 
   function removeOverlay() {
@@ -219,9 +237,16 @@
     decorateAll();
 
     // Mercari renders results client-side and paginates in place, so tiles
-    // arrive after load and after navigation within the SPA.
+    // arrive after load and after navigation within the SPA. href is watched
+    // too: recycling an anchor onto a different listing may change only that
+    // attribute, and a missed re-sync leaves a dot describing the wrong card.
     observer = new MutationObserver(() => decorateAll());
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['href'],
+    });
 
     document.addEventListener('keydown', onKeydown, true);
   }

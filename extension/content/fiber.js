@@ -33,15 +33,36 @@
     return null;
   }
 
+  function tryParse(json) {
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+
   function stamp() {
     // Dormant unless the content script has switched capture on, so ordinary
     // Mercari browsing does no work at all.
     if (!document.documentElement.classList.contains('cc-active')) return;
 
     for (const anchor of document.querySelectorAll(TILE)) {
-      if (anchor.dataset.ccItem) continue;
+      // A stamp is only valid while the anchor still points at the same
+      // listing. React recycles these nodes, so a surviving stamp can describe
+      // the item this tile used to show — re-stamp instead of skipping.
+      const stampedId = anchor.dataset.ccItem
+        ? tryParse(anchor.dataset.ccItem)?.id
+        : null;
+      const hrefId = (anchor.getAttribute('href') || '').match(/\/item\/(m\d+)/)?.[1];
+      if (stampedId && stampedId === hrefId) continue;
+
       const item = itemFromFiber(anchor);
-      if (!item) continue;
+      if (!item) {
+        // Stale stamp with nothing to replace it: clearing beats leaving a
+        // wrong one in place, which the content script would happily capture.
+        if (stampedId) delete anchor.dataset.ccItem;
+        continue;
+      }
       anchor.dataset.ccItem = JSON.stringify({
         id: item.id,
         name: item.name ?? null,
@@ -56,11 +77,15 @@
     }
   }
 
-  // childList only — stamping writes attributes, and observing those too would
-  // retrigger this observer on its own writes.
+  // href is watched alongside childList so a recycled anchor gets re-stamped
+  // even when only the link changed. data-cc-item is deliberately NOT watched:
+  // stamping writes it, and observing it would retrigger this observer on its
+  // own writes.
   new MutationObserver(stamp).observe(document.body, {
     childList: true,
     subtree: true,
+    attributes: true,
+    attributeFilter: ['href'],
   });
 
   // Re-stamp when capture is switched on, since nothing was stamped while
