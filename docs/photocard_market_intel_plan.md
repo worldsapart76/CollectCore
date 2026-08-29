@@ -219,50 +219,132 @@ deploy could break. **The parser tries fiber first and degrades to scraping the
 tile** (id from the href, plus price, title, sold badge) rather than depending
 on fiber alone.
 
-### Enrich — opt-in, throttled
+### Detail-page capture — supersedes the enrich tier (decided 2026-08-29)
 
-For the handful of listings seriously being considered, the extension queues
-those ids and fetches detail pages in the background using the existing
-session: condition, description, seller, shipping.
+A tile carries only `thumbnail` (photo 1), an empty `description`, and a null
+`shippingPayerCode`. Those live on the listing's own page. The original plan
+reached them with an **enrich** tier: queue ids, fetch detail pages in the
+background on the existing session, paced a few per minute and capped per
+session.
 
-**This is automated fetching** and is paced accordingly — a few per minute,
-jittered, capped per session. Reserved for buy candidates, never run across a
-whole result set. Sweeping pages already being viewed at human pace is a
-different posture from bulk background fetching, and the cap is what keeps that
-distinction real.
+**That tier is superseded and will not be built.** Its entire cost — the queue,
+the background fetcher, the throttle, the jitter, the session handling — existed
+to make *automated fetching* defensible. It disappears if the human opens the
+page, which is already how these listings get looked at: tabs get opened to see
+the photos and read the description regardless of any tool.
 
-**Enrich is on demand from the review queue, never automatic** (decided
-2026-08-28). Capture stores the thumbnail only. Each queue row carries two
-controls:
+So the detail page gets **its own `+` button**, and the throttle is unnecessary
+because nothing is fetched that was not opened by hand. The plan's own test is
+the one being applied:
 
-- **Open listing ↗** — opens `listing_url` in a new tab.
-- **Fetch photos** — runs enrich now and stores the full photo set.
+> Sweeping pages already being viewed at human pace is a different posture from
+> bulk background fetching.
 
-A tile carries only `thumbnail` (photo 1), so a 12-card bundle is identified
-from photos 2-6 on the detail page. **Both controls only work while the listing
-is live** — Mercari photocards can sell within days, and v3's POC recorded
-Neokyo serving 403-plus-redirect for deleted listings. The accepted tradeoff:
-capture stays cheap and fast, and the cost is that a speculative capture left
-sitting too long may become unidentifiable. Working the queue promptly is the
-mitigation, not more capture-time machinery.
+An opened tab is squarely the former.
+
+**The workflow it produces:** open tabs while browsing as usual, `+` the ones
+worth tracking, close, move on. No search-page interaction required at all.
+
+**The tile `+` stays.** It is the fast path for noting many listings without
+opening anything. Two capture surfaces, one pipeline, chosen by what you are
+already doing rather than by a mode switch.
+
+#### Why it costs almost nothing to add
+
+`capture()` in the service worker takes a generic payload and keys on
+`obsKey(marketplace, item.id)` = `${marketplace}:${externalId}`. It does not
+know which surface sent it. A detail-page capture therefore sends **the same
+`CAPTURE` message**, lands in the same review queue, and picks up the armed
+card by the same path — no parallel pipeline.
+
+The dedupe falls out of that key for free. Capturing a tile and later capturing
+that same listing's detail page hits the existing-record branch and appends a
+sighting rather than duplicating. One record either way, with nothing to
+remember or clean up.
+
+#### Three things to get right
+
+- **The ✓ must land before the tab closes.** The write is local and fast, but
+  without visible confirmation the tab gets closed on a capture that may not
+  have registered. Same `+` → `✓` treatment the tiles use.
+- **The merge branch has to absorb the new fields.** Today the existing-record
+  path refreshes only price and status. It must also fill in shipping, photos
+  and description when a detail capture follows a tile capture — otherwise the
+  richer data is silently dropped on precisely the path most likely to hit it.
+- **The fiber walk will differ.** Search tiles expose the item at hop 5 from the
+  result anchor; the detail page is a different component tree, so that path
+  does not transfer. Prefer a **shape-matched search** (an object carrying the
+  URL's item id, plus `name`/`price`/`status`) over a fixed hop count — it
+  survives re-renders on both pages and needs no re-measurement when Mercari
+  reorganises its tree.
+
+#### What it still does not solve
+
+It is a tab per listing. That is fine for buy candidates and for the handful of
+comps worth checking shipping on; it is not viable across a fifty-row sweep. So
+per-listing shipping will always be missing for most of the series, which is why
+the **per-marketplace assumption** below is the baseline and detail capture is
+the override.
 
 ## Sites
 
 Capture happens **where browsing already happens.** A tool that requires
 changing shopping habits to feed it stops getting used.
 
-| Side | Site | States | Parser |
-|---|---|---|---|
-| Buy (JP) | **Neokyo** (proxies Mercari JP + Rakuten Rakuma) | active only | Server-rendered HTML — easy, POC-validated |
-| Sell (US) | **Mercari US** direct | active + sold | SPA — search-response interception |
+**A marketplace is not a side.** The original design paired JP=buy with US=sell,
+which was wrong: Mercari US is also a buying venue — US exclusives are cheaper
+there than through a proxy, ordinary album cards are often reasonable, and a
+cheap 10-card lot can be worth buying for the 6 cards wanted with the other 4
+resold. `lkup_mkt_marketplaces.side` already carries `buy` / `sell` / `both` and
+already has `mercari_us = both`, so nothing in the data model has to change —
+only the assumption that comps flow one direction.
 
-Neokyo is the checkout and consolidation layer, which is why buying happens
-there; capturing there means the saved URL is the one that can actually be
-purchased. Proxies generally surface only purchasable items, so JP-side sold
-comps are unavailable — no real loss, since the buy side is active-only anyway.
+| Site | Currency | Side | States | Parser |
+|---|---|---|---|---|
+| **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
+| **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | Server-rendered HTML — POC-validated, next |
+| **Pocamarket** | KRW | both | tbd | Declared, no parser |
+| **eBay** | USD | both | tbd | Declared, no parser |
 
-Consequence: **only one SPA parser to build.** Yahoo Auctions JP and other
-sources are deferred until the first run says whether this works.
+All four rows exist with currency and side set, so ingest, FX conversion and
+comps accept them today. What each still needs is a **capture parser** — tile
+shape, id, price, URL — which is one unit of work per site. Pocamarket also
+needs a KRW rate on file, exactly as JPY does.
+
+Neokyo remains the checkout and consolidation layer for JP purchases, which is
+why capturing there matters: the saved URL is the one that can actually be
+bought. Proxies surface only purchasable items, so JP-side sold comps do not
+exist — no loss, since that side is active-only anyway.
+
+### The two questions a marketplace answers
+
+The same captures serve both, read from opposite ends:
+
+- **"What will this sell for?"** → the **sold** median, net of fees and
+  shipping. Asking prices are what sellers hope for.
+- **"What will this cost me?"** → the **active asks**, landed. When *you* are
+  the buyer, the ask is the price you pay.
+
+This is why the comp view keeps both panels rather than collapsing to one
+number, and it needed no new capture — only the recognition that the buy-side
+number was already on screen.
+
+### Landed cost, for choosing a source
+
+"Is Mercari US a better deal than Neokyo for this card?" is a sourcing question,
+not a comp question, and it compares **landed** cost in USD:
+
+```
+Mercari US   price + domestic shipping
+Neokyo       price + proxy/service fee + JP domestic shipping
+                   + allocated intl shipping + customs
+Pocamarket   price + proxy/shipping
+```
+
+It is the arbitrage comparison the module was built for, pointed at your own
+buying rather than at resale. It needs no capture beyond what the parsers
+already give, but it does need the per-line allocation the ledger provides —
+consolidated shipping and customs only become per-card numbers after allocation.
 
 ## Dormant by default
 
@@ -766,6 +848,76 @@ Non-card lines (album, magazine, merch) take the same outcomes — they can be
 resold, kept, or absorbed. Allocating a share away from the cards without
 giving it somewhere to land just leaks it.
 
+## Gross is not net — fees, shipping, and the offer gap
+
+Every figure the comp view shows today is **gross**. A sold median of $13.00
+against a $2.50 basis reads as $10.50 of margin, and it is not: Mercari's cut
+and the shipping you absorb come out of it first. That is a decision-grade
+error, not a rounding one, and it is live right now.
+
+Three separate deductions, routinely conflated:
+
+| | What it is | Where it lands |
+|---|---|---|
+| **Marketplace fee** | the platform's cut of a sale | sell side |
+| **Shipping** | whoever pays it, buyer or seller | either side |
+| **The offer gap** | buyers expect to negotiate down from the ask | sell side, *before* listing |
+
+### The offer gap is already visible in the data
+
+Sold prices come back as odd amounts — `407`, `425`, `567`, `769`, `1045`,
+`1867`. That is accepted offers and automatic price drops, which means the
+**sold median is already net of negotiation**: it is what buyers actually paid,
+not what sellers asked.
+
+The consequence runs the other way, and it is the number that is missing: to
+*clear* $5 you must **list above** $5, because the offer arrives against the
+ask. Nothing in the module currently produces that figure.
+
+```
+target net
+  + marketplace fee
+  + shipping absorbed
+  + expected offer discount
+  = the price to actually list at
+```
+
+That is the number typed into Mercari, and it is what "price this card" should
+mean.
+
+### Per-marketplace assumptions are the baseline
+
+Detail capture yields a real `shippingPayerCode` — but only for listings opened
+by hand, which will never be most of a comp series. A per-listing field is
+therefore the wrong *primary* mechanism.
+
+Instead each marketplace carries editable defaults — fee percentage, fixed fee,
+typical shipping absorbed, expected offer discount — applied to every comp to
+produce a **net** figure. A detail capture overrides the assumption for that
+listing; the assumption covers everything else.
+
+Cruder than per-listing truth, and strictly better than the alternative, which
+is a gross number silently presented as profit. The assumption is **visible and
+editable**, so it can be corrected as real sales accumulate rather than being
+buried in code.
+
+### The buy side needs the same treatment
+
+The ledger objects already carry the inputs — Box holds international shipping,
+consolidation/repack fee, insurance and customs plus the FX snapshot; Purchase
+holds item price and per-item proxy fees. Two gaps against real Neokyo use:
+
+- **JP domestic shipping** is not in the field list. Usually included in the
+  listing, so low priority, but it exists.
+- **Customs/duties need a value-based allocation driver.** They scale with
+  declared value, so they cannot split by weight or evenly the way parcel
+  shipping does. The allocation model already supports value-driven drivers;
+  duties simply have to use one.
+
+**Landed cost is the buy-side mirror of net proceeds.** Neither side means
+anything without its deductions, and the two together are what make
+"is Mercari US a better deal than Neokyo" answerable.
+
 ## Album purchases — the other acquisition path
 
 Most cards do not arrive as a Neokyo purchase. They come out of albums bought
@@ -960,6 +1112,59 @@ neither                                              → unknown
 Mirrors how effective price already works in `tbl_photocard_pricing`: derived on
 read, never denormalized. **Estimated is labelled**, so a blended figure is never
 mistaken for a measured one.
+
+### Per COPY for real costs, per CARD for estimates
+
+`mkt_item_cost` as built is keyed on **`item_id`**, so every copy of a card
+shares one basis. That is right for an estimate — a blended tier has no
+copy-level information to offer — and **wrong for real purchases.** Own two
+copies of the same card, one from the backlog at an estimated $3.00 and one
+bought later for $8.00, and both would report $3.00.
+
+The ledger fixes it by resolving at the copy:
+
+```
+copy has a ledger-linked purchase cost?  -> use it     (per copy, exact)
+otherwise                                -> item tier  (per card, ESTIMATED)
+```
+
+`tbl_photocard_copies.copy_id` already exists, so copies are individually
+addressable; no restructuring is needed, only a `copy_id` on the purchase line.
+
+**Which copy sold?** You will not know which physical card went in the envelope,
+so: **specific-identification when a sale is linked to a copy, FIFO within the
+card otherwise**, ordered by `COALESCE(purchase_date, copy.created_at)`.
+`created_at` is already populated and genuinely spread (35 distinct dates across
+Mar-Aug 2026), so no new field is required.
+
+FIFO's usual weakness does not bite here. Ordering only matters when copies
+carry *different* bases, and every backlog copy shares the same tier estimate —
+so among them the order is a no-op whichever way it resolves. It starts
+mattering exactly when real purchases begin, and those carry real dates.
+
+### The tier is transitional for purchases, permanent for trades
+
+The estimate exists because cards acquired before tracking started have no
+receipts. As purchases get logged, its share shrinks and real costs take over.
+
+It does **not** disappear, though: cards acquired **by trade** have no cash cost
+at all — a card accepted to re-trade later, given in exchange for something a
+friend needed. Those keep using the tier indefinitely.
+
+A more accurate option exists if it ever matters: a traded-for card really costs
+**the basis of the card given up**, so a logged trade could carry basis across.
+The Trades module already exists, so the hook is there. Not worth building until
+the estimate visibly bothers you.
+
+### Your own purchases are sales data
+
+A card bought on Mercari US is a **real transaction at a real price** — better
+evidence than a scraped sold listing, because it is confirmed rather than
+inferred. Purchases therefore feed the sold series.
+
+**Dedupe on `(marketplace, external_id)`.** A purchase and a capture of that same
+listing are one event, and counting both would inflate the series with your own
+buying.
 
 ### Blended on purpose, and what that costs
 
@@ -1220,6 +1425,12 @@ No backup changes needed.
 
 ### Next
 
+- **Detail-page capture** (Mercari US). Replaces the enrich tier — same `+`,
+  same pipeline, new surface. Unlocks `shippingPayerCode`, full photos and
+  description, and matches how listings already get browsed.
+- **Net, not gross.** Per-marketplace fee/shipping/offer-discount assumptions,
+  applied to comps, plus the "list at X to net Y" figure. The comp view is
+  currently gross and reads as more profit than it is.
 - **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
   read — plain DOM parsing, more brittle but simpler. Brings the Japanese
   lexicon into play and is the first live exercise of the JPY path.
@@ -1231,8 +1442,13 @@ No backup changes needed.
 
 ### Not planned for v1
 
-Comp charting beyond the quartile bands; Pocamarket and eBay parsers (declared
-only); automatic sync; any `/pcs/` exposure of price data.
+Comp charting beyond the quartile bands; automatic sync; any `/pcs/` exposure of
+price data.
+
+**Pocamarket and eBay parsers** moved out of this list 2026-08-29 — both are
+places purchases actually happen, so they are queued behind Neokyo rather than
+deferred indefinitely. The **enrich tier** left this document entirely: it is
+superseded by detail-page capture, not deferred.
 
 ## Open Questions
 
@@ -1293,6 +1509,34 @@ only); automatic sync; any `/pcs/` exposure of price data.
 - **2026-08-28** — No multi-week measurement program. Sell-through and
   days-to-sell accrue as a byproduct of `date_listed` / `date_sold` once the
   ledger is in use.
+- **2026-08-29** — **Detail-page capture supersedes the enrich tier.** The
+  queue, background fetcher, throttle and session handling existed only to make
+  automated fetching defensible; a human-opened tab needs none of it. Same `+`,
+  same `CAPTURE` message, same queue, and the `marketplace:externalId` key
+  dedupes a tile capture against a later detail capture for free. A net
+  reduction in scope.
+- **2026-08-29** — **A marketplace is not a side.** Mercari US is a buying venue
+  too (US exclusives, cheap album cards, lots bought for the wanted subset and
+  the rest resold). `lkup_mkt_marketplaces.side` already said `both`; only the
+  one-directional assumption had to go. Sold median answers "what will it sell
+  for", active asks answer "what will it cost me" — same captures, opposite ends.
+- **2026-08-29** — **Your own purchases are sales data**, deduped on
+  `(marketplace, external_id)`. A confirmed transaction beats an inferred one.
+- **2026-08-29** — **Real cost resolves per COPY, estimates per CARD.**
+  `mkt_item_cost` keyed on `item_id` is correct for a blended tier and wrong for
+  purchases: two copies bought at different prices must not report the same P&L.
+  Sale consumes basis by specific-ID where a copy is linked, else **FIFO** on
+  `COALESCE(purchase_date, copy.created_at)` — already populated, no new field.
+- **2026-08-29** — **The cost tier is transitional for purchases but permanent
+  for trades.** Trade-acquired cards have no cash cost ever, so the estimate
+  keeps a role after purchase tracking matures. Basis carry-over from the card
+  given up is the more accurate option, deferred.
+- **2026-08-29** — **Comps must be shown NET.** Fees, absorbed shipping and the
+  offer gap are three separate deductions and the view currently applies none of
+  them. Per-marketplace editable assumptions are the baseline because detail
+  capture can only ever cover listings opened by hand; a real
+  `shippingPayerCode` overrides for that listing. Also missing and needed: the
+  inverse, "to net $X, list at $Y".
 - **2026-08-29** — **Cost basis is scoped to the sale pile**
   (`trade`/`pending_outgoing`), not the catalog. Only 1,664 of 11,323 catalogued
   cards are actually held, so a catalog-wide basis would be a large confident
