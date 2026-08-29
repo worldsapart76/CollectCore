@@ -81,7 +81,17 @@
   // even when only the link changed. data-cc-item is deliberately NOT watched:
   // stamping writes it, and observing it would retrigger this observer on its
   // own writes.
-  new MutationObserver(stamp).observe(document.body, {
+  let pending = false;
+  function scheduleStamp() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      stamp();
+    });
+  }
+
+  new MutationObserver(scheduleStamp).observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
@@ -90,7 +100,7 @@
 
   // Re-stamp when capture is switched on, since nothing was stamped while
   // dormant.
-  new MutationObserver(stamp).observe(document.documentElement, {
+  new MutationObserver(scheduleStamp).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['class'],
   });

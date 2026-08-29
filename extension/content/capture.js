@@ -204,13 +204,33 @@
   function syncDot(anchor, dot) {
     const id = idFromHref(anchor);
     const on = id ? captured.has(keyFor(id)) : false;
-    dot.classList.toggle('cc-on', on);
-    dot.classList.remove('cc-error');
-    dot.textContent = on ? '✓' : '+';
+    const label = on ? '✓' : '+';
+
+    // Every write here must be conditional. Assigning textContent replaces the
+    // text node even when the value is unchanged, and that is a childList
+    // mutation the observer picks up — which called this again, forever, and
+    // hung the page.
+    if (dot.textContent !== label) dot.textContent = label;
+    if (dot.classList.contains('cc-on') !== on) {
+      dot.classList.toggle('cc-on', on);
+    }
+    if (dot.classList.contains('cc-error')) {
+      dot.classList.remove('cc-error');
+    }
   }
 
   function decorateAll() {
     document.querySelectorAll(SITE.tiles).forEach(decorate);
+  }
+
+  let decoratePending = false;
+  function scheduleDecorate() {
+    if (decoratePending) return;
+    decoratePending = true;
+    requestAnimationFrame(() => {
+      decoratePending = false;
+      decorateAll();
+    });
   }
 
   function syncAllDots() {
@@ -240,7 +260,7 @@
     // arrive after load and after navigation within the SPA. href is watched
     // too: recycling an anchor onto a different listing may change only that
     // attribute, and a missed re-sync leaves a dot describing the wrong card.
-    observer = new MutationObserver(() => decorateAll());
+    observer = new MutationObserver(scheduleDecorate);
     observer.observe(document.body, {
       childList: true,
       subtree: true,
