@@ -36,6 +36,11 @@ const PROXY_PATHS = [
   // '/binder-designer', not '/binders' — a shared prefix would make the SPA
   // page and the list endpoint two GETs on one path, indistinguishable here.
   '/binders',
+  // Market intel API. The SPA route is deliberately '/market-intel', not
+  // '/market' — same trap as '/binders' above: this proxy matches on prefix,
+  // so a shared one would make the page load and the comps endpoint
+  // indistinguishable.
+  '/market',
 ]
 
 // Frontend sub-paths that share a prefix with backend routes.

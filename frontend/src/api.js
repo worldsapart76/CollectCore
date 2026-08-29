@@ -1456,3 +1456,42 @@ export async function fetchTradeOwnership(catalogItemIds) {
   return handleJsonResponse(res, "Failed to fetch ownership map");
 }
 
+
+// ---------- Market intel (capture extension comps) ----------
+//
+// Admin only. Reads the listing captures pushed up by the browser extension.
+// Design: docs/photocard_market_intel_plan.md.
+
+export async function listMarketComps() {
+  const res = await fetch(`${API}/market/comps`);
+  return handleJsonResponse(res, 'Failed to load comps');
+}
+
+export async function getMarketComps(itemId) {
+  const res = await fetch(`${API}/market/comps/${itemId}`);
+  return handleJsonResponse(res, 'Failed to load comps for card');
+}
+
+export async function listMarketplaces() {
+  const res = await fetch(`${API}/market/marketplaces`);
+  return handleJsonResponse(res, 'Failed to load marketplaces');
+}
+
+export async function listFxRates() {
+  const res = await fetch(`${API}/market/fx`);
+  return handleJsonResponse(res, 'Failed to load FX rates');
+}
+
+export async function setFxRate(payload) {
+  const res = await fetch(`${API}/market/fx`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, 'Failed to save rate');
+}
+
+export async function backfillFxUsd() {
+  const res = await fetch(`${API}/market/fx/backfill`, { method: 'POST' });
+  return handleJsonResponse(res, 'Failed to backfill USD');
+}

@@ -33,6 +33,7 @@ const TradePage = lazy(() => import("./pages/TradePage"));
 // open, and only admin builds link to it at all.
 // See docs/photocard_binder_designer_plan.md.
 const BinderDesignerPage = lazy(() => import("./pages/BinderDesignerPage"));
+const MarketIntelPage = lazy(() => import("./pages/MarketIntelPage"));
 
 // Guest debug page is dev-only. The `import.meta.env.DEV ? ... : null`
 // constant-folds at build time, so in a production bundle Rollup eliminates
@@ -119,6 +120,17 @@ function AppRoot() {
           element={
             <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
               <BinderDesignerPage />
+            </Suspense>
+          }
+        />
+        {/* Market intel — comps from the capture extension (admin only).
+            Route is '/market-intel', not '/market': the latter is the API
+            prefix and Vite's dev proxy matches on prefix. */}
+        <Route
+          path="/market-intel"
+          element={
+            <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+              <MarketIntelPage />
             </Suspense>
           }
         />
