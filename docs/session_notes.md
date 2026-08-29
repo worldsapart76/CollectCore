@@ -6,6 +6,62 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-29 (US CDT) — Origin ship dates + cost basis BUILT + DEPLOYED (`fd551e3`)
+
+Same day as the capture/comps entry below, second working block. Turns the comp
+view from "what does this sell for" into "what would I make on it". Plan doc
+updated in the same pass.
+
+- **Dates are an origin fact, not a card fact.** `start_date` +
+  `date_precision` on `lkup_photocard_source_origins` — **88 origin rows date
+  all 11,323 catalogued cards**, and no card has a null origin, so this was an
+  evening rather than a data-entry project. 87/88 seeded (only `Merch`, which
+  has no cards). Sourced from two fan-maintained spreadsheets reconciled
+  against the 2026-08-28 prod backup, plus 8 dates supplied directly for the
+  2025-26 tail the sheets do not reach. `sort_order` on that table turned out
+  to be `0` on every row and read by nothing.
+- **Lookup ids are NOT stable across databases — this nearly shipped a silent
+  bug.** In the dev copy id 77 was `This & That`; in prod id 77 is
+  `Season's Greetings 2025 (Japan) Your Hero`. Seeding on id alone would have
+  written an album date onto a Season's Greetings row with nothing to notice it
+  by. Names drift independently too (~15 origins renamed in prod:
+  `Nacific` → `Collab: Nacific`), so name-only matching skips rows instead.
+  The seed matches on **(id AND name) together**, writes **NULLs only** so a
+  hand correction survives restarts, and logs any mismatch rather than
+  guessing. Verified both directions: 87 seeded on a prod copy, 56 seeded and
+  15 refused-with-reasons on dev.
+- **Cost basis is scoped to the sale pile**, `trade`/`pending_outgoing`. The
+  catalog is 11,323 cards but only **1,664 copies are actually held** — the
+  rest are `undecided` reference rows. A catalog-wide basis would have been a
+  large confident number about cards that were never owned. Real pile: **453
+  copies over 243 cards, $1,342.50, $2.96/copy**, ~77% tier 3 (expected — that
+  is where the buying and trading have been).
+- **`mkt_cost_tier` + `mkt_item_cost`**, mirroring `tbl_photocard_pricing`'s
+  tier-XOR-custom CHECK: derived on read, never denormalized, so editing a tier
+  reprices every card on it with no backfill (verified $1,342.50 → $1,517.00 on
+  a $3.00→$3.50 change). `mkt_` prefix rather than `tbl_photocard_*` keeps cost
+  out of the catalog/guest sweeps; nothing reaches `/pcs/`.
+- **`\bID\b` is a registered SQLite function, not `LIKE`.** SQLite has no
+  word-boundary operator, and `version LIKE '%ID%'` matches 1,758 cards of
+  which only **288** are ID cards — the other 1,470 are Polaroids, so the
+  shortcut sweeps expensive cards into the cheapest tier. Preview is always on
+  screen; only the assign button writes.
+- **Fixed a latent ordering bug the change would have hit.**
+  `_run_migrations` runs *before* the schema's `CREATE TABLE`s, so any seed
+  guarded on a table existing silently skipped on the first boot that created
+  it and only ran on the second restart. Both seeds now run post-schema;
+  verified on a fresh DB and a prod copy.
+- **Corrected my own overstatement:** these columns reach the catalog delta and
+  guest seed, but **not `/pcs/`**, whose origins endpoint uses an explicit
+  column list against the live DB and never reads a seed. Only the retired WASM
+  `/guest/` tier would care, and nobody is on it. Confirmed by test that an old
+  guest seed + new delta fails on the unknown column — moot, but now known.
+
+**Next:** per-card basis override UI (the table stores `source='manual'` and
+the sweep preserves it; only the editing surface is missing), then Neokyo
+capture (buy side, first real exercise of the JPY path), thumbnail upload to
+R2, and the ledger.
+
 ### 2026-08-29 (US CDT) — Market intel capture + comps BUILT + DEPLOYED + LIVE
 
 Continues the 2026-08-28 design session below. Slices 1-5 of

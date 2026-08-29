@@ -39,6 +39,17 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
   `pending_*`). `not_wanted` + `trade` is legal on purpose. Bulk ownership
   sweeps must stay **row-scoped to the decision row** — a card-scoped
   `WHERE item_id = ...` flattens trade stacks. See the triage plan doc.
+- **Lookup row ids are NOT stable between dev and prod, and names drift too** —
+  dev id 77 was `This & That` while prod id 77 is `Season's Greetings 2025
+  (Japan) Your Hero`, and prod has renamed ~15 origins dev still holds under old
+  labels. Seed or migrate lookup data on **(id AND name) together**, write NULLs
+  only, and log mismatches instead of guessing. `backend/seed_origin_dates.py`
+  is the worked example.
+- Photocard **ship dates live on the origin, never the card** —
+  `lkup_photocard_source_origins.start_date` + `date_precision`. 88 origin rows
+  date all 11,323 cards. `start_date` means *when the line started shipping*
+  (tours and collab series span months), not a release date. Age is a **prior
+  where comps are thin, never an override of a real comp**.
 - **Nothing new goes on `tbl_photocard_details`** without checking the guest
   paths: `catalog.py` (`SELECT *`) and `seed_builder.py` (PRAGMA-driven copy)
   reflect that table, so a new column ships to the catalog delta and the guest

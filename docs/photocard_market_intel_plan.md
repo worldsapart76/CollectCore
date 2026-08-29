@@ -835,11 +835,119 @@ the friction that kills the habit.
 each; selling one at $5 is a real $3 gain. And dupes that never sell still
 consumed cost.
 
-## Cost basis for the backlog
+## Origin ship dates — AS BUILT 2026-08-29
+
+Older cards are worth more, sometimes a great deal more. Age does not *cause*
+that — scarcity does, and age is a proxy for it (smaller fandom at release →
+smaller print run → fewer surviving copies). The correlation is real but noisy:
+`I am NOT` and `SKZ2020` are both old with very different scarcity, while a
+current-era Chinese-store POB outprices both. So a date is a **prior where comps
+are thin, never an override of an actual comp** — the same role, and the same
+limits, as a cost tier.
+
+### It is an origin fact, not a card fact
+
+`start_date` and `date_precision` live on `lkup_photocard_source_origins`.
+**88 origin rows date all 11,323 catalogued cards**, and no card has a null
+origin, so this is an evening's work rather than a data-entry project. A new
+origin costs one field at creation and never becomes a backlog again.
+
+This placement is also what keeps it out of trouble: nothing new goes on
+`tbl_photocard_details` without checking the guest paths, and the origin lookup
+is both the correct normalization and the safe side of that rule.
+
+### `start_date` means when the line STARTED SHIPPING
+
+Not a release date. Look at what is actually in the list — `Fan Club Gen 2`,
+`Maniac World Tour`, `Dicon`, `SHIBUYA109`. Those are not point events; they run
+for weeks or months. The date is the **opening of the window**, and
+`date_precision` says how much of it to trust:
+
+| value | meaning | stored as |
+|---|---|---|
+| `day` | exact known date | the date |
+| `month` | known to the month | the 1st |
+| `year` | approximate, year only | Jan 1 |
+
+Both columns are nullable. A dateless origin is legal and means *unknown*.
+
+### Coverage
+
+**87 of 88 origins = 11,323 of 11,323 cards.** The only undated origin is
+`Merch`, which has no cards. Sources were two fan-maintained spreadsheets (an
+album release list and a photocard event timeline) reconciled against the prod
+backup of 2026-08-28, plus eight dates supplied directly for the 2025–26 tail
+the sheets do not reach.
+
+Two judgement calls, both the user's: **Nacific** is a 22-round collab series
+running Sep 2021 – Nov 2023 and takes the earliest date (its cards are tier 1
+anyway, so the loss does not propagate); **Dominate** spans many drops and takes
+the earliest, the Aug 2024 dominATE SEOUL pop-up.
+
+### The seeding rule, and why it is not negotiable
+
+`backend/seed_origin_dates.py` + `_seed_origin_start_dates()` match on
+**(id AND name) together**, and write **only where `start_date IS NULL`**.
+
+Both halves are load-bearing, and this is the part worth remembering:
+
+- **Lookup row ids are NOT stable across databases.** In the 2026-08 dev copy,
+  id 77 was `This & That`; in prod, id 77 is `Season's Greetings 2025 (Japan)
+  Your Hero`. Seeding on id alone would have silently written an album date onto
+  a Season's Greetings row, with nothing to notice it by.
+- **Names drift too.** Prod had since renamed ~15 origins that dev still held
+  under the old label (`Nacific` → `Collab: Nacific`, `Fan Club Gen 4` →
+  `Fan Club Gen 4 STAY HIDEOUT`), so name-only matching would have skipped them.
+- **NULL-only** means a date corrected by hand in the admin UI survives every
+  later restart.
+
+A row whose id and name disagree is **skipped and logged**, never guessed at.
+Verified both ways before shipping: 87 seeded against a prod backup; 56 seeded
+and 15 refused-with-reasons against dev.
+
+One accepted wart: clearing a date in the UI lets the seed refill it on the next
+restart, because `NULL` means "unknown" and the seed knows it. Correct a date by
+setting it, not by blanking it.
+
+### Editing, and where the columns travel
+
+Editing rides the generic lookup admin — the two columns are registry
+`secondary_cols`, so list, patch and UI came for free. Secondary columns now get
+light validation, because a malformed date would be stored silently and then
+skew every era comparison that read it.
+
+`catalog.py` `SELECT *`s this table and `seed_builder` copies it PRAGMA-driven,
+so both columns **do** reach the catalog delta and the guest seed. That is
+intended and benign — a ship date is public fact, unlike pricing — and it does
+not touch `/pcs/`, whose origins endpoint uses an explicit column list against
+the live DB and never reads a seed. The only consumer that would care is the
+retired WASM `/guest/` tier, which is nobody.
+
+## Cost basis for the backlog — AS BUILT 2026-08-29
 
 Cards already in the collection have no receipts — albums bought months ago,
 opened, sorted into keeps and trades. They still need *something*, or every sale
 from the existing pile reads as pure profit.
+
+### Scope: the sale pile, not the catalog
+
+Basis is assigned only to copies held for **`trade` / `pending_outgoing`**
+(`SALE_STATUSES` in `market.py`). A card that was never owned has no basis to
+speak of, and a card being kept is a collecting cost rather than a trading one.
+
+This is not a detail. The catalog is **11,323 cards but only 1,664 copies are
+actually held** — the rest are `undecided` reference rows for cards that exist.
+A catalog-wide assignment would have produced a large, confident, meaningless
+number. Measured on the real pile instead: **453 copies over 243 distinct cards,
+$1,342.50 estimated, $2.96/copy.**
+
+`SALE_STATUSES` is a named constant because the monthly-flow metric below
+eventually wants `owned` too — its *out* side is the cost of cards moved to KEEP
+in a month, which cannot be computed while the scope stops at the sale pile.
+Widening it is a deliberate call, not an accident.
+
+The distribution runs ~77% tier 3, which is expected rather than a flaw in the
+rules: current-era cards are where the buying and trading have been focused.
 
 ### Precedence, derived on read
 
@@ -875,8 +983,8 @@ ranking is the same shape.
 | Tier | Contents | Selector |
 |---|---|---|
 | 1 | ID cards, common non-album | `\bID\b`, hand-adjusted |
-| 2 | Older-era album cards | era via `source_origin` |
-| 3 | Current-era album + first-run, older-era first-run | era + not special |
+| 2 | Older-era album cards | `start_date <= 2020-12-31` |
+| 3 | Current-era album + first-run, older-era first-run | `start_date >= 2021-01-01` |
 | 4 | **Store POBs** | `is_special = 1` |
 
 **"POB" is a misnomer covering two different things**, and the distinction is
@@ -896,6 +1004,18 @@ implies POB), while the flag encodes the judgement directly.
 > cards. The other 1,470 are Polaroids — `Polaroid POB`, `Polaroid SKZOO POB`,
 > `Seoul Polaroid POB` — i.e. it sweeps expensive cards into the cheapest tier.
 > Word boundaries, and a preview count before committing.
+
+As built, `ID` is a **registered SQLite function** (`cc_is_id_version`)
+rather than a `LIKE` pattern, because SQLite has no word-boundary operator and
+the approximation is exactly the trap above. The era boundary is a request
+parameter, not a constant, so it can be slid and re-previewed: at `2019-12-31`
+tier 2 holds 13 copies, at `2020-12-31` 15, at `2022-12-31` 96.
+
+**The preview is always on screen and only the assign button writes.** A bad
+rule's damage is invisible once written — a wrong assignment looks exactly like
+a right one — so the dry run is a safety property, not decoration. Assignment
+writes one row per *item*, not per copy, and leaves `source = 'manual'` rows
+alone unless `overwrite_manual` is passed.
 
 ### The tier is a floor, not an answer
 
@@ -1008,6 +1128,23 @@ sample.
 SPA route is **`/market-intel`**, never `/market` — that is the API prefix and
 Vite's dev proxy matches on prefix. Same trap as `/binders`.
 
+### Cost tables — as built
+
+`mkt_cost_tier` (tier_code, tier_name, cost_cents, sort_order) and
+`mkt_item_cost` (item_id PK, cost_tier_id, cost_cents, source, updated_at).
+
+The `CHECK ((cost_tier_id IS NULL) <> (cost_cents IS NULL))` mirrors
+`tbl_photocard_pricing` exactly: **tier XOR explicit amount**, effective figure
+derived on read and never denormalized, so editing a tier reprices every card
+sitting on it with no backfill. `source` is `rule` or `manual`.
+
+The `mkt_` prefix rather than `tbl_photocard_*` is deliberate — cost is an
+admin-only fact and the prefix keeps it out of the catalog and guest paths that
+sweep `tbl_photocard_*`. Nothing here reaches `/pcs/`.
+
+Endpoints: `GET /market/cost-tiers`, `PUT /market/cost-tiers/{id}`,
+`GET /market/cost-basis/preview`, `POST /market/cost-basis/assign`.
+
 ### Ledger tables
 
 `mkt_box`, `mkt_purchase`, `mkt_purchase_line`, `mkt_sale`, `mkt_shortlist` are
@@ -1071,9 +1208,16 @@ No backup changes needed.
 4. **Ingest + comps** — idempotent, sole-line rule enforced, multi-currency.
 5. **Comp view** at `/market-intel` — sold-median headline, quartile bands,
    auditable series with thumbnails, excluded lots.
+6. **Origin ship dates** — 87/88 origins, 100% of catalogued cards, editable
+   through the generic lookup admin.
+7. **Cost tiers** — `mkt_cost_tier` + `mkt_item_cost`, scoped to the sale pile,
+   preview-before-assign.
 
 ### Next
 
+- **Per-card basis override UI.** The table stores `source = 'manual'` and the
+  assign sweep already preserves it; only the editing surface is missing. Small,
+  and it is what lets a comp displace a tier card by card.
 - **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
   read — plain DOM parsing, more brittle but simpler. Brings the Japanese
   lexicon into play and is the first live exercise of the JPY path.
@@ -1147,6 +1291,24 @@ only); automatic sync; any `/pcs/` exposure of price data.
 - **2026-08-28** — No multi-week measurement program. Sell-through and
   days-to-sell accrue as a byproduct of `date_listed` / `date_sold` once the
   ledger is in use.
+- **2026-08-29** — **Cost basis is scoped to the sale pile**
+  (`trade`/`pending_outgoing`), not the catalog. Only 1,664 of 11,323 catalogued
+  cards are actually held, so a catalog-wide basis would be a large confident
+  number about cards that were never owned. Kept cards are a collecting cost,
+  not a trading one. Consequence to revisit: the monthly-flow metric's *out*
+  side needs `owned` too, so `SALE_STATUSES` is a constant rather than inlined.
+- **2026-08-29** — **Era boundary is 2020-12-31**: 2020 and earlier is older,
+  2021 forward is current. It is a request parameter, not a constant, so it can
+  be slid and re-previewed. Small lever in practice — it moves 15 copies at the
+  chosen cutoff.
+- **2026-08-29** — **Origin ship dates are seeded on (id AND name), NULLs only.**
+  Lookup ids are not stable across databases and names drift independently, so
+  neither key alone is safe: dev id 77 was `This & That` where prod id 77 is
+  `Season's Greetings 2025 (Japan) Your Hero`. Mismatches are logged and skipped,
+  never guessed at.
+- **2026-08-29** — **Age is a prior, not an answer.** Age proxies scarcity but
+  noisily, so a ship date may fill a gap where comps are thin and must never
+  override an actual comp — the same rule already applied to cost tiers.
 - **2026-08-29** — **Album purchases are lots.** The shell is a line with
   outcome `kept`, taking an explicit per-config amount, so card P&L excludes it
   because that is what `kept` means — no separate "residual" concept. Slot
