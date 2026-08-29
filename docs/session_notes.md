@@ -6,6 +6,65 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-29 (US CDT) — Market intel capture + comps BUILT + DEPLOYED + LIVE
+
+Continues the 2026-08-28 design session below. Slices 1-5 of
+`docs/photocard_market_intel_plan.md` (authoritative, reconciled against what
+shipped): a Chrome extension that captures Mercari listings while browsing,
+ingest, and a comp view at `/market-intel`. Admin only, `mkt_*` namespace, no
+photocard/catalog/`/pcs/` behaviour changes.
+
+- **Capture reads the React fiber, from the page world.** Mercari hands each
+  result tile a full item object (`memoizedProps.item`, hop 5). Content scripts
+  run in an **isolated world** and cannot see React's `__reactFiber$` expandos,
+  so the walk lives in `content/fiber.js` under `"world": "MAIN"` and hands
+  results over as a `data-cc-item` attribute — attributes cross the boundary,
+  JS properties do not. Moving that walk back into `capture.js` silently
+  degrades to DOM scraping, which is exactly what happened once.
+- **`trading` is the sold marker**, not `sold_out` — a sold-filtered sweep
+  returned 24/24 `trading`. The **default search also contains sold rows**, so
+  state must come from the item's `status` field and never from which filter
+  was running.
+- **Sole-line rule.** A card's price series counts only listings where it is
+  the only line; a 12-card bundle at $27 is not that card selling for $27.
+  Verified against a card appearing in both singles and a lot.
+- **Comp view leads with the SOLD median.** Real data made the case: one card,
+  n=43, asks **$20.00-$47.00** against sales **$5.00-$26.60**. Ranges barely
+  overlap — browsing active listings would price it at ~2x what it clears at.
+  Quartile bands rather than min/max (meaningless at 5x spread), and the series
+  renders with thumbnails so a mis-association is findable by eye.
+- **Card index pulls live from prod and self-refreshes** (>12h old, on panel
+  open). A hand-exported copy was rejected as a correctness problem, not a
+  convenience one: a card catalogued since the last export fails to match and
+  gets pushed down the create-the-card path, inviting a duplicate.
+- **Multi-source + currency.** Four sources declared (`mercari_us`, `neokyo`,
+  `pocamarket`, `ebay`); only Mercari US has a parser. Native amount is the
+  record, USD derived and labelled with its rate and source. Rates are dated
+  history, never one mutable value.
+
+**Four bugs worth remembering, all found by use rather than review:**
+- `sidePanel.open()` needs a live user gesture, and the worker being woken by
+  the click ends it. Chrome opens the panel natively via `setPanelBehavior`
+  instead; the extension never calls `open()`.
+- Reloading the extension **orphans content scripts in open tabs** — injected
+  DOM survives, messaging is dead. Now shows a red bar saying to refresh.
+- **React recycles result tiles.** The dot cached its listing id at creation, so
+  a recycled anchor captured the wrong card. The anchor's live href is now the
+  only source of truth.
+- `dot.textContent = x` replaces the text node even when unchanged → childList
+  mutation → observer → hang. All observer-path writes are now conditional and
+  coalesced through rAF.
+
+**Known gap:** the extension stores thumbnail blobs locally as designed, but
+sync sends only `thumbnailUrl`, so server-side thumbnails hotlink Mercari's CDN
+and **will rot when listings close**. The bytes exist in the browser; nothing
+ships them yet.
+
+**Next / open:** Neokyo capture (buy side — server-rendered, no fiber read,
+brings the Japanese lexicon in). Then thumbnail upload to R2, the ledger, and
+ship-name aliases. Brainstorm pending on cost basis for cards pulled from album
+purchases.
+
 ### 2026-08-28 (US CDT) — Photocard market intel DESIGNED (extension + resale ledger)
 
 Design session only — no code. Resurfaced the parked listing tracker and

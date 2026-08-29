@@ -1,6 +1,7 @@
 # Photocard Market Intel — Design & Implementation Plan
 
-**Status:** designed 2026-08-28, not built.
+**Status:** capture + comps **BUILT** 2026-08-29 (slices 1-5, live in prod).
+Ledger designed, not built. Neokyo / Pocamarket / eBay declared, no parsers yet.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -683,125 +684,69 @@ Secondary numbers, all free once the above exists:
 
 ---
 
-## Data Model
+## Data Model — as built
 
-All tables `mkt_*`. Column lists are the intent, not final DDL.
+Diverged from the original two-table sketch in one structural way, noted below.
+Full DDL with rationale is in `backend/sql/schema.sql`.
 
-### mkt_observation
+### Three tables, not two
 
-One sighting of one listing. Append-only.
+The plan had `mkt_observation` + `mkt_observation_line`. Building it showed the
+observation was doing two jobs: **a listing is seen more than once.** Identity
+and contents belong to the listing; price and state belong to each sighting.
+Folding them together duplicates a listing's title, thumbnail, and card lines on
+every re-capture and makes "which lines does this listing have" ambiguous.
 
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| marketplace | TEXT NOT NULL | `neokyo`, `mercari_us` |
-| external_id | TEXT | Native listing id from the URL; dedupe key with `marketplace` |
-| listing_url | TEXT | |
-| observed_at | TEXT NOT NULL | ISO 8601 |
-| listing_state | TEXT NOT NULL | `active` / `sold` — **never blended** |
-| price | REAL | |
-| currency | TEXT | |
-| price_usd | REAL | Marketplace-provided conversion where available (Neokyo) |
-| title_raw | TEXT | Original, untranslated |
-| thumbnail_url | TEXT | Source URL; see Thumbnails |
-| result_position | INTEGER | Rank within the search page |
-| search_query | TEXT | What was being searched |
-| is_lot | INTEGER | |
-| capture_tier | TEXT | `sweep` / `enrich` |
+| Table | Holds |
+|---|---|
+| `mkt_listing` | Identity: marketplace, external_id, url, title, condition, category, brand, thumbnail, `is_lot`, `suspected_lot`, `via_fallback`, first/last seen. `UNIQUE (marketplace, external_id)` |
+| `mkt_listing_line` | Contents: `line_type` (card / non_card / unidentified), **nullable** `item_id` + `collection_type_id`, label, qty. Also the lot decomposition |
+| `mkt_sighting` | One row per sighting: `observed_at`, `listing_state`, `raw_status`, `price_cents`, `currency`, `price_usd`, `fx_rate`, `fx_source`. `UNIQUE (listing_id, observed_at)` |
 
-### mkt_observation_line
+Both UNIQUE constraints exist so **ingest is idempotent** — the extension cannot
+know what the server already holds, so re-syncing an overlapping batch has to be
+a no-op rather than a duplicate.
 
-Contents of an observation. Also the lot decomposition.
+### Sources and currency
 
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| observation_id | INTEGER NOT NULL | |
-| line_type | TEXT NOT NULL | `card` / `non_card` / `unidentified` |
-| item_id | INTEGER | **Nullable** — LEFT JOIN, scope by `collection_type_id` |
-| collection_type_id | INTEGER | Denormalized for the scoped join |
-| label | TEXT | The allocation basis |
-| qty | INTEGER NOT NULL | Default 1 |
-| notes | TEXT | |
+| Table | Holds |
+|---|---|
+| `lkup_mkt_marketplaces` | `mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD) — code, name, currency, side. Currency is declared per source, not guessed per row |
+| `mkt_fx_rate` | `(currency, as_of_date)` → `usd_per_unit`, source, note |
 
-### mkt_shortlist
+**`price_cents` holds MINOR units of its currency, not literally cents.** USD
+$40.00 is 4000; ¥2500 is 2500, because JPY has no subdivision. Assuming 2
+decimal places everywhere produced a live 100x bug (¥2500 converted to $0.17),
+so conversion routes through major units. `CURRENCY_EXPONENT` in
+`backend/routers/market.py` is the authority.
 
-Saved buy candidates. A list, not a tracker.
+Rates are **dated history, never one mutable current value** — a single value
+would silently rewrite the USD of every past observation each time it changed.
+A marketplace's own conversion wins where present (Neokyo shows USD beside the
+yen, and that is the amount actually charged). `GET /market/fx` names currencies
+with no rate on file so a gap is visible rather than quietly shrinking the
+sample.
 
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| observation_id | INTEGER | |
-| listing_url | TEXT NOT NULL | |
-| added_at | TEXT NOT NULL | |
-| notes | TEXT | |
-| resolved_at | TEXT | Set when bought or dismissed |
+### Endpoints
 
-### mkt_box
+| Route | Purpose |
+|---|---|
+| `GET /admin/card-index` | The library the extension matches titles against |
+| `POST /market/captures` | Ingest, idempotent |
+| `GET /market/comps` | Every card with usable comp data |
+| `GET /market/comps/{item_id}` | One card's series + excluded lots |
+| `GET /market/marketplaces` | Declared sources |
+| `GET /market/fx` · `PUT /market/fx` · `POST /market/fx/backfill` | Rates |
 
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| label | TEXT | |
-| ordered_at / shipped_at / received_at | TEXT | |
-| intl_shipping_cost | REAL | Weight-basis allocation |
-| consolidation_fee / insurance_cost / customs_cost | REAL | |
-| currency | TEXT | |
-| fx_rate_at_payment | REAL | **Snapshot, never a live rate** |
-| notes | TEXT | |
+SPA route is **`/market-intel`**, never `/market` — that is the API prefix and
+Vite's dev proxy matches on prefix. Same trap as `/binders`.
 
-### mkt_purchase
+### Ledger tables
 
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| box_id | INTEGER | Nullable until assigned to a box |
-| marketplace | TEXT | |
-| listing_url / external_id | TEXT | |
-| purchased_at | TEXT | |
-| item_price / item_currency | REAL / TEXT | |
-| per_item_fees | REAL | Per-item basis allocation |
-| domestic_shipping | REAL | If itemized separately |
-| is_lot | INTEGER | |
-| notes | TEXT | |
-
-### mkt_purchase_line
-
-Same shape as `mkt_observation_line`, plus allocation and outcome.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| purchase_id | INTEGER NOT NULL | |
-| line_type | TEXT NOT NULL | `card` / `non_card` / `unidentified` |
-| item_id / collection_type_id | INTEGER | Nullable; LEFT JOIN, scoped |
-| label | TEXT | |
-| qty | INTEGER NOT NULL | |
-| weight_basis | REAL | Est. grams — drives shipping allocation |
-| value_weight | REAL | Drives fee allocation; class default, overridable |
-| alloc_override_amount | REAL | Explicit amount; pulls the line out of the sweep |
-| allocated_cost | REAL | Derived; the per-card landed cost |
-| outcome | TEXT | `listed` / `sold` / `unsold` / `kept` / `filler` |
-| notes | TEXT | |
-
-### mkt_sale
-
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK | |
-| purchase_line_id | INTEGER NOT NULL | |
-| marketplace | TEXT | |
-| listing_url | TEXT | |
-| date_listed / date_sold | TEXT | Days-to-sell and sell-through derive from these |
-| list_price / sale_price | REAL | Realized ≠ asked; offers matter |
-| platform_fee / shipping_cost / other_fees | REAL | |
-| currency | TEXT | |
-| notes | TEXT | |
-
-### Indexes
-
-`(marketplace, external_id)` on observations; `observed_at`; `item_id` on both
-line tables; `box_id` on purchases; `purchase_line_id` on sales.
+`mkt_box`, `mkt_purchase`, `mkt_purchase_line`, `mkt_sale`, `mkt_shortlist` are
+**designed above but not built.** The column sketches earlier in this document
+stand; expect the same listing/sighting-style split to shake out during
+construction.
 
 ### Images — stored, not hotlinked (reverses the earlier deferral)
 
@@ -827,6 +772,13 @@ everything, prune later if volume ever justifies it.
 - **On sync, upload to R2** under the `listings/` prefix via
   `images.collectcoreapp.com` — the same client and custom domain used for
   `catalog/` and `admin/`. Not in the backup ZIP; R2 is independently durable.
+
+> **NOT BUILT — known gap.** The extension stores the blob locally as designed,
+> but `POST /market/captures` sends only `thumbnailUrl`, so server-side
+> thumbnails are hotlinked to Mercari's CDN and **will rot when listings
+> close**. The bytes exist in the browser; nothing ships them. Closing this
+> means posting the blobs on sync and uploading to R2 — worth doing before the
+> comp view's audit thumbnails start going blank.
 - **Pruning, if ever needed:** an observation associated to a single catalog
   card has a library image already, so its captured image is the first
   candidate to drop. Unassociated and lot images are never pruned.
@@ -840,41 +792,34 @@ No backup changes needed.
 
 ## Build Order
 
-Sequenced by the actual purchase timeline, not by architectural tidiness.
+### Built (2026-08-29, live in prod)
 
-### 1. Extension — Mercari US
+1. **Capture extension, Mercari US** — dormant until switched on; the side panel
+   holds a runtime port and its disconnect turns capture off.
+2. **Card index + title matcher** — 11,323 cards pulled live from prod,
+   auto-refreshing when over 12h old. 12/12 correct top-hit origin on the
+   regression corpus (`node tools/test_matcher.mjs`).
+3. **Card picker, both capture modes** — Collecting and Armed, chips, lot
+   flagging.
+4. **Ingest + comps** — idempotent, sole-line rule enforced, multi-currency.
+5. **Comp view** at `/market-intel` — sold-median headline, quartile bands,
+   auditable series with thumbnails, excluded lots.
 
-Sweep active + sold. Local IndexedDB buffer, CSV/JSON export, no ingest, no
-auth. Arm-a-card runs off a manually exported catalog index at first.
+### Next
 
-**Immediate payoff with zero capital at risk:** comps for the existing trade
-shelf, informing the price tiers and Mercari CSV export that are already built.
+- **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
+  read — plain DOM parsing, more brittle but simpler. Brings the Japanese
+  lexicon into play and is the first live exercise of the JPY path.
+- **Thumbnail upload to R2** — see the known gap under Images.
+- **Ledger** — box → purchase → line → outcome → sale.
+- **Ship-name aliases** (`Minsung`, `Hyunlix`, `Seungjin`). Sellers use them
+  constantly; needs the alias table to map to member *pairs*, not single
+  members.
 
-Preceded by the ~30 minute search-response check.
+### Not planned for v1
 
-### 2. Extension — Neokyo
-
-Same capture UI, second parser, and the easier one — server-rendered, already
-parsed by the POC. Feeds buy decisions for the first test run.
-
-### 3. Backend
-
-Order determined by whichever the calendar forces:
-
-- **Observations + comp views** if still shopping — ingest endpoint, per-card
-  price-over-time, active vs. sold series, supply depth, lot discount ratio.
-- **Ledger** once a box is inbound — boxes, purchases, lines, allocation,
-  outcomes, sales, the pays-for-itself number.
-
-Both are one SPA route, admin-only, reusing the existing card picker.
-
-### Not in v1
-
-Comp charting beyond two simple series; price dispersion analysis; Yahoo
-Auctions or other sources; thumbnail caching; any automated refresh; any
-`/pcs/` exposure of price data.
-
----
+Comp charting beyond the quartile bands; Pocamarket and eBay parsers (declared
+only); automatic sync; any `/pcs/` exposure of price data.
 
 ## Open Questions
 
@@ -930,6 +875,20 @@ Auctions or other sources; thumbnail caching; any automated refresh; any
 - **2026-08-28** — No multi-week measurement program. Sell-through and
   days-to-sell accrue as a byproduct of `date_listed` / `date_sold` once the
   ledger is in use.
+- **2026-08-29** — Built as three tables, not two: a listing is seen more than
+  once, so identity/contents belong to the listing and price/state to each
+  sighting. Ingest is idempotent on both keys.
+- **2026-08-29** — `price_cents` is MINOR units of its currency. Assuming two
+  decimals everywhere produced a live 100x error (¥2500 → $0.17); conversion
+  routes through major units.
+- **2026-08-29** — SPA route is `/market-intel`, never `/market` — the API
+  prefix, and the dev proxy matches on prefix. Same trap as `/binders`.
+- **2026-08-29** — Comp view leads with the **sold** median. Measured on one
+  card, n=43: asks $20.00-$47.00 against sales $5.00-$26.60. The ranges barely
+  overlap, so active listings alone would have priced it at roughly double what
+  it clears at. Distributions render as quartile bands because min/max is
+  meaningless at that spread, and the series renders with thumbnails because a
+  statistic you cannot audit is one you stop trusting.
 - **2026-08-28** — Mercari US capture reads the **React fiber**
   (`memoizedProps.item` off a result tile's anchor), not the network. Ruled
   out first: `__NEXT_DATA__` (227-char stub), GraphQL (0/1091 matches), RSC
