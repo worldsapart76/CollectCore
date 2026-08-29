@@ -16,8 +16,11 @@ export const MODULE_DEFS = {
       // and Vite's dev proxy matches on prefix — the same collision the
       // Binders route above avoids.
       { label: 'Market',       to: '/market-intel', adminOnly: true },
-      { label: 'Library',      to: '/library' },
       { label: 'Trades',       to: '/trades' },
+      // Library sits last on purpose: it is the most-visited page here, so it
+      // gets a fixed, predictable position at the end rather than drifting as
+      // admin-only tools are added ahead of it.
+      { label: 'Library',      to: '/library' },
     ],
   },
   books: {
