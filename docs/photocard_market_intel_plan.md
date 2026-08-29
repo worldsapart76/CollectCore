@@ -1212,12 +1212,14 @@ No backup changes needed.
    through the generic lookup admin.
 7. **Cost tiers** — `mkt_cost_tier` + `mkt_item_cost`, scoped to the sale pile,
    preview-before-assign.
+8. **Per-card override + margin in the comp view** —
+   `PUT /market/cost-basis/item/{id}`, marked `source = 'manual'` and preserved
+   by the sweep. The card detail reads
+   *cost $2.50 (Older era) · margin $10.50 vs sold median $13.00 · ESTIMATED*.
+   Margin is computed against the **sold** median, never the asking median.
 
 ### Next
 
-- **Per-card basis override UI.** The table stores `source = 'manual'` and the
-  assign sweep already preserves it; only the editing surface is missing. Small,
-  and it is what lets a comp displace a tier card by card.
 - **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
   read — plain DOM parsing, more brittle but simpler. Brings the Japanese
   lexicon into play and is the first live exercise of the JPY path.
