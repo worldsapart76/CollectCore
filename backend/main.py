@@ -109,6 +109,38 @@ async def spa_host_routing(request: Request, call_next):
         return FileResponse(str(index_html))
     return await call_next(request)
 
+# ---------- Cache headers ----------
+#
+# index.html carried NO Cache-Control, which meant browsers fell back to
+# heuristic caching (roughly a fraction of the time since Last-Modified) and
+# some — mobile Chrome notably — held onto it across a deploy. Because Vite
+# content-hashes its bundles, a stale index.html asks for asset filenames the
+# new deploy deleted, every module 404s, and the page renders WHITE with no
+# error anywhere the user can see. Observed on mobile 2026-08-29 while desktop,
+# which had revalidated, was fine.
+#
+# So the two halves get opposite, explicit policies:
+#   index.html  -> no-cache: revalidate every load. It is served by
+#                  FileResponse, which unlike StaticFiles does not answer
+#                  If-None-Match, so this costs a full 200 each load rather
+#                  than a 304 — under a kilobyte, and worth it to make a
+#                  white-screened deploy impossible.
+#   /assets/*   -> immutable: the filename contains a content hash, so the
+#                  bytes can never change under a given name.
+_IMMUTABLE_PREFIXES = ("/assets/", "/guest/guest-assets/", "/pcs/pcs-assets/")
+
+
+@app.middleware("http")
+async def cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _IMMUTABLE_PREFIXES):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # ---------- Admin authorization gate (env-gated) ----------
 # CollectCore historically had zero authorization: Cloudflare Access allowed
 # only the admin email through the edge, so every endpoint could trust its
