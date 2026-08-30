@@ -6,6 +6,49 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-30 (US CDT) — Market workspace v2 DESIGNED (no code)
+
+Deliberate pause to redesign before building further. The v1 comp view answers
+"what is this one card worth" well, and that turned out to be the wrong
+question to organise around.
+
+- **The unit was wrong.** v1 is card-first, so you must already know which card
+  to look up. Every real decision is about a *listing* — you buy a listing, not
+  a card — which is also why lots read as second-class. Not a display bug.
+- **Three views** replace one: a **card grid** (paid / cheapest-buy / net-sell,
+  plus flip and arb margins, per-source comp counts and ages), a **lot
+  analyzer**, and **wanted-with-no-source** as a browsing to-do list. The v1
+  comp view survives as the drill-down.
+- **Cheapest-to-buy is two numbers.** The cheapest source for a card is often
+  inside a lot, and one card cannot be bought out of an 8-card lot. A blended
+  column would rank listings that cannot be acted on.
+- **Sold and gone are different events.** Sold-with-a-price is a new comp and
+  free price discovery; gone just drops out. Merging them would let every
+  vanished proxy listing inflate the sold median.
+- **I was wrong about allocation.** I argued it cannot change a buy decision
+  since totals are unchanged however cost is split. The counter-example is
+  ordinary: a $100 lot of ten where one card sells for $75. Even allocation
+  reports nine worthless cards and one lottery win; value-weighting reports a
+  uniform ~65% margin, which is the truth — and shows that 45% of the cost
+  rides on one card selling. Same totals, different risk.
+- **The value ladder stays in value units.** Cost tiers are acquisition costs
+  ($1-3) and comps are sale values ($10-75); borrowing tiers as weights would
+  crush no-comp cards toward zero. Two rungs only — own comp, else era median —
+  with finer rungs deferred until real lots prove them needed.
+- **Keep/flip defaults from library ownership status**, so most lots need no
+  toggling: the standing decision about a card is already recorded.
+
+Feedback taken on board: the lot analysis may be over-built for the decision it
+serves. v1 of it is deliberately minimal and the doc says so outright, with the
+elaborations parked until real captured lots show they are wanted.
+
+Written to `docs/photocard_market_intel_plan.md` -> *v2 — the market
+workspace*, with `CLAUDE.md`'s roadmap and the plan's Next section pointed at
+it. Three additive columns are all it needs schema-wise
+(`mkt_listing_line.value_cents`, `.disposition`, `mkt_listing.delisted_at`).
+
+**Next:** build step 1 — card grid + sold/gone marking.
+
 ### 2026-08-30 (US CDT) — Neokyo capture VERIFIED against the live site
 
 A real listing captured correctly: *Stray Kids Hyunjin KMS Rakuten Store

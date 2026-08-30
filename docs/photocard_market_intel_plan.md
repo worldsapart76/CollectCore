@@ -1,8 +1,11 @@
 # Photocard Market Intel — Design & Implementation Plan
 
 **Status:** capture + comps **BUILT** 2026-08-29 (slices 1-5, live in prod).
-Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). Ledger
-designed, not built. Pocamarket / eBay declared, no parsers yet.
+Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). The **v2
+market workspace** — card grid, lot analyzer, wanted-sourcing — is DESIGNED
+2026-08-30 and supersedes the card-first comp view as the destination; the v1
+comp view survives as its drill-down. Ledger designed, not built.
+Pocamarket / eBay declared, no parsers yet.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -1410,6 +1413,217 @@ leaking into a metric that is supposed to be about cards.
 
 ---
 
+## v2 — the market workspace (DESIGNED 2026-08-30, NOT BUILT)
+
+The v1 comp view answers *"what is this one card worth?"* and answers it well.
+It is not the destination, and the plan should stop implying it is.
+
+### The organizing unit was wrong
+
+v1 is **card-first**: you must already know which card to look up. Every
+decision actually made is about a **listing** — you buy a listing, not a card —
+and a card-first model cannot represent *"is this 8-card lot worth $118?"*,
+because that question is about the whole listing at once.
+
+That is also why lots read as second-class. Not a display bug: the organizing
+unit does not fit the work. The real workflow is **browse and capture
+opportunistically, then come back later and ask what the pile is worth** — a
+question v1 has no screen for.
+
+### Three views
+
+| View | Question | Entry point |
+|---|---|---|
+| **Card grid** | what do I hold, what can I get, what can I sell? | the front door |
+| **Lot analyzer** | is this specific lot worth buying? | from a lot |
+| **Wanted, no source** | where should I go browse next? | the to-do list |
+
+The v1 comp view survives as the **drill-down** from a grid row, not as the
+landing page.
+
+### The card grid
+
+Every card carries three values, and the two profits that fall out of them:
+
+```
+card                              own  paid   buy      sell    flip    arb    comps
+Hyunjin · Rock Star · KM Station   2   $2.50  $12.50L  $19.06  +$16.56  +$6.56  M2·3d N1·1d
+Hyunjin · This & That · Ver. POB   1   $5.00  $14.00   $18.20  +$13.20  +$4.20  M19·2d
+Felix · ATE · Yes24                –     –    $8.00    $9.20      –     +$1.20  M4·9d
+Bang Chan · Maxident · POB         –     –      –      $22.00     –       –     M6·30d
+```
+
+- **paid** — cost basis. Card-level in v1; see *per-copy* below.
+- **buy** — cheapest landed. **Two columns, not one.**
+- **sell** — median of **sold** sightings, **net** of sell-side fees. Asks are
+  what sellers hope for; sold is what buyers paid.
+- **flip** = sell − paid — margin on what is already held.
+- **arb** = sell − buy — margin on what could be sourced.
+- **comps** — count and age **per source**. `M19·2d N1·21d` is nineteen Mercari
+  comps two days old and one Neokyo listing three weeks old that may well be
+  gone. An overall count hides exactly that.
+
+#### Cheapest-to-buy is two numbers
+
+The cheapest source for a card is often **inside a lot**, and one card cannot
+be bought out of an 8-card lot — the lot can. A single blended "cheapest"
+column would rank listings that cannot be acted on: `$12.50` is a real number
+and acting on it costs $118.
+
+So: **cheapest single** and **cheapest via-lot**, separately, with the lot's
+full commitment shown in the drill-down.
+
+#### Scope
+
+Default to **cards with market data, plus every card marked Wanted** even with
+no data at all. A grid over all 11,347 catalog rows is not the goal and would
+run straight into the deliberate no-virtualization shortcut; the useful set is
+a few hundred rows. "Show everything" stays available as an opt-in.
+
+### Sold vs gone are different events
+
+Marking a captured listing as no longer available is two facts, and merging
+them corrupts the sell side:
+
+| | Meaning | Effect |
+|---|---|---|
+| **Sold, price known** | someone paid this | a **new sold comp** — free price discovery from revisiting a listing |
+| **Gone / delisted** | no longer purchasable, price unknown | drops out of buy options, **no comp** |
+
+On a proxy especially, a vanished listing says nothing about what it fetched.
+If "gone" silently became "sold at the asking price", every disappeared listing
+would inflate the sold median.
+
+### The lot analyzer
+
+```
+8-card KMS fansign set · neokyo · ¥16,000 → $118.40 landed
+
+line                              status    own  paid   sell(net)  alloc   margin
+Hyunjin · Rock Star · KM Station  * wanted   –     –      $19.06   $27.10   −$8.04
+Felix · ATE · Yes24               * wanted   –     –       $9.20   $13.08   −$3.88
+Han · Rock Star · HMV             owned x1  $2.50   $17.20  $24.45  −$7.25
+album (non-card)                     –       –     –      $12.00   $17.06   −$5.06
+unidentified x2                      ?       –     –          —        —        —
+
+known value $86.50 across 6 of 8 lines  ·  landed $118.40
+```
+
+And the line that actually decides it — keep/flip stated as a residual:
+
+> Keep the 2 Wanted, flip the other 4 → **flips net $65.20**, lot costs
+> **$118.40**, so the 2 kept cost **$53.20** ($26.60 each). Buying them
+> separately: **$22.00**. **The lot is $31.20 worse.**
+
+Every factor collapses into one comparison that can be judged at a glance.
+
+#### Allocation is value-weighted, and it IS decision-relevant
+
+An earlier draft of this section claimed allocation cannot change a buy
+decision, on the grounds that total value against total cost is unchanged
+however the cost is split. That is wrong, and the counter-example is the
+ordinary case:
+
+**$100 landed · 10 cards · one sells $75, nine sell $10**
+
+| | even split | value-weighted |
+|---|---|---|
+| the $75 card | $10 cost → **+$65** | $45.45 cost → **+$29.55** |
+| each $10 card | $10 cost → **$0** | $6.06 cost → **+$3.94** |
+
+Even allocation says *nine of these are worthless to buy and one is a lottery
+win*. False — the nine are fine and the allocation was lying. Value-weighting
+shows a uniform ~65% margin, which is the truth about a fairly-priced lot.
+
+It also surfaces what totals hide: **45% of the lot's cost rides on one card
+selling.** Ten $10 cards is a diversified bet and this is a concentrated one.
+Identical totals, materially different risk.
+
+This is the same device *Allocation — three levels, two bases* already
+classifies as **"a margin-analysis device, not real cost — a chase card does
+not weigh more."** That classification stands. The difference is tense: that
+section allocates **real box costs after purchase** (weight and value bases,
+reconciling to zero); this one allocates **a hypothetical listing price before
+purchase**, to decide whether to buy at all. Lot-level P&L remains the
+authoritative number in both.
+
+#### The value ladder, kept short
+
+Weights must stay in **value** units the whole way down. Cost tiers are
+*acquisition costs* ($1–3); sale comps are *sale values* ($10–75). Borrowing
+tier costs as weights would put no-comp cards on a different scale entirely and
+crush them toward zero, making them look free.
+
+v1 of this feature uses **two rungs**:
+
+1. the card's own **net sold median**
+2. otherwise, the **median net sold value of its era** (the ≤2020 / 2021+ split
+   that already exists)
+
+Each rung is labelled so a card priced off rung 2 is visibly an estimate.
+Finer rungs — same origin, same version type, global median — are **deferred
+until real lots show two rungs to be insufficient.** Cost tiers keep doing
+their actual job: basis for cards already owned.
+
+**Unidentified lines** allocate at the rung-2 value rather than $0. Zero makes
+the identified cards absorb the whole lot cost, overstating their basis and
+making the lot look worse than it is. `3 of 10 unidentified` is the signal that
+matters, and it is shown either way.
+
+#### Non-card lines
+
+Entered per lot, with a manual value. One model, not two: **every line gets a
+value, the lot's value is the sum, allocation runs over relative value.**
+"Value the album at $12" and "adjust the lot cost by $12" are the same
+operation seen from two ends.
+
+#### Keep vs flip
+
+**Defaults from library ownership status** — Wanted → keep, anything else →
+flip — with a per-line override in the analyzer. Most lots should need no
+toggling at all, because the standing decision about a card is already recorded
+in the library.
+
+### Deliberately NOT in v1
+
+Held back until real lots prove them necessary, because the risk here is a
+model more elaborate than the decision it serves:
+
+- More than two rungs on the value ladder
+- A separate concentration/risk metric — the allocation column already shows it
+- Weight-class bases for pre-purchase evaluation (the ledger needs them; a
+  buy/don't-buy call does not)
+- Automatic re-checking of captured listings for sold/gone
+
+**This whole section is a first cut to be reviewed against real captured
+lots.** Where the analyzer turns out to be more machinery than the decision
+needs, cut it — that judgement is easier with numbers on screen than in advance.
+
+### Schema additions
+
+Small, and additive:
+
+| Change | For |
+|---|---|
+| `mkt_listing_line.value_cents` | manual value override; non-card line values |
+| `mkt_listing_line.disposition` | keep / flip override, NULL = derive from library status |
+| `mkt_listing.delisted_at` | gone, price unknown — distinct from a sold sighting |
+
+Marking **sold** needs no new column: it is a sighting with
+`listing_state = 'sold'` and a price, which the ingest already models.
+
+### Build order
+
+1. **Card grid + sold/gone marking.** Every value in the grid is computable
+   from data already held. The marking goes in alongside it because the grid's
+   numbers decay without it.
+2. **Lot analyzer.** Value-weighted allocation, non-card lines, keep/flip, the
+   residual line.
+3. **Per-copy basis (the ledger).** Last. It only sharpens `paid` for cards
+   held in multiples, and it is by far the largest piece. Card-level basis is
+   honest in the meantime **provided the grid says so** rather than implying a
+   precision it does not have.
+
 ## Data Model — as built
 
 Diverged from the original two-table sketch in one structural way, noted below.
@@ -1689,13 +1903,19 @@ No backup changes needed.
 
 ### Next
 
+**The v2 market workspace is the next build**, in the order set out under
+*v2 — the market workspace*: card grid + sold/gone marking, then the lot
+analyzer, then per-copy basis with the ledger. Everything below is real but
+sits behind it.
+
 - **Japanese title matching.** Neokyo capture works but its titles do not filter
   the card picker: `lib/matcher.js` tokenizes Latin only, so a Japanese title
   yields no chips. The picker now says so outright rather than returning the
   whole library as an apparent match, and the search box is the workaround.
   Segmentation plus a kana/kanji alias layer is the fix; `ALIASES` is the seam.
 - **Thumbnail upload to R2** — see the known gap under Images.
-- **Ledger** — box → purchase → line → outcome → sale.
+- **Ledger** — box → purchase → line → outcome → sale. Now also the home of
+  **per-copy cost basis**, which is step 3 of the v2 build.
 - **Ship-name aliases** (`Minsung`, `Hyunlix`, `Seungjin`). Sellers use them
   constantly; needs the alias table to map to member *pairs*, not single
   members.
