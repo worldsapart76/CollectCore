@@ -223,15 +223,63 @@
     return best;
   }
 
+  // Mercari's own field names, read off a real detail page 2026-08-29 via the
+  // scan diagnostic. They differ from the search tile's in four places, which
+  // is why the first detail captures came out unnamed and image-less:
+  //
+  //   tile            detail page
+  //   id           -> itemId
+  //   thumbnail    -> photoUrl
+  //   (absent)     -> shippingPayer      (NOT shippingPayerCode)
+  //   itemCondition is an OBJECT here, not a string
+  //
+  // Normalising here means nothing downstream has to know any of that.
+  function textOf(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string') return v || null;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    // { id, name } shapes — condition, brand, category all arrive this way.
+    return v.name ?? v.label ?? v.title ?? null;
+  }
+
   function photoList(item) {
     const raw = item.photos || item.imageUrls || item.images;
-    if (!Array.isArray(raw) || !raw.length) return null;
-    const urls = raw
-      .map((p) =>
-        typeof p === 'string' ? p : p?.uri ?? p?.url ?? p?.thumbnail ?? null
-      )
-      .filter(Boolean);
-    return urls.length ? urls : null;
+    if (Array.isArray(raw) && raw.length) {
+      const urls = raw
+        .map((p) =>
+          typeof p === 'string' ? p : p?.uri ?? p?.url ?? p?.thumbnail ?? null
+        )
+        .filter(Boolean);
+      if (urls.length) return urls;
+    }
+    // Detail pages carry a single photoUrl rather than a list.
+    const one = item.photoUrl || item.thumbnail;
+    return one ? [one] : null;
+  }
+
+  function normalize(item, id) {
+    const photos = photoList(item);
+    return {
+      id,
+      name: textOf(item.name),
+      price: item.price ?? null,
+      status: textOf(item.status),
+      itemCondition: textOf(item.itemCondition),
+      category: textOf(item.itemCategory ?? item.category),
+      categoryId: item.categoryId ?? item.itemCategory?.id ?? null,
+      brand: textOf(item.brand),
+      thumbnail: item.photoUrl ?? item.thumbnail ?? photos?.[0] ?? null,
+      // shippingPayer on a detail page; the tile's spelling kept as a fallback.
+      shippingPayerCode: textOf(item.shippingPayer ?? item.shippingPayerCode),
+      shippingMethod: textOf(item.shippingMethod),
+      shippingFromArea: textOf(item.shippingFromArea),
+      description: textOf(item.description),
+      sellerId: textOf(item.seller?.id ?? item.sellerId),
+      numLikes: item.numLikes ?? null,
+      photos,
+      dates: datesFrom(item),
+      _scanKeys: lastScan,
+    };
   }
 
   function stampDetail() {
@@ -254,27 +302,7 @@
       if (stamped) delete document.body.dataset.ccDetailItem;
       return;
     }
-    document.body.dataset.ccDetailItem = JSON.stringify({
-      id: item.id,
-      name: item.name ?? null,
-      price: item.price ?? null,
-      status: item.status ?? null,
-      itemCondition: item.itemCondition ?? null,
-      category: item.category ?? null,
-      categoryId: item.categoryId ?? null,
-      brand: item.brand ?? null,
-      // A detail page may carry only the photo array, with no single
-      // `thumbnail` -- which is why the first detail capture had a broken
-      // image. Fall back to the first photo.
-      thumbnail: item.thumbnail ?? photoList(item)?.[0] ?? null,
-      // The whole reason this surface exists -- all null in tiles.
-      shippingPayerCode: item.shippingPayerCode ?? null,
-      description: item.description ?? null,
-      sellerId: item.seller?.id ?? item.sellerId ?? null,
-      photos: photoList(item),
-      dates: datesFrom(item),
-      _scanKeys: lastScan,
-    });
+    document.body.dataset.ccDetailItem = JSON.stringify(normalize(item, wantId));
   }
 
   function stamp() {

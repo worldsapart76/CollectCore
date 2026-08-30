@@ -46,18 +46,29 @@ anything else looks completely normal — no overlays, no panel.
 
 | Action | How |
 |---|---|
-| **Turn on** | Click the toolbar icon. The side panel opens; capture dots appear on results. |
+| **Turn on** | Click the toolbar icon. The side panel opens; capture is on for the **whole session**. |
 | **Capture** | Click the **+** on any result tile. It turns green. |
 | **Capture a listing you opened** | Click **+ Capture**, bottom-right of the listing's own page. |
 | **Un-capture** | Click the **✓** again, on either surface. |
 | **Identify** | *Identify →* on a captured row, then click the matching card. |
 | **Arm a card** | The Mode button. Every capture then auto-associates to it. |
-| **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
+| **Turn off** | Press **Esc**, or close the side panel with its **✕**. Ends the session everywhere, not just that tab. |
 | **Sync** | *Sync* pushes captures to CollectCore. Safe to press repeatedly. |
 | **Clear** | Removes **synced** captures only. Unsynced ones are kept unless you confirm a second prompt. |
 | **Remove one** | The **✕** on a row. Warns first if that row has never synced. |
 | **Export** | *Export JSON* — downloads your **captures** as a backup. |
 | **Import** | Loads a **card index** file. *Not* the inverse of Export — see below. |
+
+### Capture is a session, not a tab
+
+Switching on once covers **every Mercari tab you open afterwards**, which is
+what the tab-at-a-time workflow needs — open several listings, capture the good
+ones, close them. Activation used to be per tab, so each newly opened listing
+came up dormant with no button and nothing explaining why.
+
+Dormant-by-default is unchanged: nothing happens on any tab until you click the
+toolbar icon once. **Esc** or closing the panel ends the session on every tab at
+once, so nothing is left quietly capturing.
 
 ### Keeping the queue clean
 
@@ -165,7 +176,7 @@ not see.
 
 ## What it captures
 
-Read off React's fiber on each result tile (verified 2026-08-28):
+Read off React's fiber (tiles verified 2026-08-28, detail pages 2026-08-29):
 
 `id` · `name` · `price` (integer USD cents) · `status` · `itemCondition` ·
 `category` / `categoryId` · `brand` · `thumbnail`
@@ -178,6 +189,19 @@ shipping.
 
 A row's `capture_tier` says which surface it came from. On a `sweep` row a null
 shipping payer means **"not looked at yet"**, never "no shipping".
+
+**The two surfaces do not use the same field names**, which is why the first
+detail captures came out unnamed and image-less. Normalised in
+`content/fiber.js`; recorded here so the next surface starts from fact:
+
+| tile | listing page |
+|---|---|
+| `id` | `itemId` |
+| `thumbnail` | `photoUrl` |
+| — | `shippingPayer` (not `shippingPayerCode`) |
+| `itemCondition` is a string | `itemCondition` is an **object** |
+
+Dates arrive as `created` (posted), `lastSoldAt` (sold), and `updated`.
 
 Plus, added at capture: the search query, page URL, timestamp, a
 `suspectedLot` flag from title keywords, and the thumbnail re-requested at

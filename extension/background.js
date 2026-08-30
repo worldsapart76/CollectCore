@@ -17,6 +17,18 @@ import {
 
 const ACTIVE_TABS = 'activeTabs';
 const ARMED_CARD = 'armedCard';
+const CAPTURE_ON = 'captureOn';
+
+// Capture was activated PER TAB, which quietly broke the workflow the detail
+// page exists for: open a handful of listings in tabs, capture the good ones,
+// close them. Every one of those tabs came up dormant with no button, and
+// nothing said why.
+//
+// So activation is a session-wide MODE. Dormant-by-default is unchanged --
+// nothing happens until the toolbar icon is clicked once -- but after that any
+// Mercari tab opened during the session comes up capturing, and Esc or closing
+// the panel turns the whole session off.
+let captureOn = false;
 
 // Mirror of the persisted set, readable SYNCHRONOUSLY.
 //
@@ -27,8 +39,9 @@ const ARMED_CARD = 'armedCard';
 const activeTabs = new Set();
 
 async function hydrate() {
-  const got = await chrome.storage.session.get(ACTIVE_TABS);
+  const got = await chrome.storage.session.get([ACTIVE_TABS, CAPTURE_ON]);
   for (const id of got[ACTIVE_TABS] || []) activeTabs.add(id);
+  captureOn = !!got[CAPTURE_ON];
 }
 hydrate();
 chrome.runtime.onStartup.addListener(hydrate);
@@ -45,8 +58,13 @@ async function setActive(tabId, active) {
   return active;
 }
 
+async function setCaptureMode(on) {
+  captureOn = on;
+  await chrome.storage.session.set({ [CAPTURE_ON]: on });
+}
+
 function isActive(tabId) {
-  return activeTabs.has(tabId);
+  return captureOn || activeTabs.has(tabId);
 }
 
 async function paintBadge(tabId, active) {
@@ -108,20 +126,36 @@ async function closePanel(tabId) {
 // The panel holds a long-lived port purely so its lifetime is observable:
 // connect = capture on, disconnect (panel closed) = capture off. This is what
 // makes "the panel is the switch" literally true rather than a convention.
+// A tab that navigates or opens while the mode is on gets told directly, so it
+// does not depend on the content script winning a race with the page.
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status !== 'complete' || !captureOn) return;
+  if (!/^https:\/\/www\.mercari\.com\//.test(tab.url || '')) return;
+  setActive(tabId, true).then(() =>
+    tellTab(tabId, { type: 'ACTIVATION', active: true })
+  );
+});
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'panel') return;
   let boundTab = null;
 
   port.onMessage.addListener(async (msg) => {
     if (msg.type !== 'PANEL_INIT' || !msg.tabId) return;
-    // Bound once, on open. Switching tabs deliberately does NOT follow — other
-    // tabs must stay clean unless the icon is clicked on them.
+    // Opening the panel switches capture on for the SESSION, not just for the
+    // tab it was opened from. The workflow is a run of listings across several
+    // tabs, and requiring the icon per tab meant most of them had no button.
     boundTab = msg.tabId;
+    await setCaptureMode(true);
     await setActive(boundTab, true);
     await tellTab(boundTab, { type: 'ACTIVATION', active: true });
   });
 
   port.onDisconnect.addListener(() => {
+    // Closing the panel ends the session everywhere, so no tab is left
+    // quietly capturing after the switch is off.
+    setCaptureMode(false);
+    for (const id of [...activeTabs]) deactivate(id);
     if (boundTab) deactivate(boundTab);
   });
 });
@@ -444,13 +478,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       }
-      case 'IS_ACTIVE':
-        sendResponse({
-          ok: true,
-          active: isActive(msg.tabId ?? sender.tab?.id),
-        });
+      case 'IS_ACTIVE': {
+        const tabId = msg.tabId ?? sender.tab?.id;
+        const on = isActive(tabId);
+        // A tab that loads while the mode is on enrolls itself here, so
+        // broadcasts (STORE_CHANGED) reach it without a second click.
+        if (on && tabId && !activeTabs.has(tabId)) await setActive(tabId, true);
+        sendResponse({ ok: true, active: on });
         break;
+      }
       case 'DEACTIVATE': {
+        // Esc is the panic switch: it turns the session off, not one tab,
+        // otherwise the other open listings keep their overlays.
+        await setCaptureMode(false);
+        for (const id of [...activeTabs]) {
+          if (id !== (msg.tabId ?? sender.tab?.id)) await deactivate(id);
+        }
         const tabId = msg.tabId ?? sender.tab?.id;
         if (tabId) {
           await deactivate(tabId);
