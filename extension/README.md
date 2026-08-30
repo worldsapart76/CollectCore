@@ -446,11 +446,22 @@ seller-written sentence.
   recording it per listing would charge $12 forty times. It belongs in the fee
   model as a `per_shipment` component with `typical_items_per_shipment = 40` —
   exactly the Neokyo box case.
-- **`titleUnverified: true`**, so every capture prints its shortlist in the
-  panel instead of presenting a guess as an answer. Remove it and set
-  `titlePrefer` to whatever the readout names, once the element holding the
-  card name is known. The identity is split across two lines — the version and
-  `Stray Kids | HYUNJIN` — so the captured name may need both.
+- **The name comes from the document title, and only from there.** Confirmed
+  against the page source:
+
+  ```html
+  <title>Pocamarket, Stray Kids HYUNJIN THIS &amp; THAT THIS VER. K-pop Photocard</title>
+  ```
+
+  On the page itself the identity is split across separate fields — the version
+  on one line, `Stray Kids | HYUNJIN` on the next — so the heuristic ranking can
+  only ever return half of it. Measured against the real card index, the full
+  title lands on **Hyunjin · This & That**; the version alone lands on **Bang
+  Chan · This & That**. Half a name is not a weaker match, it is a wrong one.
+
+  The site name **leads** rather than trails, so the generic suffix strip in
+  `TITLE_SOURCES.doc` does not reach it — `titleClean` takes off the prefix and
+  the trailing `K-pop Photocard`, which is on every listing.
 
 ## Sources and currency
 
@@ -470,7 +481,20 @@ is missed:
    never comes up capturing.
 
 A **React** site additionally needs `hasFiber: true`, its host in the second
-(`"world": "MAIN"`) block, and its tile selector in `content/fiber.js`. A server-rendered site needs none of that — but everything
+(`"world": "MAIN"`) block, and its tile selector in `content/fiber.js`.
+
+Set **`titleUnverified: true`** on a new site until its name element has been
+checked against a live page. It forces the panel's page-read diagnostic on for
+every capture, so the ranked shortlist and the element each candidate came off
+are visible instead of a guess presenting itself as an answer. Drop it once the
+real source is known. No site carries it today.
+
+**`titleReject` applies to every title source**, not only to the ranked
+shortlist — Neokyo's `og:title` and document title both say *Item Details*, the
+exact generic name the ranking exists to avoid, so filtering only `scope` meant
+a page where the ranking found nothing fell straight back onto it. A capture
+that ends with **no** name is flagged in the panel; one that ends with a
+plausible name that is identical on every row is not. A server-rendered site needs none of that — but everything
 the capture requires (price, title, a photo) has to be reachable from the DOM,
 since there is no page-world object to fall back to.
 

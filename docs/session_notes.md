@@ -65,9 +65,21 @@ an answer is what four rounds of Neokyo went into. Pocamarket carries the flag.
 107 cases in `tools/test_capture_parsing.mjs`; 5 more in
 `tools/test_market_grid.py` for the postage arithmetic.
 
-**Next:** confirm Pocamarket's title element from a capture's `page read:`
-readout, then set `titlePrefer` and drop the flag. After that, v2 step 3 —
-per-copy cost basis and the ledger.
+**Pocamarket's title, resolved the same day** (entry 19). Its name is the
+**document title** — `Pocamarket, Stray Kids HYUNJIN THIS & THAT THIS VER.
+K-pop Photocard` — which is the only place the identity appears whole; on the
+page it is split across separate fields, so the ranking could only ever return
+half of it. Against the real card index the full title lands on Hyunjin · This
+& That and the version alone lands on **Bang Chan** · This & That. Half a name
+is not a weaker match, it is a wrong one.
+
+`titleReject` now guards **every** title source rather than just the ranked
+shortlist — a fix for Neokyo too, whose og:title and document title both say
+"Item Details". A capture with no name is flagged in the panel; a plausible
+name identical on every row is not.
+
+**Next:** v2 step 3 — per-copy cost basis and the ledger. Capture is done for
+now: all four sources are built and verified against real pages.
 
 ### 2026-08-30 (US CDT) — v2 step 2 BUILT: the lot analyzer
 

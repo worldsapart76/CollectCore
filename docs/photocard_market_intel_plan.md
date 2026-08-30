@@ -307,7 +307,7 @@ only the assumption that comps flow one direction.
 |---|---|---|---|---|
 | **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
 | **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT + VERIFIED** — server-rendered DOM, no fiber |
-| **Pocamarket** | USD | both | active | **BUILT** — title selector unconfirmed |
+| **Pocamarket** | USD | both | active | **BUILT + VERIFIED** — name from the document title |
 | **eBay** | USD | both | active + sold | **BUILT** — server-rendered DOM, no fiber |
 
 All four now have parsers. Pocamarket needs **no** KRW rate after all: it
@@ -2015,11 +2015,41 @@ No backup changes needed.
     diagnostic on for a site whose name element has not been confirmed against
     a live page. A newly added site's title is a guess that happened to win a
     ranking, and a guess presenting itself as an answer is what four rounds of
-    Neokyo went into. Pocamarket carries the flag until its readout names the
-    real element.
+    Neokyo went into. Pocamarket carried it for exactly one round — see entry
+    19.
 
     107 cases in `tools/test_capture_parsing.mjs`; 5 more in
     `tools/test_market_grid.py` for the postage arithmetic.
+
+19. **Pocamarket's name is its document title — VERIFIED 2026-08-30.** One
+    round, off the page source:
+
+    ```html
+    <title>Pocamarket, Stray Kids HYUNJIN THIS &amp; THAT THIS VER. K-pop Photocard</title>
+    ```
+
+    It is the only place the identity appears **whole**. On the page it is
+    split across separate fields — the version on one line, `Stray Kids |
+    HYUNJIN` on the next — so the ranking can only ever return half of it.
+    Measured against the real card index: the full title lands on **Hyunjin ·
+    This & That**, the version alone lands on **Bang Chan · This & That**. Half
+    a name is not a weaker match, it is a wrong one.
+
+    The site name **leads** rather than trails here, so the generic-suffix strip
+    in `TITLE_SOURCES.doc` never reached it; `titleClean` takes the prefix and
+    the trailing `K-pop Photocard` off.
+
+    **`titleReject` now applies to every title source**, not only the ranked
+    shortlist. That is a fix for Neokyo as much as for Pocamarket: its
+    `og:title` and document title BOTH say *Item Details* — the exact generic
+    name the ranking exists to avoid — so a page where the ranking found
+    nothing fell straight back onto it. A capture with **no** name is flagged
+    in the panel; one with a plausible name identical on every row is not, and
+    that is the failure this module keeps rediscovering.
+
+    `detailTitle()` is now exercised end to end rather than only in pieces — a
+    correct cleaner and a correct source still combine into a wrong name.
+    119 cases in `tools/test_capture_parsing.mjs`.
 
 ### Next
 
@@ -2051,10 +2081,9 @@ needs, cut it.
 Comp charting beyond the quartile bands; automatic sync; any `/pcs/` exposure of
 price data.
 
-**All four declared sources now have parsers** (entries 17 and 18).
-Pocamarket's title selector is the one loose end: it is flagged
-`titleUnverified`, so every capture prints its candidate shortlist in the panel
-until the real element is confirmed. The **enrich tier** left this document entirely: it is
+**All four declared sources have parsers, and all four are verified against
+real pages** (entries 12-13, 17-19). Capture is done for now; the next build is
+v2 step 3, per-copy cost basis and the ledger. The **enrich tier** left this document entirely: it is
 superseded by detail-page capture, not deferred.
 
 ## Open Questions

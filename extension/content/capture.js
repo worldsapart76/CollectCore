@@ -260,17 +260,28 @@
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'p', 'span', 'div', 'b', 'strong', 'li', 'td',
       ],
-      // The landing page behind the app frame, plus the frame's own labels.
-      // Secondary by design — see titleCandidates() for the part that works
-      // without depending on any particular language.
+      // The landing page behind the app frame, plus the frame's own labels,
+      // plus a bare site name — which is what the document title says before
+      // the app fills it in, and what titleClean below reduces it to.
       titleReject:
-        /^(the marketplace|collect verified|check usage guide|upcoming prices|shipping information|ship to|same fee|buy now|add to cart|album|poca ?trust|verified by|save [\d.,]+|duties apply)\b/i,
-      titleOrder: ['scope', 'og', 'doc', 'h1'],
-      // Not yet confirmed against a real page, so every capture reports its
-      // shortlist in the panel rather than presenting a guess as an answer.
-      // Remove this — and set titlePrefer to whatever the readout names — once
-      // the element holding the card name is known.
-      titleUnverified: true,
+        /^(the marketplace|collect verified|check usage guide|upcoming prices|shipping information|ship to|same fee|buy now|add to cart|album|poca ?trust|verified by|save [\d.,]+|duties apply)\b|^pocamarket\s*$/i,
+      // The document title, FIRST, and confirmed against the page source:
+      //
+      //   <title>Pocamarket, Stray Kids HYUNJIN THIS &amp; THAT THIS VER.
+      //   K-pop Photocard</title>
+      //
+      // It is the only place the card's identity appears whole. On the page it
+      // is split across separate fields — the version on one line, "Stray Kids
+      // | HYUNJIN" on the next — so the heuristic ranking can only ever return
+      // half of it, and half a name matches nothing in the card index.
+      titleOrder: ['doc', 'og', 'scope', 'h1'],
+      // The site name leads rather than trails here, so the generic suffix
+      // strip in TITLE_SOURCES.doc does not reach it. The trailing category is
+      // on every listing and carries no information.
+      titleClean: (t) =>
+        t.replace(/^\s*pocamarket\s*[,:–-]\s*/i, '')
+         .replace(/\s*\bK-?pop\s+Photocards?\s*$/i, '')
+         .trim(),
       // Numbers come BEFORE the unit here: "7.00 USD", "12,000원".
       priceFrom: (text) =>
         money(text, /([\d,]+)\s*원/, 0) ??
@@ -851,7 +862,13 @@
   function detailTitle() {
     for (const key of SITE.titleOrder || ['h1', 'og', 'doc']) {
       const t = cleanTitle(TITLE_SOURCES[key]?.());
-      if (t) {
+      // The reject list applies to EVERY source, not only to the ranked
+      // shortlist. Neokyo's og:title and document title both say "Item
+      // Details" -- the exact generic name the ranking exists to avoid -- so
+      // filtering only `scope` meant a page where the ranking found nothing
+      // fell straight back onto it. Better to end with no name, which the
+      // panel flags, than with a plausible one that is the same on every row.
+      if (t && !SITE.titleReject?.test(t)) {
         lastTitleSource = key;
         return t;
       }

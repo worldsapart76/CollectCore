@@ -8,7 +8,7 @@ import fs from 'node:fs';
 
 const src = fs.readFileSync('extension/content/capture.js', 'utf8');
 const HOOK =
-  '  globalThis.__cc = { SITES, money, idFromLastSegment, readPrice, TITLE_SOURCES, SITE };\n})();';
+  '  globalThis.__cc = { SITES, money, idFromLastSegment, readPrice, TITLE_SOURCES, SITE, detailTitle };\n})();';
 const patched = src.replace(/\}\)\(\);\s*$/, HOOK);
 if (patched === src) throw new Error('could not find the IIFE close');
 
@@ -407,9 +407,30 @@ eq('canonical URL', pm.urlFor('498832'),
    'https://pocamarket.com/search/detail/498832');
 eq('a search link is not a listing', pm.idFrom('/search?q=hyunjin'), null);
 
+console.log('--- Pocamarket: the whole name lives in the document title ---');
+// Confirmed from the page source. On the page itself the identity is split
+// across separate fields -- the version on one line, "Stray Kids | HYUNJIN" on
+// the next -- so the heuristic ranking can only ever return half of it, and
+// half a name matches nothing in the card index.
+const PM3 = loadFor('pocamarket.com', '/search/detail/498832');
+globalThis.document.title =
+  'Pocamarket, Stray Kids HYUNJIN THIS & THAT THIS VER. K-pop Photocard';
+eq('the site name leads here, so the trailing strip does not reach it',
+   pm.titleClean(PM3.TITLE_SOURCES.doc()),
+   'Stray Kids HYUNJIN THIS & THAT THIS VER.');
+eq('group and member survive, which is the point',
+   /Stray Kids/.test(pm.titleClean(PM3.TITLE_SOURCES.doc())) &&
+   /HYUNJIN/.test(pm.titleClean(PM3.TITLE_SOURCES.doc())), true);
+eq('doc is tried first', pm.titleOrder[0], 'doc');
+eq('the plural category is stripped too',
+   pm.titleClean('Pocamarket, Felix ATE K-pop Photocards'), 'Felix ATE');
+eq('an ordinary name is untouched',
+   pm.titleClean('Stray Kids HYUNJIN ROCK-STAR'), 'Stray Kids HYUNJIN ROCK-STAR');
+
 console.log('--- Pocamarket: the landing page behind the app frame ---');
 // It renders as a mobile frame on desktop with the marketing page still in the
-// DOM beside it, in display type -- so it wins the font-size ranking outright.
+// DOM beside it, in display type -- so it would win the font-size ranking. The
+// scope path is now only the fallback, but it still has to not be wrong.
 const PM2 = loadFor('pocamarket.com', '/search/detail/498832', [
   ['The Marketplace for K-Pop Photocards', null, 48],
   ['Collect Verified Photocards of Your Bias on Pocamarket.', null, 20],
@@ -417,17 +438,58 @@ const PM2 = loadFor('pocamarket.com', '/search/detail/498832', [
 ]);
 eq('the landing headline cannot win',
    PM2.TITLE_SOURCES.scope(), 'THIS & THAT THIS VER.');
-eq('and its subhead cannot either',
-   PM2.TITLE_SOURCES.scope() === 'Collect Verified Photocards of Your Bias on Pocamarket.',
-   false);
-// Until the real name element is confirmed against a live page, every capture
-// reports its shortlist rather than presenting a guess as an answer.
-eq('the title is marked unverified', pm.titleUnverified, true);
+// A bare site name is what the document title says before the app fills it in.
+// Reduced to nothing by titleClean, it falls back to itself -- so the reject
+// list has to catch it, or every unrendered page captures as "Pocamarket".
+eq('a bare site name is rejected', pm.titleReject.test('Pocamarket'), true);
+eq('but a real name starting with it is not',
+   pm.titleReject.test('Stray Kids HYUNJIN THIS & THAT THIS VER.'), false);
+
+console.log('--- the reject list guards every source, not just the ranking ---');
+// Neokyo's og:title and document title BOTH say "Item Details" -- the exact
+// generic name the ranking exists to avoid. Filtering only the shortlist meant
+// a page where the ranking found nothing fell straight back onto it.
+eq('neokyo og would have been taken', nk.titleReject.test('Item Details'), true);
+eq('and so would its doc title', nk.titleReject.test('Item Price on Rakuma'), true);
 
 console.log('--- Pocamarket: postage is per SHIPMENT, so it is not read ---');
 // "Ship to United States from 12.00 USD -- same fee up to 40 items" is a box
 // cost. Recording it per listing would charge $12 forty times.
 eq('no per-listing shipping hook', pm.shippingFrom, undefined);
+
+
+console.log('--- the whole title chain, as it actually runs ---');
+// The pieces above are tested individually; this is detailTitle() itself,
+// which is what a capture calls. Testing the parts and not the chain is how a
+// correct cleaner and a correct source still combine into a wrong name.
+function docTitleFor(host, path, title, headings = []) {
+  const cc = loadFor(host, path, headings);
+  globalThis.document.title = title;
+  return cc.detailTitle();
+}
+eq('pocamarket: the real page title, end to end',
+   docTitleFor('pocamarket.com', '/search/detail/498832',
+     'Pocamarket, Stray Kids HYUNJIN THIS & THAT THIS VER. K-pop Photocard'),
+   'Stray Kids HYUNJIN THIS & THAT THIS VER.');
+// Before the app fills the head in, the title is the bare site name. Cleaned
+// it reduces to nothing and falls back to itself, so only the reject list
+// stops every unrendered page capturing as "Pocamarket".
+eq('an unfilled head falls through to the ranking',
+   docTitleFor('pocamarket.com', '/search/detail/498832', 'Pocamarket',
+     [['THIS & THAT THIS VER.', null, 18]]),
+   'THIS & THAT THIS VER.');
+eq('and with nothing to fall through to, no name at all',
+   docTitleFor('pocamarket.com', '/search/detail/498832', 'Pocamarket'), '');
+// The reject list now guards every source. Neokyo's og and doc both say "Item
+// Details", so a page whose ranking finds nothing must end with no name rather
+// than with the generic one.
+eq('neokyo does not fall back onto its page name',
+   docTitleFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a',
+     'Item Details | Neokyo'), '');
+eq('eBay strips its screen-reader prefix through the chain',
+   docTitleFor('www.ebay.com', '/itm/123456789012',
+     'Stray Kids Hyunjin Photocard | eBay'),
+   'Stray Kids Hyunjin Photocard');
 
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);
