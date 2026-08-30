@@ -78,7 +78,9 @@ function row(rec) {
   if (rec.itemCondition) meta.append(tag(rec.itemCondition));
   if (rec.isLot) meta.append(tag('lot', 'warn'));
   else if (rec.suspectedLot) meta.append(tag('possible lot?', 'warn'));
-  if (rec.viaFallback) meta.append(tag('DOM fallback', 'warn'));
+  // Only when something is genuinely MISSING, not merely read another way.
+  if (!rec.name) meta.append(tag('no title', 'warn'));
+  if (rec.priceCents == null) meta.append(tag('no price', 'warn'));
   if (rec.sightings?.length > 1) meta.append(tag(`seen ${rec.sightings.length}×`));
   // 'detail' means shipping and description are known for this row; on a sweep
   // row they are merely unlooked-at.
@@ -94,10 +96,9 @@ function row(rec) {
   // Fiber-scan diagnostic, shown only when the read was poor. Mercari's own
   // page console is far too noisy for a diagnostic to be noticed in, and this
   // is the information needed to find where the real item object lives.
-  if (rec.borrowed?.length) meta.append(tag(`page: ${rec.borrowed.join(', ')}`));
-
+  // The scan dump is for a broken capture, not a merely unusual one.
   const scan = rec.scanKeys;
-  if (scan && (!rec.name || rec.viaFallback || rec.borrowed?.length)) {
+  if (scan && (!rec.name || rec.priceCents == null)) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =

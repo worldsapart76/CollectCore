@@ -367,11 +367,9 @@
       }
     }
 
-    // Only a borrowed NAME or PRICE is a degraded read. A thumbnail taken from
-    // the page's own img tag is the same photo by another route, and flagging
-    // the whole capture over it made every detail capture look degraded while
-    // its actual data was complete.
-    const degraded = !stamped || borrowed.some((k) => k === 'name' || k === 'price');
+    // Degraded means the capture is actually WORSE, not merely sourced
+    // differently: no name, or no price. Where those came from is irrelevant.
+    const degraded = !merged.name || merged.price === null || merged.price === undefined;
     if (degraded) merged._viaFallback = true;
     // Recorded either way, so "why is this flagged" is answerable from the
     // panel instead of from another round of guessing.
@@ -403,14 +401,13 @@
 
   function syncDetailBar(bar, item) {
     const on = captured.has(keyFor(item.id));
-    const label = on
-      ? '✓ Captured'
-      : item._viaFallback
-        ? '+ Capture (partial read)'
-        : '+ Capture';
-    // "partial read" now means the NAME or PRICE came from the page rather
-    // than the item object -- a borrowed thumbnail is the same photo by
-    // another route and no longer counts.
+    // Two states only. There was a third, "(partial read)", which lit up
+    // whenever any field came from reading the page instead of Mercari's
+    // internal object -- including the photo, which is the same photo either
+    // way. It warned about nothing, and four rounds went into tuning the
+    // warning rather than the data. A capture missing its NAME or PRICE is a
+    // real problem and shows up in the panel; everything else is noise.
+    const label = on ? '✓ Captured' : '+ Capture';
     // Conditional writes only -- see syncDot. An unconditional textContent
     // assignment is a childList mutation, and the observer that calls this
     // watches for exactly that.
