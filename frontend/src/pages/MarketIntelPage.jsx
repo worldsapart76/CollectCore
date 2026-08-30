@@ -182,9 +182,25 @@ export default function MarketIntelPage() {
                 >
                   <div style={{ fontSize: 13, marginBottom: 2 }}>{c.label}</div>
                   <div style={{ fontSize: 11, color: "#666" }}>
-                    {sold ? `sold ${usd(sold.min)}–${usd(sold.max)} (${c.n_sold})` : "no sales"}
-                    {" · "}
-                    {active ? `asks ${usd(active.min)}–${usd(active.max)} (${c.n_active})` : "no asks"}
+                    {c.lots_only ? (
+                      // Seen only inside multi-card listings. Deliberately no
+                      // price: a bundle's total is not this card's value, and
+                      // showing one would be the error the sole-line rule
+                      // exists to prevent. The row exists so the card is
+                      // reachable at all -- without it, capturing a bundle and
+                      // linking its cards produced nothing visible anywhere.
+                      <span>
+                        in {c.n_lots} {c.n_lots === 1 ? "lot" : "lots"} · no
+                        single-card comps yet
+                      </span>
+                    ) : (
+                      <>
+                        {sold ? `sold ${usd(sold.min)}–${usd(sold.max)} (${c.n_sold})` : "no sales"}
+                        {" · "}
+                        {active ? `asks ${usd(active.min)}–${usd(active.max)} (${c.n_active})` : "no asks"}
+                        {c.n_lots > 0 && <span> · in {c.n_lots} lots</span>}
+                      </>
+                    )}
                     {c.n_unconverted > 0 && (
                       <span style={{ color: "#b45309" }}> · {c.n_unconverted} unconverted</span>
                     )}

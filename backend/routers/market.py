@@ -552,6 +552,30 @@ def comps_summary(db=Depends(get_db)):
             + " GROUP BY ln.item_id ORDER BY n DESC, ln.item_id"
         )
     ).mappings().all()
+    # Cards that appear only inside multi-card listings.
+    #
+    # The sole-line rule keeps a bundle's price out of any card's series, and
+    # that is right. But it also kept those cards out of this LIST, so a card
+    # whose only sighting is a lot had comp data at /comps/{item_id} and no row
+    # anywhere to reach it from -- capture it, link it, sync it, and the app
+    # showed nothing. Listed here with no price, which is the honest state:
+    # seen in a bundle, not yet priced on its own.
+    lot_rows = db.execute(
+        text(
+            "SELECT ln.item_id, MAX(ln.label) AS label,"
+            " COUNT(DISTINCT l.listing_id) AS n_lots,"
+            " MAX(s.observed_at) AS last_seen "
+            "FROM mkt_listing l "
+            "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+            "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+            "WHERE ln.item_id IS NOT NULL "
+            "  AND (l.is_lot = 1 OR (SELECT COUNT(*) FROM mkt_listing_line x"
+            "        WHERE x.listing_id = l.listing_id) > 1) "
+            "GROUP BY ln.item_id"
+        )
+    ).mappings().all()
+    lots_by_item = {r["item_id"]: r for r in lot_rows}
+
     basis = {
         r[0]: (r[1] if r[1] is not None else r[2])
         for r in db.execute(text(
@@ -559,10 +583,36 @@ def comps_summary(db=Depends(get_db)):
             "LEFT JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id"))
     }
     cards = []
+    seen = set()
     for r in rows:
         d = dict(r)
         d["basis_cents"] = basis.get(d["item_id"])
+        d["n_lots"] = (lots_by_item.get(d["item_id"]) or {}).get("n_lots", 0)
+        d["lots_only"] = False
+        seen.add(d["item_id"])
         cards.append(d)
+
+    for item_id, r in lots_by_item.items():
+        if item_id in seen:
+            continue
+        cards.append({
+            "item_id": item_id,
+            "label": r["label"],
+            "n": 0, "n_active": 0, "n_sold": 0,
+            "active_min": None, "active_max": None,
+            "sold_min": None, "sold_max": None,
+            "active_usd_min": None, "active_usd_max": None,
+            "sold_usd_min": None, "sold_usd_max": None,
+            "n_currencies": 0, "n_unconverted": 0,
+            "last_seen": r["last_seen"],
+            "basis_cents": basis.get(item_id),
+            "n_lots": r["n_lots"],
+            # Sorted last and rendered without a price: a card seen only in a
+            # bundle has no single-card figure, and inventing one from the
+            # bundle is the exact error the sole-line rule exists to prevent.
+            "lots_only": True,
+        })
+
     return {"cards": cards}
 
 
