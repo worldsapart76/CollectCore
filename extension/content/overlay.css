@@ -80,6 +80,17 @@
   transition: background 120ms ease, transform 120ms ease;
 }
 
+/* Neokyo parks its help-chat launcher in the bottom-right corner, exactly
+   where this button sat -- the two overlapped.
+
+   Raised rather than moved to the other corner: the bottom LEFT holds Neokyo's
+   own green buy-request button, so going sideways would only trade one
+   collision for another. Straight up clears the launcher (a ~64px circle on a
+   20px margin) and leaves both corners to the page. */
+#cc-detail-bar.cc-site-neokyo {
+  bottom: 104px;
+}
+
 #cc-detail-bar:hover {
   background: rgba(17, 17, 17, 1);
   transform: scale(1.04);

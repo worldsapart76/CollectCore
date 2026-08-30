@@ -174,6 +174,10 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
   segment moving does not break capture.
 - **Titles are Japanese**, so the picker cannot pre-filter them yet — see
   *Not built yet*.
+- **The capture button sits higher up the right edge**, not in the corner —
+  Neokyo's help-chat launcher owns that corner and the two overlapped. Its
+  position is per site, in `content/overlay.css`, because which corner is free
+  is a fact about the site.
 
 ## Two places to capture from
 

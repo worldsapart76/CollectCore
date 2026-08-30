@@ -559,6 +559,9 @@
       bar = document.createElement('button');
       bar.id = BAR_ID;
       bar.type = 'button';
+      // Which corner is free differs per site, so the stylesheet needs to know
+      // which site this is.
+      bar.classList.add(`cc-site-${SITE.code}`);
       bar.addEventListener('click', onDetailClick);
       document.body.appendChild(bar);
     }
