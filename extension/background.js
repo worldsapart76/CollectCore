@@ -15,6 +15,12 @@ import {
   clearAll,
 } from './lib/db.js';
 
+// Hosts the capture content script runs on. Must stay in step with `matches`
+// in manifest.json -- a host listed there but missing here loads the script and
+// then never gets told the session is active, so the page comes up with no
+// buttons and nothing says why.
+const CAPTURE_HOSTS = /^https:\/\/(www\.)?(mercari\.com|neokyo\.com)\//;
+
 const ACTIVE_TABS = 'activeTabs';
 const ARMED_CARD = 'armedCard';
 const CAPTURE_ON = 'captureOn';
@@ -130,7 +136,7 @@ async function closePanel(tabId) {
 // does not depend on the content script winning a race with the page.
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status !== 'complete' || !captureOn) return;
-  if (!/^https:\/\/www\.mercari\.com\//.test(tab.url || '')) return;
+  if (!CAPTURE_HOSTS.test(tab.url || '')) return;
   setActive(tabId, true).then(() =>
     tellTab(tabId, { type: 'ACTIVATION', active: true })
   );
@@ -186,10 +192,16 @@ async function setArmed(card) {
 
 // --- Capture ---------------------------------------------------------------
 
+// Mercari sizes its thumbnails from the query string, so a bigger one is free.
+// That is a Mercari CDN behaviour, not a general one -- Rakuma's img.fril.jp
+// serves Neokyo's images and an unknown `width` param there is at best ignored
+// and at worst a cache miss or a 404. So the rewrite is scoped to the CDN it
+// was learned from and every other host is left exactly as found.
 function bigThumb(url) {
   if (!url) return null;
   try {
     const u = new URL(url);
+    if (!/mercdn\.net$/.test(u.hostname)) return url;
     u.searchParams.set('width', String(IMAGE_WIDTH));
     u.searchParams.delete('height');
     return u.toString();
@@ -263,7 +275,15 @@ async function capture({
 
   const sighting = {
     observedAt: new Date().toISOString(),
+    // Native MINOR units, whatever the currency: cents on Mercari, whole yen
+    // on Neokyo. The name predates the second currency; the server reads it
+    // through the currency's own exponent, so ¥350 must arrive as 350.
     priceCents: item.price,
+    // The marketplace's own USD conversion, where it publishes one alongside
+    // the native price. Neokyo does. Recording it means that sighting needs no
+    // looked-up rate at all, and the rate it implies is the one actually
+    // charged rather than a daily average.
+    priceUsd: item.priceUsd ?? null,
     listingState: listingState(item.status),
     rawStatus: item.status,
   };

@@ -2,14 +2,18 @@
   "manifest_version": 3,
   "name": "CollectCore Market Capture",
   "version": "0.1.0",
-  "description": "Capture photocard listing data from Mercari search results while browsing. Dormant until switched on.",
+  "description": "Capture photocard listing data from Mercari and Neokyo while browsing. Dormant until switched on.",
   "permissions": [
     "storage",
     "sidePanel"
   ],
   "host_permissions": [
     "https://www.mercari.com/*",
+    "https://neokyo.com/*",
+    "https://www.neokyo.com/*",
     "https://u-mercari-images.mercdn.net/*",
+    "https://static.mercdn.net/*",
+    "https://img.fril.jp/*",
     "https://api.collectcoreapp.com/*"
   ],
   "background": {
@@ -25,7 +29,9 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.mercari.com/*"
+        "https://www.mercari.com/*",
+        "https://neokyo.com/*",
+        "https://www.neokyo.com/*"
       ],
       "js": [
         "content/capture.js"

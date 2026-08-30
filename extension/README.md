@@ -1,6 +1,7 @@
 # CollectCore Market Capture — Chrome Extension
 
-Captures photocard listing data from Mercari search results while browsing.
+Captures photocard listing data from **Mercari US** (sell side and buy side)
+and **Neokyo** (buy side, proxying Mercari JP and Rakuma) while browsing.
 Design doc: [`docs/photocard_market_intel_plan.md`](../docs/photocard_market_intel_plan.md).
 
 ## There is no build step
@@ -11,8 +12,8 @@ Design doc: [`docs/photocard_market_intel_plan.md`](../docs/photocard_market_int
 - Nothing here goes into `backend/frontend_dist/`.
 - Nothing here deploys to Railway. It runs only in your local Chrome.
 
-After any code change: **reload the extension, then refresh the Mercari tab.**
-That is the whole workflow.
+After any code change: **reload the extension, then refresh the marketplace
+tab.** That is the whole workflow.
 
 ## Install (once)
 
@@ -28,7 +29,7 @@ That is the whole workflow.
 
 1. Go to `chrome://extensions`
 2. Click the **↻ reload** icon on the CollectCore card
-3. **Refresh every open Mercari tab**
+3. **Refresh every open Mercari and Neokyo tab**
 
 **Step 3 is required after *any* reload**, not just when content-script files
 changed. Reloading the extension orphans the content script already running in
@@ -41,7 +42,7 @@ capturing"*, and clicking it reloads the page.
 
 ## Using it
 
-The extension is **dormant until you switch it on.** Browsing Mercari for
+The extension is **dormant until you switch it on.** Browsing either site for
 anything else looks completely normal — no overlays, no panel.
 
 | Action | How |
@@ -61,7 +62,7 @@ anything else looks completely normal — no overlays, no panel.
 
 ### Capture is a session, not a tab
 
-Switching on once covers **every Mercari tab you open afterwards**, which is
+Switching on once covers **every supported tab you open afterwards**, which is
 what the tab-at-a-time workflow needs — open several listings, capture the good
 ones, close them. Activation used to be per tab, so each newly opened listing
 came up dormant with no button and nothing explaining why.
@@ -155,10 +156,24 @@ means turns capture off. Chrome opens the panel natively on the toolbar click
 (`openPanelOnActionClick`); the extension never calls `sidePanel.open()`, which
 can only run inside a live user gesture and fails silently when it doesn't.
 
-Activation is **per tab**, so a second Mercari tab stays clean for ordinary
-browsing.
-
 The toolbar badge reads **ON** while the current tab is capturing.
+
+## What differs on Neokyo
+
+It is a **proxy**, and that shapes the data rather than just the parsing.
+
+- **Buy side only, and active only.** A proxy lists what can still be bought, so
+  no sold comps come from there. That is not a gap in the parser; it is what the
+  buy side *is*. Sold comps come from Mercari US.
+- **Prices are yen, and yen has no subunit.** ¥1,200 is stored as `1200`, not
+  `120000`. Every display goes through the currency's own exponent.
+- **No React fiber.** The page is server-rendered, so `content/fiber.js` is
+  deliberately not injected there and the DOM read is the whole parser.
+- **The listing id is the tail of the URL** and the URL is recorded as found.
+  Neokyo's path layout is not hardcoded anywhere, so a locale or provider
+  segment moving does not break capture.
+- **Titles are Japanese**, so the picker cannot pre-filter them yet — see
+  *Not built yet*.
 
 ## Two places to capture from
 
@@ -176,10 +191,13 @@ not see.
 
 ## What it captures
 
-Read off React's fiber (tiles verified 2026-08-28, detail pages 2026-08-29):
+On Mercari, read off React's fiber (tiles verified 2026-08-28, detail pages
+2026-08-29). On Neokyo there is no fiber — the page is server-rendered and the
+DOM read below is the only path, not a fallback:
 
-`id` · `name` · `price` (integer USD cents) · `status` · `itemCondition` ·
-`category` / `categoryId` · `brand` · `thumbnail`
+`id` · `name` · `price` (integer **minor units of the site's currency** — see
+Currency below) · `status` · `itemCondition` · `category` / `categoryId` ·
+`brand` · `thumbnail`
 
 **Only from a listing's own page:** `shippingPayerCode` (who pays shipping),
 the full `description`, the seller id, and the complete photo set. All of these
@@ -221,17 +239,17 @@ invisible to them. The walk therefore runs in `content/fiber.js`, declared
 not. **Do not move that walk into `capture.js`** — it will silently fall back to
 DOM scraping, which is exactly what happened on 2026-08-28.
 
-### If a detail capture reads "(partial read)"
+### When a capture comes back thin
 
-The button says **+ Capture (partial read)** when the page's own DOM had to
-supply the title or image because the fiber scan did not. The capture still
-works and is tagged `DOM fallback` in the panel — it is flagged rather than
-hidden, because a silently degraded capture is worse than a loud one.
+A capture is flagged **DOM fallback** only when it is genuinely worse — no
+title, or no price. Where a field was *read from* is not itself a problem: on
+Neokyo, reading the page is the only way, because the site is server-rendered
+and there is no React fiber to read.
 
-To help fix it: open DevTools on that listing (F12 → Console) and look for a
-line starting `[CollectCore] detail fiber scan:`. It prints how many candidate
-objects carried the listing id and what keys each had. That says where Mercari
-actually keeps the item, which is the one thing guessing has not settled.
+There used to be a **(partial read)** badge on the detail button that lit up
+whenever any single field came off the page rather than out of Mercari's
+internal object — including the photo, which is the same photo either way. It
+warned about nothing and was removed.
 
 ### If Mercari changes and captures stop working
 
@@ -278,14 +296,22 @@ bundle at $60 is real market signal, it just is not that card selling for $60.
 ## Sources and currency
 
 `marketplace` is recorded on every listing, and the DB knows four sources —
-`mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD). Only
-Mercari US has a capture parser so far; the rest are declared so the schema,
-comps, and currency handling are ready.
+`mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD).
+**Mercari US and Neokyo have capture parsers**; Pocamarket and eBay are declared
+so the schema, comps, and currency handling are ready for them.
 
-**Adding a site** means: an entry in `SITES` at the top of
-`content/capture.js`, its host in `matches` in *both* content-script blocks in
-`manifest.json`, and its tile selector in `content/fiber.js`. Nothing else in
-the extension knows any marketplace's URL shape.
+**Adding a site** means an entry in `SITES` at the top of `content/capture.js`
+and its host in `matches` in the `capture.js` content-script block of
+`manifest.json`. A **React** site additionally needs `hasFiber: true`, its host
+in the second (`"world": "MAIN"`) block, and its tile selector in
+`content/fiber.js`. A server-rendered site needs none of that — but everything
+the capture requires (price, title, a photo) has to be reachable from the DOM,
+since there is no page-world object to fall back to.
+
+Nothing else in the extension knows any marketplace's URL shape. Where a site
+can rebuild a listing URL from its id it declares `urlFor`; otherwise the
+anchor's own `href` is recorded, which is always right and needs no knowledge
+of the path layout.
 
 ### Currency
 
@@ -301,6 +327,12 @@ now" are different questions that disagree whenever a currency moves.
   existed. A capture is never blocked on a missing rate.
 - When a site does its own conversion (Neokyo shows USD beside the yen), that
   figure wins — it is what actually gets charged.
+- **That conversion also puts a rate on file.** Syncing a Neokyo capture records
+  the rate its own USD figure implies, so yen *fees* start converting to USD
+  without anyone entering a rate by hand. Per currency per day it keeps the rate
+  implied by the **largest** listing — the published USD figure is rounded, so
+  ¥12,000 → $79.20 pins the rate far more tightly than ¥350 → $2.31 — and it
+  never overwrites a rate already on file for that day.
 - `GET /market/fx` lists rates and names any currency with **no rate on file**,
   so a gap is visible rather than silently dropping those sightings out of
   comps.
@@ -311,9 +343,16 @@ is a USD-only assumption.
 
 ## Not built yet
 
-Capture parsers for Neokyo, Pocamarket, and eBay. Lot line entry beyond a
-card list (quantities, non-card items, unidentified placeholders). Automatic
-sync. Image blobs still stay local — sync sends the thumbnail URL only.
+Capture parsers for Pocamarket and eBay. Lot line entry beyond a card list
+(quantities, non-card items, unidentified placeholders). Automatic sync. Image
+blobs still stay local — sync sends the thumbnail URL only.
+
+**Japanese titles do not filter the card picker.** `lib/matcher.js` tokenizes
+Latin only, so a Neokyo title produces no chips and the panel says
+*"Japanese title — not readable yet, search for the card"* rather than
+presenting the whole library as if it had matched something. Use the search box.
+Segmentation plus a kana/kanji alias layer is the fix, and `ALIASES` is the seam
+it hangs off.
 
 The planned **enrich** tier — queueing ids and fetching detail pages in the
 background — was dropped rather than deferred. Its queue, throttle and session

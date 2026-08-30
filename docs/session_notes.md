@@ -6,6 +6,55 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-29 (US CDT) — Neokyo capture BUILT (second marketplace, buy side)
+
+The second capture source, and the first server-rendered one. Mercari is a
+React app read through its fiber; Neokyo has no fiber at all, so the DOM read
+that was a *fallback* there is the *whole parser* here.
+
+- **Per-site rules, not per-site code.** `SITES` in `content/capture.js` now
+  carries price, sold-state, photo-host and id extraction per marketplace, so
+  nothing about a source lives outside its own entry. `content/fiber.js` is
+  deliberately not injected on Neokyo.
+- **The URL shape is not hardcoded anywhere.** The listing id is the tail of
+  the path and the URL is recorded as found, so a locale or provider segment
+  moving does not break capture. Only a site that CAN rebuild its URL from an
+  id declares `urlFor`.
+- **The JPY path was declared but never exercised, and it had a real bug.** The
+  panel formatted every price as `$x.xx` from a hardcoded /100, so ¥1,200 would
+  have read as $12.00. Prices are minor units of their own currency and yen has
+  no subunit. Same class of bug as the fee fields a few days ago.
+- **Neokyo's own USD conversion now sets an FX rate.** It prints USD beside the
+  yen; syncing records the rate that implies, so yen *fees* convert without a
+  rate being entered by hand — which was a listed prerequisite. Per currency
+  per day it keeps the rate from the **largest** listing (published USD is
+  rounded: ¥12,000 → $79.20 pins the rate far tighter than ¥350 → $2.31) and
+  never overwrites a rate already on file.
+- **A latent bug found on the way:** every *detail* capture was flagged
+  `via_fallback`. The flag was only ever set true, and the DOM read it merges
+  over always arrives true on a fiber site. It now means what it says — no
+  title, or no price.
+
+**Known limitation, surfaced rather than hidden:** `lib/matcher.js` tokenizes
+Latin only, so a Japanese title filters nothing and the picker would return the
+entire 11,323-card library looking like a confident match. It now says
+*"Japanese title — not readable yet, search for the card"*. Segmentation plus a
+kana/kanji alias layer is the fix. Hangul is deliberately not covered yet —
+that belongs with Pocamarket.
+
+**Tested rather than assumed**, given the site's markup could not be inspected
+from here: 21 `node` cases over the parsing (yen vs cents, full-width ￥,
+`1,200円`, sold-out in both languages, id extraction and the rejection of nav
+and category paths), the matcher regression still 12/12, and a fresh-DB round
+trip through `POST /market/captures` proving ¥350 stays 350, `fx_source =
+'marketplace'`, and `fee_model('neokyo','buy')` converting ¥350 to $2.31 with
+`fx_missing` false.
+
+**Next:** first live Neokyo run — the selectors are defensive but unverified
+against the real page. Then the ledger (box → purchase → line → outcome →
+sale), thumbnail upload to R2, promoting `source_dates` to real
+`posted_at`/`sold_at` columns, and ship-name aliases.
+
 ### 2026-08-29 (US CDT) — Detail-page capture BUILT + WORKING (third block)
 
 Capture from a listing's own page, not just search tiles. Confirmed working

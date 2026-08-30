@@ -182,6 +182,8 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
     rather than a duplicate row.
     """
     listings_new = sightings_new = lines_new = 0
+    # {(currency, YYYY-MM-DD): (usd_per_unit, native_price_it_came_from)}
+    implied_fx: Dict[Any, Any] = {}
 
     for cap in batch.captures:
         currency = cap.currency or marketplace_currency(db, cap.marketplace)
@@ -303,6 +305,15 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
             if s.priceUsd is not None:
                 usd, fx_source = s.priceUsd, "marketplace"
                 fx = implied_rate(s.priceCents, currency, s.priceUsd)
+                # Keep the best implied rate seen per (currency, day). Best
+                # means the LARGEST native price: the marketplace publishes a
+                # rounded USD figure, so ¥350 -> $2.31 pins the rate to about
+                # three digits while ¥12,000 -> $79.20 pins it to five.
+                if fx is not None:
+                    day = (s.observedAt or cap.capturedAt)[:10]
+                    prev = implied_fx.get((currency, day))
+                    if prev is None or (s.priceCents or 0) > prev[1]:
+                        implied_fx[(currency, day)] = (fx, s.priceCents or 0)
             else:
                 fx = rate_for(db, currency, s.observedAt)
                 fx_source = "table" if fx is not None else None
@@ -330,6 +341,34 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
             )
             sightings_new += res.rowcount or 0
 
+    # A marketplace that publishes its own USD conversion is also telling you
+    # its exchange rate, and that is the rate you are actually charged -- spread
+    # included -- rather than a mid-market number looked up later. Recording it
+    # is what lets Neokyo's yen fees convert to USD without anyone having to go
+    # and enter a rate by hand first.
+    #
+    # DO NOTHING on conflict: a rate already on file for that day was either
+    # entered deliberately or derived from a bigger, more precise listing, and
+    # neither should be overwritten by a later small one.
+    rates_new = 0
+    for (cur, day), (rate, _price) in implied_fx.items():
+        if cur == "USD":
+            continue
+        res = db.execute(
+            text(
+                "INSERT INTO mkt_fx_rate (currency, as_of_date, usd_per_unit,"
+                " source, note) VALUES (:c, :d, :r, 'marketplace', :n) "
+                "ON CONFLICT(currency, as_of_date) DO NOTHING"
+            ),
+            {
+                "c": cur,
+                "d": day,
+                "r": rate,
+                "n": "implied by a captured listing's own USD conversion",
+            },
+        )
+        rates_new += res.rowcount or 0
+
     db.commit()
     return {
         "ok": True,
@@ -337,6 +376,7 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
         "listings_new": listings_new,
         "sightings_new": sightings_new,
         "lines_written": lines_new,
+        "fx_rates_new": rates_new,
     }
 
 

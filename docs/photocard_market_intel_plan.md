@@ -1,7 +1,8 @@
 # Photocard Market Intel — Design & Implementation Plan
 
 **Status:** capture + comps **BUILT** 2026-08-29 (slices 1-5, live in prod).
-Ledger designed, not built. Neokyo / Pocamarket / eBay declared, no parsers yet.
+Neokyo capture **BUILT** 2026-08-29 (buy side, JPY). Ledger designed, not
+built. Pocamarket / eBay declared, no parsers yet.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -302,7 +303,7 @@ only the assumption that comps flow one direction.
 | Site | Currency | Side | States | Parser |
 |---|---|---|---|---|
 | **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
-| **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | Server-rendered HTML — POC-validated, next |
+| **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT** — server-rendered DOM, no fiber |
 | **Pocamarket** | KRW | both | tbd | Declared, no parser |
 | **eBay** | USD | both | tbd | Declared, no parser |
 
@@ -1570,12 +1571,47 @@ No backup changes needed.
    by the sweep. The card detail reads
    *cost $2.50 (Older era) · margin $10.50 vs sold median $13.00 · ESTIMATED*.
    Margin is computed against the **sold** median, never the asking median.
+12. **Neokyo capture** (buy side, JPY) — the second marketplace, and the first
+    server-rendered one. `SITES` in `content/capture.js` gained per-site price,
+    sold-state, photo-host and id rules, so nothing about a marketplace lives
+    outside its own entry; `content/fiber.js` is deliberately **not** injected
+    on Neokyo, which makes the DOM read the whole parser rather than a fallback.
+
+    Three things this forced, all of which are the JPY path finally being
+    exercised rather than merely declared:
+
+    - **Minor units end to end.** ¥1,200 is `1200`, never `120000` and never
+      `12.00`. The panel formatted every price as `$x.xx` off a hardcoded
+      /100 — the same currency bug that got the Neokyo fee fields entered
+      wrong once already.
+    - **The marketplace's own USD conversion now sets an FX rate.** Neokyo
+      prints USD beside the yen; syncing records the rate that implies, so yen
+      *fees* convert without a rate being entered by hand first. Per currency
+      per day it keeps the rate from the **largest** listing (the published USD
+      is rounded, so ¥12,000 → $79.20 pins it far tighter than ¥350 → $2.31)
+      and never overwrites a rate already on file.
+    - **The URL shape is not hardcoded.** The id is the tail of the path and
+      the listing URL is recorded as found, so a locale or provider segment
+      moving does not break capture.
+
+    Also fixed in passing: every *detail* capture was being flagged
+    `via_fallback`, because the flag was only ever set true and the DOM read it
+    merges over always arrives true on a fiber site. Now it means what it says —
+    no title, or no price.
+
+    Verified by `node` against the parsing (21 cases: yen vs cents, full-width
+    ￥, `1,200円`, sold-out in both languages, id extraction and rejection) and
+    by a fresh-DB round trip through `POST /market/captures` proving ¥350 stays
+    350, `fx_source = 'marketplace'`, and `fee_model('neokyo','buy')` converting
+    ¥350 to $2.31 with `fx_missing` false.
 
 ### Next
 
-- **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
-  read — plain DOM parsing, more brittle but simpler. Brings the Japanese
-  lexicon into play and is the first live exercise of the JPY path.
+- **Japanese title matching.** Neokyo capture works but its titles do not filter
+  the card picker: `lib/matcher.js` tokenizes Latin only, so a Japanese title
+  yields no chips. The picker now says so outright rather than returning the
+  whole library as an apparent match, and the search box is the workaround.
+  Segmentation plus a kana/kanji alias layer is the fix; `ALIASES` is the seam.
 - **Thumbnail upload to R2** — see the known gap under Images.
 - **Ledger** — box → purchase → line → outcome → sale.
 - **Ship-name aliases** (`Minsung`, `Hyunlix`, `Seungjin`). Sellers use them

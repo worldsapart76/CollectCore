@@ -8,31 +8,140 @@
 (() => {
   // Supported sources, keyed by hostname.
   //
-  // ADDING A SITE: add an entry here, add its host to `matches` in both
-  // content_scripts blocks in manifest.json, and add the same selector to
-  // content/fiber.js. If the site is not React, fiber.js finds nothing and the
-  // DOM fallback in this file carries it — which is why `price` has to be
-  // extractable from the tile.
+  // ADDING A SITE: add an entry here and add its host to `matches` in the
+  // capture.js content_scripts block in manifest.json. Only a React site needs
+  // the second (MAIN-world) block and a selector in content/fiber.js; set
+  // `hasFiber` for those. A server-rendered site is read from the DOM alone,
+  // which is why `price`, `name` and a photo all have to be reachable from the
+  // tile without any page-world help.
   //
   // Content scripts cannot import modules, so this registry lives inline
   // rather than in lib/. Keep it in step with lkup_mkt_marketplaces.
+  // `price` is always in the site currency's MINOR units — cents on Mercari,
+  // whole yen on Neokyo. JPY has no subunit, so ¥350 is 350 and dividing it by
+  // 100 anywhere is the classic currency bug. The backend agrees (minor_exp).
   const SITES = {
     'www.mercari.com': {
       code: 'mercari_us',
       currency: 'USD',
+      minorExponent: 2,
+      // React app: content/fiber.js reads the real item object in the page
+      // world and stamps it on the tile. The DOM read below is the fallback.
+      hasFiber: true,
       tiles: 'a[href*="/item/m"]',
       idFrom: (href) => href.match(/\/item\/(m\d+)/)?.[1] || null,
       urlFor: (id) => `https://www.mercari.com/us/item/${id}/`,
       queryParam: 'keyword',
+      priceFrom: (text) => money(text, /\$\s?([\d,]+(?:\.\d{2})?)/, 2),
+      // A tile is short and its only "sold" is the badge, so a bare word is
+      // safe there. A detail page is not: its description can say "sold out
+      // elsewhere", and reading that as a sale would invent a comp out of
+      // nothing. Two patterns, because the two surfaces carry different risks.
+      tileSoldFrom: (text) => /\bsold\b/i.test(text),
+      soldFrom: (text) =>
+        /\bitem sold\b|\bsold\s+\d+\s*(h|m|d|hour|min|day)/i.test(text),
+      photoHost: /mercdn\.net\/photos\//,
     },
+
+    // Proxy for Mercari JP and Rakuma. Server-rendered, so there is no fiber to
+    // read and content/fiber.js is deliberately not injected here — the DOM
+    // path below is the ONLY path, which is why it has to stand on its own.
+    //
+    // Active-only by nature: a proxy lists what can still be bought, so no sold
+    // comps come from here. That is not a gap, it is what the buy side is.
+    'neokyo.com': {
+      code: 'neokyo',
+      currency: 'JPY',
+      minorExponent: 0,
+      // The path prefix is not hardcoded. Matching on `/product/` alone
+      // survives a locale segment (`/en/`), a provider segment, and any
+      // reshuffling of either — none of which change what the link IS.
+      tiles: 'a[href*="/product/"]',
+      idFrom: idFromLastSegment,
+      // idFromLastSegment only knows "long, has a digit", which a category or
+      // page-number segment can also satisfy. This says which paths are
+      // actually listings, so a capture bar never appears on a browse page.
+      detailPath: /\/product\//,
+      // No urlFor: the anchor's own href is the URL, so nothing has to be
+      // reconstructed from a shape this file would have to know.
+      queryParam: 'keyword',
+      // ¥1,234 and 1,234円 are both current on Neokyo depending on where the
+      // number is rendered. Whole yen: no decimals, exponent 0.
+      priceFrom: (text) =>
+        money(text, /[¥￥]\s?([\d,]+)/, 0) ?? money(text, /([\d,]+)\s*円/, 0),
+      // Neokyo prints its own USD conversion beside the yen. Recorded as the
+      // marketplace's own number rather than converted here — it beats any
+      // rate we would look up, and it gives the JPY rate for free.
+      usdFrom: (text) => money(text, /\$\s?([\d,]+(?:\.\d{2})?)/, 2),
+      soldFrom: (text) => /\bsold\s*out\b|売り切れ|販売終了/i.test(text),
+      photoHost: /img\.fril\.jp|mercdn\.net/,
+    },
+
     // Not built yet — see docs/photocard_market_intel_plan.md:
-    //   neokyo      (JPY, buy side, server-rendered so no fiber read)
     //   pocamarket  (KRW)
     //   ebay        (USD)
   };
 
-  const SITE = SITES[location.hostname];
+  const SITE = SITES[location.hostname] || SITES[location.hostname.replace(/^www\./, '')];
   if (!SITE) return; // not a supported source; stay entirely inert
+
+  // --- Site helpers --------------------------------------------------------
+
+  // Pulls a number out of page text and returns it in minor units. `exponent`
+  // is the currency's, not the match's: 2 turns 12.34 into 1234, 0 leaves 1234
+  // alone.
+  function money(text, re, exponent) {
+    const m = String(text || '').match(re);
+    if (!m) return null;
+    const n = parseFloat(m[1].replace(/,/g, ''));
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 10 ** exponent);
+  }
+
+  // Text of the first element matching any of `selectors`. Used to read a
+  // price from the element that holds it rather than from the whole page,
+  // where a currency switcher or a shipping quote can appear above it.
+  function scopedText(selectors) {
+    for (const sel of selectors || []) {
+      const el = document.querySelector(sel);
+      const t = (el?.textContent || '').trim();
+      if (t) return t;
+    }
+    return null;
+  }
+
+  // Last meaningful path segment, for sites whose listing id is the tail of
+  // the URL and whose prefix we would otherwise have to guess. Guarded so a
+  // nav link like /en/about never reads as a listing.
+  function idFromLastSegment(href) {
+    let path;
+    try {
+      path = new URL(href, location.origin).pathname;
+    } catch {
+      return null;
+    }
+    const seg = path.split('/').filter(Boolean).pop() || '';
+    // An id is long and contains a digit. Category and locale segments are
+    // neither, so this rejects them without knowing what they are called.
+    if (seg.length < 6 || !/\d/.test(seg)) return null;
+    return seg;
+  }
+
+  // The canonical URL for a listing. A site that can rebuild it from the id
+  // does so; otherwise the anchor's own resolved href is used, which is always
+  // right and needs no knowledge of the site's URL shape.
+  function urlForListing(id, anchor) {
+    if (SITE.urlFor) return SITE.urlFor(id);
+    if (anchor) return new URL(anchor.getAttribute('href'), location.origin).href;
+    return location.href.split('?')[0];
+  }
+
+  // A page is a listing's own page when its URL yields an id the same way a
+  // tile href does. Nothing site-specific beyond idFrom, which already exists.
+  function detailIdFromUrl() {
+    if (SITE.detailPath && !SITE.detailPath.test(location.pathname)) return null;
+    return SITE.idFrom(location.pathname) || null;
+  }
 
   const DOT_CLASS = 'cc-capture-dot';
 
@@ -89,23 +198,64 @@
 
   // Fallback for when React internals move under us. Gets less, but keeps the
   // extension working rather than failing silently on a Mercari deploy.
+  //
+  // On a site with no fiber at all — Neokyo is server-rendered — this is not a
+  // fallback, it is the only reader. Hence _viaFallback below is set from
+  // whether the site HAS a fiber path, not from having landed here.
   function itemFromDom(anchor) {
     const id = idFromHref(anchor);
     if (!id) return null;
     const text = anchor.textContent || '';
-    const dollars = text.match(/\$\s?([\d,]+(?:\.\d{2})?)/)?.[1];
     return {
       id,
-      name: anchor.querySelector('img')?.getAttribute('alt') || '',
-      price: dollars ? Math.round(parseFloat(dollars.replace(/,/g, '')) * 100) : null,
-      status: /\bsold\b/i.test(text) ? 'trading' : 'on_sale',
-      thumbnail: anchor.querySelector('img')?.src || null,
+      // A tile's own text is the title on a server-rendered card and the alt
+      // text on an image-only one. Neither is guaranteed, so try both.
+      name:
+        anchor.querySelector('img')?.getAttribute('alt') ||
+        tileTitle(anchor) ||
+        '',
+      price: SITE.priceFrom(text),
+      priceUsd: SITE.usdFrom ? SITE.usdFrom(text) : null,
+      status: (SITE.tileSoldFrom || SITE.soldFrom)(text) ? 'trading' : 'on_sale',
+      thumbnail: tilePhoto(anchor),
       itemCondition: null,
       category: null,
       categoryId: null,
       brand: null,
-      _viaFallback: true,
+      _viaFallback: !!SITE.hasFiber,
     };
+  }
+
+  // The tile's visible heading. Falls back to its whole text only when there is
+  // no element-level title, and drops the price line out of it — a title with
+  // "¥1,200" welded onto the end matches nothing in the card index.
+  function tileTitle(anchor) {
+    const el = anchor.querySelector(
+      'h1, h2, h3, h4, [class*="title"], [class*="name"]'
+    );
+    const raw = (el?.textContent || anchor.textContent || '').trim();
+    return raw
+      .replace(/[¥￥$]\s?[\d,]+(?:\.\d{2})?/g, ' ')
+      .replace(/[\d,]+\s*円/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Prefer a photo on the site's own image CDN; take any image rather than
+  // none, since a wrong-looking thumbnail is visibly wrong in the panel while
+  // a missing one just looks broken.
+  function tilePhoto(anchor) {
+    const imgs = [...anchor.querySelectorAll('img')];
+    const hosted = imgs.find((i) => SITE.photoHost.test(i.currentSrc || i.src || ''));
+    const pick = hosted || imgs[0];
+    // Lazy-loaded tiles carry the real URL in data-src until they scroll in.
+    return (
+      pick?.currentSrc ||
+      pick?.src ||
+      pick?.dataset?.src ||
+      pick?.getAttribute('data-original') ||
+      null
+    );
   }
 
   function readItem(anchor) {
@@ -191,7 +341,7 @@
         item,
         marketplace: SITE.code,
         currency: SITE.currency,
-        listingUrl: SITE.urlFor(id),
+        listingUrl: urlForListing(id, anchor),
         pageUrl: location.href,
         searchQuery: searchQuery(),
       },
@@ -266,19 +416,23 @@
       ?.getAttribute('content')
       ?.trim();
     if (og) return og;
-    return (document.title || '').replace(/\s*[|\-–]\s*Mercari.*$/i, '').trim();
+    // Every marketplace suffixes its own name onto the document title.
+    return (document.title || '')
+      .replace(/\s*[|\-–]\s*(Mercari|Neokyo)[^|\-–]*$/i, '')
+      .trim();
   }
 
   function detailPhoto() {
-    // Largest Mercari-CDN photo, EXCEPT that a not-yet-decoded image reports
-    // zero dimensions -- so the first match is taken as a baseline and only
-    // replaced by something measurably bigger. Requiring area > 0 to win is
-    // what left the button unrendered on pages whose photos had not loaded.
+    // Largest photo on the site's own image CDN, EXCEPT that a not-yet-decoded
+    // image reports zero dimensions -- so the first match is taken as a
+    // baseline and only replaced by something measurably bigger. Requiring
+    // area > 0 to win is what left the button unrendered on pages whose photos
+    // had not loaded.
     let best = null;
     let bestArea = -1;
     for (const img of document.querySelectorAll('img')) {
       const src = img.currentSrc || img.src || '';
-      if (!/mercdn\.net\/photos\//.test(src)) continue;
+      if (!SITE.photoHost.test(src)) continue;
       const area =
         (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
       if (area > bestArea) {
@@ -303,9 +457,12 @@
 
     const body = document.body.innerText || '';
     // Mercari renders the discounted price before the struck-through original,
-    // so the FIRST match is what the item actually costs.
-    const dollars = body.match(/\$\s?([\d,]+(?:\.\d{2})?)/)?.[1];
-    const sold = /\bitem sold\b|\bsold\s+\d+\s*(h|m|d|hour|min|day)/i.test(body);
+    // so the FIRST match in the body is what the item actually costs. That
+    // holds only where the body's first price IS the item's -- a page with a
+    // currency switcher or a shipping quote above the fold needs the price
+    // read from a narrower element, which is what priceScope is for.
+    const priceText = scopedText(SITE.priceScope) ?? body;
+    const sold = SITE.soldFrom(body);
 
     // Being on a listing URL is enough to offer a capture. Bailing out when the
     // title or photo could not be read is what made the button vanish
@@ -313,7 +470,10 @@
     return {
       id,
       name: detailTitle(),
-      price: dollars ? Math.round(parseFloat(dollars.replace(/,/g, '')) * 100) : null,
+      price: SITE.priceFrom(priceText),
+      // The marketplace's own conversion, where it publishes one. Its rate is
+      // the one actually charged, so it beats anything looked up later.
+      priceUsd: SITE.usdFrom ? SITE.usdFrom(priceText) : null,
       status: sold ? 'trading' : 'on_sale',
       thumbnail: detailPhoto(),
       itemCondition: null,
@@ -325,7 +485,10 @@
       sellerId: null,
       photos: null,
       dates: null,
-      _viaFallback: true,
+      // On a site with a fiber, having to read the page IS the fallback. On a
+      // server-rendered one it is simply how the page is read, and flagging it
+      // would mark every Neokyo capture degraded for no reason.
+      _viaFallback: !!SITE.hasFiber,
     };
   }
 
@@ -370,7 +533,10 @@
     // Degraded means the capture is actually WORSE, not merely sourced
     // differently: no name, or no price. Where those came from is irrelevant.
     const degraded = !merged.name || merged.price === null || merged.price === undefined;
-    if (degraded) merged._viaFallback = true;
+    // Set both ways. This only ever set it TRUE, and the scraped read it
+    // merges over always arrived true on a fiber site -- so every detail
+    // capture was flagged degraded, including the clean ones.
+    merged._viaFallback = degraded || (!!SITE.hasFiber && !stamped);
     // Recorded either way, so "why is this flagged" is answerable from the
     // panel instead of from another round of guessing.
     if (borrowed.length) merged._borrowed = borrowed;
@@ -445,7 +611,7 @@
         item,
         marketplace: SITE.code,
         currency: SITE.currency,
-        listingUrl: SITE.urlFor(item.id),
+        listingUrl: urlForListing(item.id, null),
         pageUrl: location.href,
         searchQuery: null, // arrived at directly, not through a search
       },
@@ -456,10 +622,6 @@
     // open a tab, capture, close it. Closing on an unconfirmed capture is how
     // a listing gets silently lost.
     syncDetailBar(bar, item);
-  }
-
-  function detailIdFromUrl() {
-    return location.pathname.match(/\/item\/(m\d+)/)?.[1] || null;
   }
 
   function decorateAll() {

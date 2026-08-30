@@ -8,7 +8,36 @@ import * as cardIndex from '../lib/cardIndex.js';
 import { apiFetch, SIGNIN_HINT } from '../lib/api.js';
 
 const $ = (id) => document.getElementById(id);
-const usd = (cents) => (cents == null ? '—' : `$${(cents / 100).toFixed(2)}`);
+// Prices are stored in the marketplace's own MINOR units, and how many minor
+// units make one unit differs: 100 cents to the dollar, but the yen has no
+// subunit at all. Dividing everything by 100 turned ¥1,200 into ¥12.00 and
+// stamped a dollar sign on it -- the same currency bug that got the Neokyo fee
+// fields entered wrong once already.
+const EXPONENT = { USD: 2, JPY: 0, KRW: 0 };
+const SYMBOL = { USD: '$', JPY: '¥', KRW: '₩' };
+
+function money(minor, currency = 'USD') {
+  if (minor == null) return '—';
+  const code = (currency || 'USD').toUpperCase();
+  const exp = EXPONENT[code] ?? 2;
+  const sym = SYMBOL[code] || '';
+  const n = (minor / 10 ** exp).toFixed(exp);
+  // With no symbol for it, the code still has to be visible -- an unlabelled
+  // bare number is how a foreign price gets read as dollars.
+  return sym ? `${sym}${n}` : `${n} ${code}`;
+}
+
+// What a record's price is, in its own currency, with the marketplace's own
+// USD conversion after it where there is one. Neokyo publishes that
+// conversion; showing it is what makes a yen price comparable at a glance to
+// the USD comps beside it.
+function priceLabel(rec) {
+  const native = money(rec.priceCents, rec.currency);
+  const cur = (rec.currency || 'USD').toUpperCase();
+  if (cur === 'USD') return native;
+  const usdMinor = rec.sightings?.[rec.sightings.length - 1]?.priceUsd;
+  return usdMinor == null ? native : `${native} (${money(usdMinor, 'USD')})`;
+}
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
 
@@ -73,7 +102,7 @@ function row(rec) {
   meta.className = 'meta';
   const price = document.createElement('span');
   price.className = 'price';
-  price.textContent = usd(rec.priceCents);
+  price.textContent = priceLabel(rec);
   meta.append(price, stateTag(rec));
   if (rec.itemCondition) meta.append(tag(rec.itemCondition));
   if (rec.isLot) meta.append(tag('lot', 'warn'));
@@ -286,8 +315,15 @@ async function renderCandidates() {
   $('assoc-chips').replaceChildren(...res.chips.map(chipEl));
 
   const bits = [`${res.total.toLocaleString()} candidates`];
-  if (res.widened) bits.push('widened to avoid an empty result');
-  if (res.lowConfidence) bits.push('no member matched — may not be your group');
+  if (res.unreadableTitle) {
+    // Say it once and plainly. The matcher is Latin-only, so a Japanese title
+    // filters nothing -- without this the panel shows the entire library and
+    // looks like it simply failed.
+    bits.push('Japanese title — not readable yet, search for the card');
+  } else {
+    if (res.widened) bits.push('widened to avoid an empty result');
+    if (res.lowConfidence) bits.push('no member matched — may not be your group');
+  }
   $('assoc-summary').textContent = bits.join(' · ');
 
   $('assoc-grid').replaceChildren(...res.cards.map(cardTile));
@@ -355,7 +391,7 @@ function openAssociate(rec) {
   $('assoc-lot').checked = !!rec.isLot;
   $('assoc-search').value = '';
 
-  const facts = [usd(rec.priceCents)];
+  const facts = [priceLabel(rec)];
   if (rec.itemCondition) facts.push(rec.itemCondition);
   facts.push(rec.listingState);
   $('assoc-facts').textContent = facts.join(' · ');

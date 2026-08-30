@@ -63,6 +63,13 @@ const TITLE_STOPWORDS = new Set([
   'ver', 'version', 'new', 'rare', 'mint', 'sealed', 'authentic',
 ]);
 
+// Kana, kanji and full-width punctuation. Nothing here survives tokenize(),
+// which is Latin-only, so a title made of these produces no chips at all.
+// Written as script properties rather than as codepoint ranges: it says what it
+// means, and a range whose endpoints are raw CJK characters is a line nobody
+// can proofread.
+const HAS_CJK = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
+
 // --- Index -----------------------------------------------------------------
 
 // Sellers write "Rockstar" where the library says "Rock Star", and "ThisThat"
@@ -258,6 +265,11 @@ export function matchTitle(title, index, { limit = 60, drop = [] } = {}) {
     // P1Harmony and ENHYPEN rows), so the picker should say so rather than
     // present 1,400 confident-looking candidates.
     lowConfidence: !chips.some((c) => c.kind === 'member'),
+    // A Japanese title yields no Latin tokens, so nothing filters and the
+    // whole library comes back looking like a confident result. Saying the
+    // title could not be read is the honest answer, and it points at the
+    // search box instead of at 11,000 candidates.
+    unreadableTitle: !chips.length && HAS_CJK.test(title || ''),
     total: scored.length,
     cards: scored.slice(0, limit).map((s) => s.card),
   };
