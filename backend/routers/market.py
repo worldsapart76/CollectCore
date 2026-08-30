@@ -1537,6 +1537,121 @@ def _labels_for(db, item_ids: List[int]) -> Dict[int, str]:
 # hand but not yours to sell. See CLAUDE.md on the two orthogonal facts.
 HELD_STATUSES = ("owned", "trade", "pending_outgoing")
 
+# How many CARDS a listing actually contains, counting quantity rather than
+# rows. One line of `qty: 3` is three cards for one price -- not a single-card
+# listing -- so a row count would treat it as a per-card comp and divide a lot's
+# landed cost by the wrong number.
+UNITS_SQL = ("(SELECT COALESCE(SUM(x.qty), 0) FROM mkt_listing_line x"
+             "  WHERE x.listing_id = l.listing_id)")
+
+
+def _median(values: List[int]) -> Optional[int]:
+    if not values:
+        return None
+    v = sorted(values)
+    mid = len(v) // 2
+    return v[mid] if len(v) % 2 else (v[mid - 1] + v[mid]) // 2
+
+
+def _net_sold_by_item(db, ids: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
+    """Median SOLD price per card, net of the selling fees where it sold.
+
+    Sole-unit sold sightings only: an ask is what a seller hopes for, and a
+    bundle's price is not this card's price. `is_lot` is checked as well as the
+    unit count, matching SOLE_LINE_SQL: the common lot is one identified card
+    and N unknowns never entered, which counts as one unit and would otherwise
+    walk straight into the series as a sole comp.
+
+    Unfiltered by default, because the lot analyzer's value ladder needs an era
+    median and that is a statistic over the whole series. At this size the whole
+    series costs nothing to compute.
+    """
+    where = f"AND ln.item_id IN ({ids}) " if ids else ""
+    prices: Dict[int, List[int]] = {}
+    mkts: Dict[int, List[str]] = {}
+    for item_id, usd_cents, mkt in db.execute(text(
+        "SELECT ln.item_id, s.price_usd, l.marketplace "
+        "FROM mkt_sighting s "
+        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "WHERE ln.item_id IS NOT NULL " + where +
+        "  AND s.listing_state = 'sold' AND s.price_usd IS NOT NULL "
+        f"  AND l.is_lot = 0 AND {UNITS_SQL} = 1"
+    )):
+        prices.setdefault(item_id, []).append(usd_cents)
+        mkts.setdefault(item_id, []).append(mkt)
+
+    fees: Dict[str, Any] = {}
+    out: Dict[int, Dict[str, Any]] = {}
+    for item_id, vals in prices.items():
+        median = _median(vals)
+        ms = mkts[item_id]
+        # The fee model belongs to wherever the sales actually happened.
+        mkt = max(set(ms), key=ms.count)
+        if mkt not in fees:
+            fees[mkt] = fee_model(db, mkt, "sell")
+        out[item_id] = {
+            "median_cents": median,
+            "net_cents": net_proceeds(median, fees[mkt]),
+            "n": len(vals),
+            "marketplace": mkt,
+        }
+    return out
+
+
+def _buy_options(db, ids: str):
+    """Cheapest live listing per card, as two routes that are never blended.
+
+    The cheapest source for a card is often INSIDE a lot, and one card cannot be
+    bought out of an 8-card lot -- the lot can. A single "cheapest" figure would
+    rank listings that cannot be acted on: $12.50 is a real number and acting on
+    it costs $118. So: cheapest single, cheapest via-lot, separately.
+    """
+    rows = db.execute(text(
+        "SELECT ln.item_id, l.listing_id, l.marketplace, l.listing_url,"
+        " s.price_cents, s.currency, s.price_usd, s.observed_at,"
+        f" {UNITS_SQL} AS line_count "
+        "FROM mkt_listing l "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+        "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
+        f"WHERE ln.item_id IN ({ids}) AND s.listing_state = 'active' "
+        "  AND m.side IN ('buy', 'both') "
+        # Gone means gone: a delisted listing is not a price you can pay.
+        "  AND l.delisted_at IS NULL "
+        "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
+        "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
+        "GROUP BY ln.item_id, l.listing_id"
+    )).mappings().all()
+
+    fees: Dict[str, Any] = {}
+    best_single: Dict[int, Dict[str, Any]] = {}
+    best_lot: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        code = r["marketplace"]
+        if code not in fees:
+            fees[code] = fee_model(db, code, "buy")
+        landed = landed_cost(r["price_usd"], fees[code])
+        if landed is None:
+            continue
+        n = max(1, r["line_count"] or 1)
+        option = {
+            "listing_id": r["listing_id"],
+            "marketplace": code,
+            "listing_url": r["listing_url"],
+            "price_cents": r["price_cents"],
+            "currency": r["currency"],
+            "line_count": n,
+            "landed_cents": landed,
+            "per_card_cents": int(round(landed / n)),
+            "observed_at": r["observed_at"],
+        }
+        target = best_single if n == 1 else best_lot
+        cur = target.get(r["item_id"])
+        if cur is None or option["per_card_cents"] < cur["per_card_cents"]:
+            target[r["item_id"]] = option
+    return best_single, best_lot
+
 
 @router.get("/grid")
 def market_grid(db=Depends(get_db)):
@@ -1600,73 +1715,9 @@ def market_grid(db=Depends(get_db)):
             "per_copy": False,
         }
 
-    # ---- What it sells for ------------------------------------------------
-    # Sole-line SOLD sightings only. Asks are what sellers hope for, and a
-    # bundle's price is not this card's price.
-    sold_by_item: Dict[int, List[int]] = {}
-    sold_mkts: Dict[int, List[str]] = {}
-    for item_id, usd_cents, mkt in db.execute(text(
-        "SELECT ln.item_id, s.price_usd, l.marketplace "
-        "FROM mkt_sighting s "
-        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
-        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
-        f"WHERE ln.item_id IN ({ids}) AND s.listing_state = 'sold' "
-        "  AND s.price_usd IS NOT NULL "
-        "  AND (SELECT COUNT(*) FROM mkt_listing_line x"
-        "        WHERE x.listing_id = l.listing_id) = 1"
-    )):
-        sold_by_item.setdefault(item_id, []).append(usd_cents)
-        sold_mkts.setdefault(item_id, []).append(mkt)
-
-    # ---- What it would cost to buy ----------------------------------------
-    # Two numbers, never blended. The cheapest source for a card is often
-    # inside a lot, and one card cannot be bought out of an 8-card lot -- the
-    # lot can. A single "cheapest" column would rank listings that cannot be
-    # acted on: $12.50 is a real number and acting on it costs $118.
-    buy_rows = db.execute(text(
-        "SELECT ln.item_id, l.listing_id, l.marketplace, l.listing_url,"
-        " s.price_cents, s.currency, s.price_usd, s.observed_at,"
-        " (SELECT COUNT(*) FROM mkt_listing_line x"
-        "   WHERE x.listing_id = l.listing_id) AS line_count "
-        "FROM mkt_listing l "
-        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
-        "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
-        "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
-        f"WHERE ln.item_id IN ({ids}) AND s.listing_state = 'active' "
-        "  AND m.side IN ('buy', 'both') "
-        # Gone means gone: a delisted listing is not a price you can pay.
-        "  AND l.delisted_at IS NULL "
-        "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
-        "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
-        "GROUP BY ln.item_id, l.listing_id"
-    )).mappings().all()
-
-    buy_fees: Dict[str, Any] = {}
-    best_single: Dict[int, Dict[str, Any]] = {}
-    best_lot: Dict[int, Dict[str, Any]] = {}
-    for r in buy_rows:
-        code = r["marketplace"]
-        if code not in buy_fees:
-            buy_fees[code] = fee_model(db, code, "buy")
-        landed = landed_cost(r["price_usd"], buy_fees[code])
-        if landed is None:
-            continue
-        n = max(1, r["line_count"] or 1)
-        option = {
-            "listing_id": r["listing_id"],
-            "marketplace": code,
-            "listing_url": r["listing_url"],
-            "price_cents": r["price_cents"],
-            "currency": r["currency"],
-            "line_count": n,
-            "landed_cents": landed,
-            "per_card_cents": int(round(landed / n)),
-            "observed_at": r["observed_at"],
-        }
-        target = best_single if n == 1 else best_lot
-        cur = target.get(r["item_id"])
-        if cur is None or option["per_card_cents"] < cur["per_card_cents"]:
-            target[r["item_id"]] = option
+    # ---- What it sells for, and what it would cost to buy ------------------
+    sold = _net_sold_by_item(db, ids)
+    best_single, best_lot = _buy_options(db, ids)
 
     # ---- Comps per source, with age ---------------------------------------
     # Per source and not overall: nineteen Mercari comps two days old and one
@@ -1686,23 +1737,13 @@ def market_grid(db=Depends(get_db)):
             {"marketplace": mkt, "n": n, "last_seen": last_seen})
 
     # ---- Assemble ---------------------------------------------------------
-    sell_fees: Dict[str, Any] = {}
     cards = []
     for item_id in item_ids:
-        prices = sorted(sold_by_item.get(item_id, []))
-        sold_median = None
-        sell_net = None
-        sell_mkt = None
-        if prices:
-            mid = len(prices) // 2
-            sold_median = (prices[mid] if len(prices) % 2
-                           else (prices[mid - 1] + prices[mid]) // 2)
-            # The fee model belongs to wherever the sales actually happened.
-            ms = sold_mkts.get(item_id) or []
-            sell_mkt = max(set(ms), key=ms.count) if ms else "mercari_us"
-            if sell_mkt not in sell_fees:
-                sell_fees[sell_mkt] = fee_model(db, sell_mkt, "sell")
-            sell_net = net_proceeds(sold_median, sell_fees[sell_mkt])
+        s = sold.get(item_id)
+        sold_median = s["median_cents"] if s else None
+        sell_net = s["net_cents"] if s else None
+        sell_mkt = s["marketplace"] if s else None
+        n_sold = s["n"] if s else 0
 
         paid = basis.get(item_id)
         single = best_single.get(item_id)
@@ -1723,7 +1764,7 @@ def market_grid(db=Depends(get_db)):
             "sold_median_cents": sold_median,
             "sell_net_cents": sell_net,
             "sell_marketplace": sell_mkt,
-            "n_sold": len(prices),
+            "n_sold": n_sold,
             "buy_single": single,
             "buy_lot": lot,
             # sell - paid: margin on what is already held. Only meaningful
@@ -1809,3 +1850,467 @@ def listing_outcome(listing_id: int, body: DelistIn, db=Depends(get_db)):
     db.commit()
     return {"ok": True, "outcome": "sold", "sighting_added": True,
             "price_usd": usd}
+
+
+# ───────────────────────── The lot analyzer ──────────────────────────────────
+#
+# A card-first model cannot answer "is this 8-card lot worth $118?", because
+# that question is about the whole listing at once. This is the view that can.
+#
+# See docs/photocard_market_intel_plan.md -> v2, the lot analyzer.
+
+
+def _eras_for(db, item_ids: List[int]) -> Dict[int, str]:
+    """`old` (<=2020) or `new` (2021+), off the ORIGIN's ship date.
+
+    The same split the cost tiers use, and for the same reason: it is the one
+    boundary that reliably separates price levels. Dates live on the origin and
+    never on the card -- 88 origin rows date all 11,323 cards -- and a NULL date
+    reads as `new`, matching the tier rules rather than inventing a third case.
+    """
+    if not item_ids:
+        return {}
+    ids = ",".join(str(int(i)) for i in item_ids)
+    out: Dict[int, str] = {}
+    # source_origin_id is nullable -- LEFT JOIN it, always.
+    for item_id, start in db.execute(text(
+        "SELECT d.item_id, o.start_date FROM tbl_photocard_details d "
+        "LEFT JOIN lkup_photocard_source_origins o "
+        "       ON o.source_origin_id = d.source_origin_id "
+        f"WHERE d.item_id IN ({ids})"
+    )):
+        out[item_id] = "old" if (start and start <= DEFAULT_ERA_CUTOFF) else "new"
+    return out
+
+
+def _value_ladder(db) -> Dict[str, Any]:
+    """Two rungs, and both stay in SALE-value units the whole way down.
+
+    1. the card's own net sold median
+    2. otherwise the net sold median of its era
+
+    Cost tiers are deliberately NOT a rung. A tier is an acquisition cost
+    ($1-3) and a comp is a sale value ($10-75); mixing the scales would put
+    no-comp cards on a different axis entirely and crush them toward zero,
+    making them look free to buy. Tiers keep doing their real job -- basis for
+    cards already owned.
+
+    Finer rungs (same origin, same version type) are deferred until real lots
+    show two to be insufficient.
+    """
+    net = _net_sold_by_item(db)
+    eras = _eras_for(db, list(net))
+    buckets: Dict[str, List[int]] = {"old": [], "new": []}
+    for item_id, row in net.items():
+        if row["net_cents"] is not None:
+            buckets[eras.get(item_id, "new")].append(row["net_cents"])
+    pooled = buckets["old"] + buckets["new"]
+    return {
+        "net": net,
+        "era_median": {"old": _median(buckets["old"]),
+                       "new": _median(buckets["new"])},
+        "era_n": {"old": len(buckets["old"]), "new": len(buckets["new"])},
+        "pooled_median": _median(pooled),
+        "pooled_n": len(pooled),
+    }
+
+
+def _allocate(landed_cents: int, weights: List[Optional[int]]) -> List[Optional[int]]:
+    """Split `landed_cents` across lines in proportion to their value.
+
+    Value-weighted rather than even, and that choice IS decision-relevant.
+    $100 landed over ten cards, one selling $75 and nine selling $10: an even
+    split says the nine are worthless to buy and the one is a lottery win, which
+    is false. Weighting by value shows a uniform ~65% margin -- the truth about
+    a fairly-priced lot -- and surfaces that 45% of the cost rides on one card
+    selling, which the totals hide.
+
+    Largest-remainder, so the parts sum to the whole exactly. A lot whose
+    allocation is a cent off its own cost invites the reader to hunt for the
+    missing cent instead of reading the margin.
+
+    A line with no value weighs nothing and is allocated nothing -- its share is
+    absorbed by the valued lines. That overstates their basis, which is why the
+    caller reports unvalued lines rather than letting them pass silently.
+    """
+    total = sum(w for w in weights if w)
+    if not total or landed_cents is None:
+        return [None] * len(weights)
+    exact = [(landed_cents * w / total) if w else None for w in weights]
+    out = [int(x) if x is not None else None for x in exact]
+    short = landed_cents - sum(x for x in out if x is not None)
+    order = sorted(
+        (i for i, x in enumerate(exact) if x is not None),
+        key=lambda i: exact[i] - out[i], reverse=True)
+    for i in order[:max(0, short)]:
+        out[i] += 1
+    return out
+
+
+def _lot_listings(db, listing_id: Optional[int] = None):
+    """Listings that hold more than one card, plus anything flagged a lot.
+
+    `is_lot` is explicit and never derived from the line count, because the
+    common case is one identified card and N unknowns never entered -- which
+    looks single. A flagged listing shows up here so those unknowns can be
+    added.
+    """
+    one = " AND l.listing_id = :i " if listing_id else ""
+    return db.execute(text(
+        "SELECT l.listing_id, l.marketplace, l.title_raw, l.listing_url,"
+        " l.thumbnail_url, l.is_lot, l.delisted_at,"
+        f" {UNITS_SQL} AS units,"
+        " (SELECT s.price_cents FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS price_cents,"
+        " (SELECT s.currency FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS currency,"
+        " (SELECT s.price_usd FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS price_usd,"
+        " (SELECT s.observed_at FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS observed_at "
+        "FROM mkt_listing l "
+        f"WHERE ({UNITS_SQL} > 1 OR l.is_lot = 1){one} "
+        "ORDER BY l.last_seen_at DESC"
+    ), {"i": listing_id} if listing_id else {}).mappings().all()
+
+
+def _analyze_lot(db, listing, ladder, wanted, buy_fees,
+                 labels=None, single_routes=None) -> Dict[str, Any]:
+    """One lot, valued line by line, with the keep/flip residual that decides it.
+
+    `labels` and `single_routes` are passed in when a caller is doing many lots
+    at once; both are looked up here otherwise.
+    """
+    code = listing["marketplace"]
+    if code not in buy_fees:
+        buy_fees[code] = fee_model(db, code, "buy")
+    landed = landed_cost(listing["price_usd"], buy_fees[code])
+
+    rows = db.execute(text(
+        "SELECT line_id, line_type, item_id, label, qty, value_cents, disposition "
+        "FROM mkt_listing_line WHERE listing_id = :i ORDER BY line_id"
+    ), {"i": listing["listing_id"]}).mappings().all()
+
+    card_ids = [r["item_id"] for r in rows if r["item_id"]]
+    if labels is None:
+        labels = _labels_for(db, card_ids)
+    eras = _eras_for(db, card_ids)
+
+    # An unidentified card has no era of its own, so it borrows the lot's --
+    # a lot of 2018 cards very likely hides more 2018 cards. With nothing
+    # identified at all there is nothing to borrow from and the pooled median
+    # stands in.
+    in_lot = [eras[i] for i in card_ids if i in eras]
+    lot_era = max(set(in_lot), key=in_lot.count) if in_lot else None
+    unknown_value = (ladder["era_median"].get(lot_era) if lot_era
+                     else ladder["pooled_median"])
+
+    lines = []
+    for r in rows:
+        qty = max(1, r["qty"] or 1)
+        item_id = r["item_id"]
+        sold = ladder["net"].get(item_id) if item_id else None
+
+        # The ladder, in order. A manual value is an override and outranks it.
+        if r["value_cents"] is not None:
+            value, source = r["value_cents"], "manual"
+        elif sold and sold["net_cents"] is not None:
+            value, source = sold["net_cents"], "sold"
+        elif item_id:
+            value, source = ladder["era_median"].get(eras.get(item_id, "new")), "era"
+        elif r["line_type"] == "unidentified":
+            # Not zero. Zero would make the identified cards absorb the whole
+            # lot cost, overstating their basis and making the lot look worse
+            # than it is. "3 of 10 unidentified" is the signal that matters and
+            # it is shown either way.
+            value, source = unknown_value, "era"
+        else:
+            # A non-card line has no ladder to fall back on: an album and a
+            # keychain are not the same guess. It stays unvalued until told.
+            value, source = None, "none"
+        if value is None:
+            source = "none"
+
+        # The standing decision about a card is already recorded in the
+        # library, so Wanted defaults to keep and most lots need no toggling.
+        if r["disposition"] in ("keep", "flip"):
+            disposition, disp_source = r["disposition"], "manual"
+        else:
+            disposition = "keep" if item_id in wanted else "flip"
+            disp_source = "library"
+
+        lines.append({
+            "line_id": r["line_id"],
+            "line_type": r["line_type"],
+            "item_id": item_id,
+            "label": (labels.get(item_id) if item_id else None) or r["label"]
+                     or ("unidentified" if r["line_type"] == "unidentified" else "—"),
+            "qty": qty,
+            "wanted": item_id in wanted,
+            "value_cents": value,
+            "value_source": source,
+            "line_value_cents": value * qty if value is not None else None,
+            "n_sold": sold["n"] if sold else 0,
+            "disposition": disposition,
+            "disposition_source": disp_source,
+        })
+
+    allocs = _allocate(landed, [ln["line_value_cents"] for ln in lines])
+    for ln, alloc in zip(lines, allocs):
+        ln["alloc_cents"] = alloc
+        ln["margin_cents"] = (ln["line_value_cents"] - alloc
+                              if alloc is not None and ln["line_value_cents"] is not None
+                              else None)
+
+    known = sum(ln["line_value_cents"] for ln in lines
+                if ln["line_value_cents"] is not None)
+    units = sum(ln["qty"] for ln in lines)
+    unvalued = sum(ln["qty"] for ln in lines if ln["line_value_cents"] is None)
+
+    # ---- Keep vs flip, stated as a residual --------------------------------
+    # Every factor collapsed into one comparison: what the cards you are
+    # keeping actually cost you, against what buying them separately would.
+    keeps = [ln for ln in lines if ln["disposition"] == "keep"]
+    flips = [ln for ln in lines if ln["disposition"] == "flip"]
+    keep_units = sum(ln["qty"] for ln in keeps)
+    flip_unvalued = sum(ln["qty"] for ln in flips if ln["line_value_cents"] is None)
+    flip_net = sum(ln["line_value_cents"] for ln in flips
+                   if ln["line_value_cents"] is not None)
+
+    if single_routes is None:
+        keep_ids = [ln["item_id"] for ln in keeps if ln["item_id"]]
+        single_routes = _buy_options(
+            db, ",".join(str(int(i)) for i in keep_ids))[0] if keep_ids else {}
+
+    separate = 0
+    priced = unpriced = 0
+    for ln in keeps:
+        route = single_routes.get(ln["item_id"]) if ln["item_id"] else None
+        if route:
+            separate += route["per_card_cents"] * ln["qty"]
+            priced += ln["qty"]
+        else:
+            unpriced += ln["qty"]
+
+    kept_cost = landed - flip_net if landed is not None else None
+    # Only a comparison when every kept card has a separate price to compare
+    # against. A partial total would read as the whole answer and understate
+    # the alternative, which is the direction that talks you into the lot.
+    comparable = bool(keep_units) and unpriced == 0 and kept_cost is not None
+    residual = {
+        "keep_units": keep_units,
+        "flip_units": sum(ln["qty"] for ln in flips),
+        "flip_net_cents": flip_net if flips else None,
+        "flip_unvalued_units": flip_unvalued,
+        "kept_cost_cents": kept_cost if keep_units else None,
+        "kept_per_unit_cents": (int(round(kept_cost / keep_units))
+                                if keep_units and kept_cost is not None else None),
+        "separate_cost_cents": separate if comparable else None,
+        "keep_units_unpriced": unpriced,
+        # Positive means the lot saves you that much over buying the keepers
+        # one at a time; negative means it costs you that much extra.
+        "lot_advantage_cents": (separate - kept_cost) if comparable else None,
+    }
+
+    return {
+        "listing_id": listing["listing_id"],
+        "marketplace": code,
+        "title": listing["title_raw"],
+        "listing_url": listing["listing_url"],
+        "thumbnail_url": listing["thumbnail_url"],
+        "delisted_at": listing["delisted_at"],
+        "price_cents": listing["price_cents"],
+        "currency": listing["currency"],
+        "price_usd": listing["price_usd"],
+        "observed_at": listing["observed_at"],
+        "landed_cents": landed,
+        "units": units,
+        "n_lines": len(lines),
+        "unidentified_units": sum(ln["qty"] for ln in lines
+                                  if ln["line_type"] == "unidentified"),
+        "unvalued_units": unvalued,
+        "known_value_cents": known if known else None,
+        # The lot-level number, which stays the authoritative one however the
+        # cost is split across lines.
+        "margin_cents": (known - landed) if (known and landed is not None) else None,
+        "lot_era": lot_era,
+        "lines": lines,
+        "residual": residual,
+    }
+
+
+@router.get("/lots")
+def list_lots(db=Depends(get_db)):
+    listings = _lot_listings(db)
+    if not listings:
+        return {"lots": [], "generated_at": datetime.utcnow().isoformat()}
+
+    ladder = _value_ladder(db)
+    wanted = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        "WHERE s.status_code = 'wanted'"))}
+
+    # Labels and single-card routes for every card in every lot, fetched once.
+    all_ids = [r[0] for r in db.execute(text(
+        "SELECT DISTINCT ln.item_id FROM mkt_listing_line ln "
+        "JOIN mkt_listing l ON l.listing_id = ln.listing_id "
+        f"WHERE ln.item_id IS NOT NULL AND ({UNITS_SQL} > 1 OR l.is_lot = 1)"))]
+    labels = _labels_for(db, all_ids)
+    routes = _buy_options(db, ",".join(str(int(i)) for i in all_ids))[0] if all_ids else {}
+
+    fees: Dict[str, Any] = {}
+    lots = []
+    for listing in listings:
+        a = _analyze_lot(db, listing, ladder, wanted, fees, labels, routes)
+        a.pop("lines")
+        lots.append(a)
+    return {"lots": lots, "generated_at": datetime.utcnow().isoformat()}
+
+
+@router.get("/lots/{listing_id}")
+def get_lot(listing_id: int, db=Depends(get_db)):
+    rows = _lot_listings(db, listing_id)
+    if not rows:
+        # Not 404 on a listing that exists but holds one card: the useful reply
+        # is why it is not a lot, and that adding an unidentified line makes it
+        # one.
+        exists = db.execute(text(
+            "SELECT 1 FROM mkt_listing WHERE listing_id = :i"), {"i": listing_id}
+        ).fetchone()
+        raise HTTPException(
+            status_code=404,
+            detail=("No such listing." if not exists else
+                    "That listing holds a single card. Add an unidentified or "
+                    "non-card line to analyze it as a lot."))
+    ladder = _value_ladder(db)
+    wanted = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        "WHERE s.status_code = 'wanted'"))}
+    lot = _analyze_lot(db, rows[0], ladder, wanted, {})
+    return {
+        "lot": lot,
+        # Said out loud so a card priced off rung 2 is visibly an estimate.
+        "ladder": {"era_median": ladder["era_median"], "era_n": ladder["era_n"],
+                   "pooled_median": ladder["pooled_median"]},
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+# ---- Editing a lot's lines --------------------------------------------------
+# "Value the album at $12" and "adjust the lot cost by $12" are the same
+# operation seen from two ends, so there is one model and not two: every line
+# gets a value, the lot's value is their sum, and allocation runs over relative
+# value.
+
+
+class LotLineIn(BaseModel):
+    line_type: str = "non_card"        # non_card | unidentified | card
+    label: Optional[str] = None
+    qty: int = 1
+    item_id: Optional[int] = None
+    value_cents: Optional[int] = None  # per unit, USD cents, net of sell fees
+    disposition: Optional[str] = None  # keep | flip
+
+
+class LotLinePatch(BaseModel):
+    label: Optional[str] = None
+    qty: Optional[int] = None
+    value_cents: Optional[int] = None
+    disposition: Optional[str] = None
+    # Explicit, because None on the fields above already means "leave alone".
+    # Without these there is no way to say "go back to deriving it", and the
+    # derived value is the one most lines should be using.
+    clear_value: bool = False
+    clear_disposition: bool = False
+
+
+def _check_line_fields(line_type=None, disposition=None, qty=None, value=None):
+    if line_type is not None and line_type not in ("card", "non_card", "unidentified"):
+        raise HTTPException(status_code=400,
+                            detail="line_type must be card, non_card or unidentified")
+    if disposition is not None and disposition not in ("keep", "flip"):
+        raise HTTPException(status_code=400, detail="disposition must be keep or flip")
+    if qty is not None and qty < 1:
+        raise HTTPException(status_code=400, detail="qty must be at least 1")
+    if value is not None and value < 0:
+        raise HTTPException(status_code=400, detail="value cannot be negative")
+
+
+def _lot_or_404(db, listing_id: int):
+    if db.execute(text("SELECT 1 FROM mkt_listing WHERE listing_id = :i"),
+                  {"i": listing_id}).fetchone() is None:
+        raise HTTPException(status_code=404, detail="No such listing.")
+
+
+@router.post("/lots/{listing_id}/lines", status_code=201)
+def add_lot_line(listing_id: int, body: LotLineIn, db=Depends(get_db)):
+    _lot_or_404(db, listing_id)
+    _check_line_fields(body.line_type, body.disposition, body.qty, body.value_cents)
+    if body.line_type == "card" and not body.item_id:
+        raise HTTPException(status_code=400, detail="A card line needs an item_id.")
+
+    type_id = _photocard_type_id(db) if body.item_id else None
+    res = db.execute(text(
+        "INSERT INTO mkt_listing_line (listing_id, line_type, item_id,"
+        " collection_type_id, label, qty, value_cents, disposition) "
+        "VALUES (:l, :t, :i, :c, :lab, :q, :v, :d)"),
+        {"l": listing_id, "t": body.line_type, "i": body.item_id, "c": type_id,
+         "lab": (body.label or "").strip() or None, "q": body.qty,
+         "v": body.value_cents, "d": body.disposition})
+    # Adding a line is what makes a one-card listing a lot, so say so on the
+    # listing too rather than leaving the flag disagreeing with the contents.
+    db.execute(text("UPDATE mkt_listing SET is_lot = 1 WHERE listing_id = :i"),
+               {"i": listing_id})
+    db.commit()
+    return {"ok": True, "line_id": res.lastrowid}
+
+
+@router.patch("/lots/{listing_id}/lines/{line_id}")
+def update_lot_line(listing_id: int, line_id: int, body: LotLinePatch,
+                    db=Depends(get_db)):
+    _lot_or_404(db, listing_id)
+    _check_line_fields(disposition=body.disposition, qty=body.qty,
+                       value=body.value_cents)
+    sets, params = [], {"l": line_id, "i": listing_id}
+    if body.label is not None:
+        sets.append("label = :lab")
+        params["lab"] = body.label.strip() or None
+    if body.qty is not None:
+        sets.append("qty = :q")
+        params["q"] = body.qty
+    if body.clear_value:
+        sets.append("value_cents = NULL")
+    elif body.value_cents is not None:
+        sets.append("value_cents = :v")
+        params["v"] = body.value_cents
+    if body.clear_disposition:
+        sets.append("disposition = NULL")
+    elif body.disposition is not None:
+        sets.append("disposition = :d")
+        params["d"] = body.disposition
+    if not sets:
+        return {"ok": True, "changed": False}
+
+    res = db.execute(text(
+        f"UPDATE mkt_listing_line SET {', '.join(sets)} "
+        "WHERE line_id = :l AND listing_id = :i"), params)
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail="No such line on that listing.")
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.delete("/lots/{listing_id}/lines/{line_id}")
+def delete_lot_line(listing_id: int, line_id: int, db=Depends(get_db)):
+    _lot_or_404(db, listing_id)
+    res = db.execute(text(
+        "DELETE FROM mkt_listing_line WHERE line_id = :l AND listing_id = :i"),
+        {"l": line_id, "i": listing_id})
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail="No such line on that listing.")
+    db.commit()
+    return {"ok": True}

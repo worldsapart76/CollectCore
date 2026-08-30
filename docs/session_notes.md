@@ -6,6 +6,56 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-30 (US CDT) — v2 step 2 BUILT: the lot analyzer
+
+`GET /market/lots` and `/market/lots/{id}`, POST/PATCH/DELETE on a lot's lines,
+and a Cards/Lots switch on the Market page. A card-first view cannot answer "is
+this 8-card lot worth $118?" — that question is about the whole listing at
+once — and this is the view that can.
+
+- **Value-weighted allocation**, largest-remainder so the lines sum to the
+  landed cost exactly. Weighting matters: $100 over ten cards where one sells
+  $75 and nine sell $10, split evenly, says the nine are worthless and the one
+  is a lottery win. Weighting by value shows a uniform ~65% margin — the truth
+  about a fairly-priced lot — and surfaces that 45% of the cost rides on one
+  card selling, which the totals hide.
+- **Two rungs on the value ladder**, both in *sale*-value units: the card's own
+  net sold median, else its era's median (the ≤2020 / 2021+ split the cost
+  tiers already use). Cost tiers are deliberately not a rung — a tier is an
+  acquisition cost ($1–3) and a comp is a sale value ($10–75), and mixing the
+  scales would crush no-comp cards toward zero and make them look free. Each
+  line says which rung priced it.
+- **Unidentified lines value at the era median, not $0**, borrowing the lot's
+  own era. Zero would make the identified cards absorb the whole cost,
+  overstating their basis and making the lot look worse than it is.
+- **Keep/flip defaults from library ownership status** — Wanted → keep — so
+  most lots need no toggling; overrides are per line and marked as typed.
+- **The residual is the line that decides it:** flips net $A, the lot costs $B,
+  so the keepers cost $C — against $D to buy them separately. Shown **only**
+  when every kept card has a single-card listing to price against; a partial
+  total reads as the whole answer and understates the alternative, which is the
+  direction that talks you into the lot.
+
+Two correctness fixes fell out of the build and apply to the grid too:
+
+- **Units, not rows.** One line of `qty: 3` is three cards for one price. The
+  old `COUNT(*)` tests called that a single-card listing, so its price became a
+  comp for that card and a lot's cost divided by the wrong number. Everything
+  now reads `SUM(qty)`.
+- **`is_lot` belongs in the sole-line rule.** `/comps` already excluded flagged
+  lots; the grid's copy of the rule did not, so the commonest lot shape — one
+  identified card, N unknowns never entered — counted as a sole comp and its
+  whole bundle price landed in that card's sold series. Both paths now share
+  one helper.
+
+Schema: `mkt_listing_line.value_cents` and `.disposition`, additive migrations.
+`tools/test_lot_analyzer.py` — 56 cases on a fresh DB with real photocard rows
+across both eras; the grid's 30 still pass.
+
+**Next:** v2 step 3, per-copy cost basis and the ledger — the largest of the
+three, and the only thing that sharpens `paid` for cards held in multiples.
+Steps 1 and 2 are first cuts to review against real captured lots first.
+
 ### 2026-08-30 (US CDT) — v2 step 1 BUILT: the card grid is the front door
 
 `GET /market/grid` plus `POST /market/listings/{id}/outcome`, and the Market
@@ -41,7 +91,7 @@ longer have to already know which card you came to look up.
 rows (groups, members, origins, copies), so a wrong join fails the test rather
 than reaching the screen.
 
-**Next:** v2 step 2, the lot analyzer.
+**Next:** v2 step 2, the lot analyzer — built the same day, above.
 
 ### 2026-08-30 (US CDT) — Market workspace v2 DESIGNED (no code)
 

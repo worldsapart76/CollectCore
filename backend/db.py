@@ -197,6 +197,25 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_listing.%s", col)
 
+    # Migration: lot-analyzer fields on mkt_listing_line.
+    if "mkt_listing_line" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(mkt_listing_line)").fetchall()}
+        for col, ddl in (
+            # Per-unit resale value in USD cents, NET of selling fees. Manual
+            # only: it overrides the value ladder, and is the sole way a
+            # non-card line ever gets a value at all.
+            ("value_cents",
+             "ALTER TABLE mkt_listing_line ADD COLUMN value_cents INTEGER"),
+            # keep|flip. NULL means "derive from the library" -- a card marked
+            # Wanted is a keep -- so most lots need no toggling.
+            ("disposition",
+             "ALTER TABLE mkt_listing_line ADD COLUMN disposition TEXT"),
+        ):
+            if col not in cols:
+                raw.execute(ddl)
+                logger.info("Migration: added mkt_listing_line.%s", col)
+
     if "mkt_fee_component" in tables:
         cols = {r[1] for r in raw.execute(
             "PRAGMA table_info(mkt_fee_component)").fetchall()}

@@ -1621,8 +1621,11 @@ Marking **sold** needs no new column: it is a sighting with
    margin, and letting unknowns win either end buries the rows the grid exists
    to surface. Stale sources (>14d) and thin sold counts (<3) render amber.
    `tools/test_market_grid.py`, 30 cases on a fresh DB with real photocard rows.
-2. **Lot analyzer.** Value-weighted allocation, non-card lines, keep/flip, the
-   residual line.
+2. **Lot analyzer — BUILT 2026-08-30.** `GET /market/lots` + `/lots/{id}`,
+   line add/edit/delete, and a Cards/Lots switch on the Market page.
+   Value-weighted allocation over the two-rung ladder, non-card and
+   unidentified lines, keep/flip defaulting from library ownership status, and
+   the residual comparison. Build log entry 16 for what the build settled.
 3. **Per-copy basis (the ledger).** Last. It only sharpens `paid` for cards
    held in multiples, and it is by far the largest piece. Card-level basis is
    honest in the meantime **provided the grid says so** rather than implying a
@@ -1905,12 +1908,48 @@ No backup changes needed.
     `/comps/{item_id}` and no row anywhere to reach it from — capture, link,
     sync, and the app showed nothing, which reads as a broken sync.
 
+16. **Lot analyzer — BUILT 2026-08-30.** `GET /market/lots`, `GET
+    /market/lots/{id}`, and POST/PATCH/DELETE on its lines; a Cards/Lots switch
+    on the Market page. Value-weighted allocation over the two-rung ladder,
+    non-card and unidentified lines, keep/flip defaulting from library
+    ownership, and the residual comparison.
+
+    Four things the build settled that the design had left implicit:
+
+    - **Units, not rows.** A line with `qty: 3` is three cards for one price.
+      Line *count* would call that a single-card listing, make its price a comp
+      for that card, and divide a lot's landed cost by the wrong number. Every
+      lot-vs-single test in the module now reads `SUM(qty)`, not `COUNT(*)`.
+    - **`is_lot` belongs in the sole-line rule.** `/comps` already excluded
+      flagged lots; the grid's copy of the rule did not, so the commonest lot
+      shape — one identified card, N unknowns never entered — counted as a sole
+      comp and its whole bundle price landed in that card's series. Both paths
+      now go through one helper that checks the flag and the unit count.
+    - **Largest-remainder allocation.** The parts sum to the landed cost
+      exactly. A lot whose lines add up to a cent off its own cost invites the
+      reader to hunt for the missing cent instead of reading the margin.
+    - **A partial comparison is not shown at all.** The lot-vs-separately line
+      appears only when every kept card has a single-card listing to price
+      against. A partial total reads as the whole answer and understates the
+      alternative — the direction that talks you into the lot.
+
+    An unvalued line is allocated nothing and its share is absorbed by the
+    valued lines, which overstates their basis; the analyzer reports unvalued
+    units rather than letting that pass. `tools/test_lot_analyzer.py`, 56 cases
+    on a fresh DB with real photocard rows across both eras.
+
 ### Next
 
-**The v2 market workspace is the next build**, in the order set out under
-*v2 — the market workspace*: card grid + sold/gone marking, then the lot
-analyzer, then per-copy basis with the ledger. Everything below is real but
-sits behind it.
+**Steps 1 and 2 of the v2 market workspace are built** (card grid +
+sold/gone marking; lot analyzer). **Next is step 3, per-copy cost basis and the
+ledger** — box → purchase → line → outcome → sale, FIFO on
+`COALESCE(purchase_date, copy.created_at)`. It is the largest of the three and
+only sharpens `paid` for cards held in multiples, so card-level basis stands in
+the meantime and the grid says so. Everything below is real but sits behind it.
+
+Steps 1 and 2 are both **first cuts to be reviewed against real captured
+lots.** Where the analyzer turns out to be more machinery than the decision
+needs, cut it.
 
 - **Japanese title matching.** Neokyo capture works but its titles do not filter
   the card picker: `lib/matcher.js` tokenizes Latin only, so a Japanese title

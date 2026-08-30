@@ -1484,6 +1484,48 @@ export async function setListingOutcome(listingId, body) {
   return handleJsonResponse(res, 'Failed to record the outcome');
 }
 
+// Multi-card listings, each with its cost split across its lines by value.
+export async function listMarketLots() {
+  const res = await fetch(`${API}/market/lots`);
+  return handleJsonResponse(res, 'Failed to load lots');
+}
+
+export async function getMarketLot(listingId) {
+  const res = await fetch(`${API}/market/lots/${listingId}`);
+  return handleJsonResponse(res, 'Failed to load the lot');
+}
+
+// A non-card or unidentified line. "Value the album at $12" and "adjust the lot
+// cost by $12" are the same operation seen from two ends, so there is one
+// model: every line carries a value and allocation runs over relative value.
+export async function addLotLine(listingId, body) {
+  const res = await fetch(`${API}/market/lots/${listingId}/lines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to add the line');
+}
+
+// `clearValue` / `clearDisposition` exist because omitting a field already
+// means "leave it alone" — without them there is no way to say "go back to
+// deriving it", which is what most lines should be doing.
+export async function updateLotLine(listingId, lineId, body) {
+  const res = await fetch(`${API}/market/lots/${listingId}/lines/${lineId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to update the line');
+}
+
+export async function deleteLotLine(listingId, lineId) {
+  const res = await fetch(`${API}/market/lots/${listingId}/lines/${lineId}`, {
+    method: 'DELETE',
+  });
+  return handleJsonResponse(res, 'Failed to delete the line');
+}
+
 export async function listMarketplaces() {
   const res = await fetch(`${API}/market/marketplaces`);
   return handleJsonResponse(res, 'Failed to load marketplaces');

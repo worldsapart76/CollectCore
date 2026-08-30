@@ -2167,6 +2167,18 @@ CREATE TABLE IF NOT EXISTS mkt_listing_line (
     label              TEXT,
     qty                INTEGER NOT NULL DEFAULT 1,
     notes              TEXT,
+    -- Per-unit resale value, USD cents, NET of selling fees. Manual only, and
+    -- an override: the lot analyzer otherwise derives a card's value from its
+    -- own sold comps, then from its era's median. Non-card lines have no
+    -- ladder to fall back on, so this is the only way an album or a keychain
+    -- ever carries value -- and a lot line left unvalued makes the identified
+    -- cards absorb its share of the cost, which the analyzer says out loud
+    -- rather than quietly writing off.
+    value_cents        INTEGER,
+    -- keep | flip, for the lot analyzer's residual. NULL means "derive from
+    -- the library": a card marked Wanted is a keep. The standing decision is
+    -- already recorded there, so most lots should need no toggling at all.
+    disposition        TEXT,
 
     FOREIGN KEY (listing_id) REFERENCES mkt_listing(listing_id)
 );

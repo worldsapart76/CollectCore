@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Alert } from "../components/primitives";
 import {
   getMarketGrid, getMarketComps, setListingOutcome,
+  listMarketLots, getMarketLot, addLotLine, updateLotLine, deleteLotLine,
   listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
@@ -348,10 +349,371 @@ function MarketGrid({ cards, selected, onSelect }) {
   );
 }
 
+// ───────────────────────── The lot analyzer ─────────────────────────────────
+//
+// A card-first view cannot answer "is this 8-card lot worth $118?" — that
+// question is about the whole listing at once. This is the view that can.
+//
+// See docs/photocard_market_intel_plan.md -> v2, the lot analyzer.
+
+// Where a line's value came from, said out loud. A card priced off its era's
+// median is a guess wearing the same typeface as a card priced off nineteen
+// real comps, and the difference decides how much weight the margin can carry.
+const VALUE_SOURCE = {
+  sold: { text: "comps", color: "#166534" },
+  era: { text: "est.", color: "#b45309" },
+  manual: { text: "set", color: "#1d4ed8" },
+  none: { text: "", color: "#999" },
+};
+
+function LotList({ lots, selected, onSelect }) {
+  const th = {
+    padding: "4px 6px", textAlign: "right", fontSize: 11, color: "#444",
+    borderBottom: "1px solid #ddd", background: "#fafafa", whiteSpace: "nowrap",
+  };
+  const td = { padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 6, overflow: "auto",
+                  maxHeight: "34vh" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>lot</th>
+            <th style={th} title="cards in the listing, counting quantity">cards</th>
+            <th style={th} title="identified cards still to be entered">unknown</th>
+            <th style={th} title="asking price in the listing's own currency">ask</th>
+            <th style={th} title="all in: price plus this marketplace's buying costs">landed</th>
+            <th style={th} title="sum of every line's value, where a value is known">value</th>
+            <th style={th} title="known value less landed cost">margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lots.map((l) => (
+            <tr
+              key={l.listing_id}
+              onClick={() => onSelect(l.listing_id)}
+              style={{
+                borderTop: "1px solid #f0f0f0", cursor: "pointer",
+                background: selected === l.listing_id ? "#eef6ff" : "transparent",
+              }}
+            >
+              <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                {l.delisted_at && (
+                  <span title="no longer listed" style={{ color: "#999" }}>✕ </span>
+                )}
+                {l.title || `listing ${l.listing_id}`}
+                <span style={{ color: "#999" }}> · {l.marketplace}</span>
+              </td>
+              <td style={td}>{l.units}</td>
+              <td style={{ ...td, color: l.unidentified_units ? "#b45309" : "#bbb" }}>
+                {l.unidentified_units || "—"}
+              </td>
+              <td style={td}>{money(l.price_cents, l.currency)}</td>
+              <td style={td}>{usd(l.landed_cents)}</td>
+              <td style={td}>{usd(l.known_value_cents)}</td>
+              <td style={td}><Margin cents={l.margin_cents} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LotLineRow({ lot, line, onChanged, onError }) {
+  const [busy, setBusy] = useState(false);
+  const src = VALUE_SOURCE[line.value_source] || VALUE_SOURCE.none;
+  // Card lines came out of the capture and its picker; a line added here is
+  // one the analyzer owns and can take away again.
+  const removable = line.line_type !== "card";
+
+  async function run(fn) {
+    setBusy(true);
+    try {
+      await fn();
+      await onChanged();
+    } catch (e) {
+      onError(e.message || "Failed to update the line");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function editValue() {
+    const now = line.value_cents == null ? "" : (line.value_cents / 100).toFixed(2);
+    const entered = prompt(
+      `Value of one "${line.label}", in dollars, AFTER selling fees.\n` +
+      `Leave empty to go back to the derived value.`, now);
+    if (entered === null) return;
+    if (!entered.trim()) {
+      if (line.value_source !== "manual") return;
+      return run(() => updateLotLine(lot.listing_id, line.line_id,
+                                     { clear_value: true }));
+    }
+    const dollars = Number(entered);
+    if (!Number.isFinite(dollars) || dollars < 0) {
+      onError("Value must be a number, and not negative.");
+      return;
+    }
+    run(() => updateLotLine(lot.listing_id, line.line_id,
+                            { value_cents: Math.round(dollars * 100) }));
+  }
+
+  function toggleDisposition() {
+    run(() => updateLotLine(lot.listing_id, line.line_id,
+                            { disposition: line.disposition === "keep" ? "flip" : "keep" }));
+  }
+
+  const td = { padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" };
+  return (
+    <tr style={{ borderTop: "1px solid #f0f0f0", opacity: busy ? 0.5 : 1 }}>
+      <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+        {line.wanted && <span title="on your wanted list" style={{ color: "#b45309" }}>★ </span>}
+        {line.label}
+        {line.qty > 1 && <span style={{ color: "#999" }}> ×{line.qty}</span>}
+        {line.line_type !== "card" && (
+          <span style={{ color: "#999", fontSize: 11 }}> ({line.line_type.replace("_", "-")})</span>
+        )}
+      </td>
+      <td style={td}>
+        <span
+          onClick={busy ? undefined : editValue}
+          title={line.value_source === "sold"
+            ? `median of ${line.n_sold} sold, net of fees — click to override`
+            : line.value_source === "era"
+              ? "no comps for this card; the median of its era stands in — click to set one"
+              : line.value_source === "manual"
+                ? "set by hand — click to change, clear to go back to deriving"
+                : "no value: its share of the cost is being carried by the other lines"}
+          style={{ cursor: "pointer", textDecoration: "underline dotted",
+                   color: line.value_cents == null ? "#b45309" : "inherit" }}
+        >
+          {line.value_cents == null ? "set value…" : usd(line.value_cents)}
+        </span>
+        {src.text && (
+          <span style={{ color: src.color, fontSize: 10 }}> {src.text}</span>
+        )}
+      </td>
+      <td style={td}>{usd(line.alloc_cents)}</td>
+      <td style={td}><Margin cents={line.margin_cents} /></td>
+      <td style={{ ...td, textAlign: "center" }}>
+        <span
+          onClick={busy ? undefined : toggleDisposition}
+          title={line.disposition_source === "library"
+            ? "from the card's library status — click to override"
+            : "set by hand"}
+          style={{
+            cursor: "pointer", fontSize: 11, padding: "1px 6px", borderRadius: 3,
+            border: "1px solid #ddd",
+            background: line.disposition === "keep" ? "#fef3c7" : "#f3f4f6",
+            fontStyle: line.disposition_source === "library" ? "italic" : "normal",
+          }}
+        >
+          {line.disposition}
+        </span>
+      </td>
+      <td style={{ ...td, width: 24 }}>
+        {removable && (
+          <span
+            onClick={busy ? undefined : () => run(
+              () => deleteLotLine(lot.listing_id, line.line_id))}
+            title="remove this line" style={{ cursor: "pointer", color: "#999" }}
+          >
+            ✕
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// The line that actually decides it: what the cards you are keeping really
+// cost, against what buying them separately would. Every other figure on the
+// screen is an input to this one.
+function Residual({ lot }) {
+  const r = lot.residual;
+  const box = {
+    marginTop: 10, padding: "8px 10px", borderRadius: 6,
+    background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 13,
+  };
+
+  if (!r.keep_units) {
+    return (
+      <div style={box}>
+        Nothing marked <strong>keep</strong>, so this is a pure flip:{" "}
+        <strong>{usd(lot.known_value_cents)}</strong> of known value against{" "}
+        <strong>{usd(lot.landed_cents)}</strong> landed —{" "}
+        <Margin cents={lot.margin_cents} />.
+      </div>
+    );
+  }
+
+  return (
+    <div style={box}>
+      Keep <strong>{r.keep_units}</strong>, flip <strong>{r.flip_units}</strong> →
+      flips net <strong>{usd(r.flip_net_cents)}</strong>, the lot costs{" "}
+      <strong>{usd(lot.landed_cents)}</strong>, so the {r.keep_units} kept cost{" "}
+      <strong>{usd(r.kept_cost_cents)}</strong>
+      {r.keep_units > 1 && <> ({usd(r.kept_per_unit_cents)} each)</>}.
+      {r.lot_advantage_cents != null ? (
+        <>
+          {" "}Buying them separately: <strong>{usd(r.separate_cost_cents)}</strong>.{" "}
+          <strong style={{ color: r.lot_advantage_cents >= 0 ? "#166534" : "#b91c1c" }}>
+            The lot is {usd(Math.abs(r.lot_advantage_cents))}{" "}
+            {r.lot_advantage_cents >= 0 ? "better" : "worse"}.
+          </strong>
+        </>
+      ) : (
+        <span style={{ color: "#b45309" }}>
+          {" "}
+          {/* Partial totals read as whole answers, and this one would
+              understate the alternative — the direction that talks you into
+              the lot. */}
+          {r.keep_units_unpriced} of the kept {r.keep_units_unpriced === 1 ? "card has" : "cards have"}{" "}
+          no separate listing captured, so there is nothing to compare against yet.
+        </span>
+      )}
+      {r.flip_unvalued_units > 0 && (
+        <span style={{ color: "#b45309" }}>
+          {" "}{r.flip_unvalued_units} flipped{" "}
+          {r.flip_unvalued_units === 1 ? "line has" : "lines have"} no value set,
+          so the flip total is understated.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function LotAnalyzer({ lot, onChanged, onError }) {
+  const [busy, setBusy] = useState(false);
+
+  async function run(fn) {
+    setBusy(true);
+    try {
+      await fn();
+      await onChanged();
+    } catch (e) {
+      onError(e.message || "Failed to add the line");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addNonCard() {
+    const label = prompt("What is it? (album, photobook, keychain…)");
+    if (!label?.trim()) return;
+    // Asked straight away rather than left blank, because an unvalued line
+    // makes the cards absorb its share of the cost — which is the one thing
+    // this screen is trying not to do quietly.
+    const entered = prompt(
+      `Value of the ${label.trim()}, in dollars, AFTER selling fees.\n` +
+      `Leave empty to set it later.`);
+    if (entered === null) return;
+    const dollars = entered.trim() ? Number(entered) : null;
+    if (dollars !== null && (!Number.isFinite(dollars) || dollars < 0)) {
+      onError("Value must be a number, and not negative.");
+      return;
+    }
+    run(() => addLotLine(lot.listing_id, {
+      line_type: "non_card", label: label.trim(), qty: 1,
+      value_cents: dollars === null ? null : Math.round(dollars * 100),
+    }));
+  }
+
+  function addUnidentified() {
+    const entered = prompt("How many cards in the lot are not identified yet?", "1");
+    if (entered === null) return;
+    const qty = Number(entered);
+    if (!Number.isInteger(qty) || qty < 1) {
+      onError("That needs to be a whole number, at least 1.");
+      return;
+    }
+    run(() => addLotLine(lot.listing_id, { line_type: "unidentified", qty }));
+  }
+
+  const th = {
+    padding: "4px 6px", textAlign: "right", fontSize: 11, color: "#444",
+    borderBottom: "1px solid #ddd", background: "#fafafa", whiteSpace: "nowrap",
+  };
+
+  return (
+    <div style={{ marginTop: 14, opacity: busy ? 0.6 : 1 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 14 }}>{lot.title || `listing ${lot.listing_id}`}</strong>
+        <span style={{ fontSize: 12, color: "#666" }}>
+          {lot.marketplace} · {money(lot.price_cents, lot.currency)}
+          {lot.landed_cents != null && <> → <strong>{usd(lot.landed_cents)}</strong> landed</>}
+          {" · "}{lot.units} {lot.units === 1 ? "card" : "cards"}
+        </span>
+        {lot.listing_url && (
+          <a href={lot.listing_url} target="_blank" rel="noreferrer"
+             style={{ fontSize: 12 }}>open ↗</a>
+        )}
+      </div>
+
+      {lot.landed_cents == null && (
+        <Alert tone="warn" style={{ marginTop: 8 }}>
+          No landed cost for this lot — its price has no USD value yet, usually a
+          missing exchange rate. Every figure below depends on it.
+        </Alert>
+      )}
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12,
+                      marginTop: 8 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>line</th>
+            <th style={th} title="what one of these would net you on a sale">value</th>
+            <th style={th} title="this line's share of the lot cost, weighted by value">alloc</th>
+            <th style={th} title="value less allocated cost">margin</th>
+            <th style={{ ...th, textAlign: "center" }}
+                title="keep defaults from the card's library status; click to override">
+              keep/flip
+            </th>
+            <th style={th} />
+          </tr>
+        </thead>
+        <tbody>
+          {lot.lines.map((line) => (
+            <LotLineRow key={line.line_id} lot={lot} line={line}
+                        onChanged={onChanged} onError={onError} />
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8,
+                    flexWrap: "wrap" }}>
+        <Button size="sm" disabled={busy} onClick={addNonCard}>+ non-card line</Button>
+        <Button size="sm" disabled={busy} onClick={addUnidentified}>+ unidentified</Button>
+        <span style={{ fontSize: 11, color: "#666", marginLeft: "auto" }}>
+          known value <strong>{usd(lot.known_value_cents)}</strong> across{" "}
+          {lot.units - lot.unvalued_units} of {lot.units} · landed{" "}
+          <strong>{usd(lot.landed_cents)}</strong>
+          {lot.unidentified_units > 0 && (
+            <span style={{ color: "#b45309" }}>
+              {" · "}{lot.unidentified_units} unidentified
+            </span>
+          )}
+        </span>
+      </div>
+
+      <Residual lot={lot} />
+    </div>
+  );
+}
+
 export default function MarketIntelPage() {
+  // Two entry points, two questions. Cards answers "what should I act on";
+  // Lots answers "is this specific listing worth buying", which is about a
+  // whole listing at once and so cannot be asked of a card-shaped view.
+  const [view, setView] = useState("cards");
   const [cards, setCards] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [lots, setLots] = useState(null);
+  const [lotId, setLotId] = useState(null);
+  const [lot, setLot] = useState(null);
   const [fx, setFx] = useState(null);
   const [error, setError] = useState("");
 
@@ -371,6 +733,33 @@ export default function MarketIntelPage() {
       .then(setDetail)
       .catch((e) => setError(e.message || "Failed to load card"));
   }, [selected]);
+
+  // Loaded on first visit rather than up front: a lot's analysis walks the
+  // whole sold series to build the value ladder, and most visits here are to
+  // the grid.
+  useEffect(() => {
+    if (view !== "lots" || lots !== null) return;
+    listMarketLots()
+      .then((d) => setLots(d.lots || []))
+      .catch((e) => setError(e.message || "Failed to load lots"));
+  }, [view, lots]);
+
+  useEffect(() => {
+    if (!lotId) return;
+    setLot(null);
+    getMarketLot(lotId)
+      .then((d) => setLot(d.lot))
+      .catch((e) => setError(e.message || "Failed to load the lot"));
+  }, [lotId]);
+
+  // Editing a line changes the lot AND the row summarising it in the list, so
+  // both are refetched — a stale summary above a fresh analysis is the kind of
+  // disagreement that gets read as a bug in the arithmetic.
+  async function refreshLot() {
+    const [d, list] = await Promise.all([getMarketLot(lotId), listMarketLots()]);
+    setLot(d.lot);
+    setLots(list.lots || []);
+  }
 
   async function handleAddRate(currency) {
     const entered = prompt(`USD per 1 ${currency} (e.g. 0.0068 for JPY):`);
@@ -429,16 +818,63 @@ export default function MarketIntelPage() {
       />
       <CostBasisPanel onError={setError} />
 
-      {cards === null && <div style={{ color: "#666" }}>Loading…</div>}
+      <div style={{ display: "flex", gap: 4, margin: "12px 0 8px" }}>
+        {[["cards", "Cards"], ["lots", "Lots"]].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            style={{
+              padding: "3px 12px", fontSize: 13, cursor: "pointer",
+              borderRadius: 4, border: "1px solid #ddd",
+              background: view === key ? "#eef6ff" : "#fff",
+              fontWeight: view === key ? 600 : 400,
+            }}
+          >
+            {label}
+            {key === "lots" && lots?.length > 0 && (
+              <span style={{ color: "#999", fontWeight: 400 }}> {lots.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
-      {cards?.length === 0 && (
+      {view === "lots" && (
+        <>
+          {lots === null && <div style={{ color: "#666" }}>Loading…</div>}
+          {lots?.length === 0 && (
+            <Alert tone="info">
+              No lots captured yet. A listing counts as a lot once it holds more
+              than one card — associate every card you can identify when you
+              capture it, then add the ones you cannot as unidentified lines.
+            </Alert>
+          )}
+          {lots?.length > 0 && (
+            <>
+              <LotList lots={lots} selected={lotId} onSelect={setLotId} />
+              {!lotId && (
+                <div style={{ color: "#666", fontSize: 13, marginTop: 10 }}>
+                  Pick a lot to split its cost across its cards.
+                </div>
+              )}
+              {lotId && !lot && <div style={{ color: "#666", marginTop: 10 }}>Loading…</div>}
+              {lot && (
+                <LotAnalyzer lot={lot} onChanged={refreshLot} onError={setError} />
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {view === "cards" && cards === null && <div style={{ color: "#666" }}>Loading…</div>}
+
+      {view === "cards" && cards?.length === 0 && (
         <Alert tone="info">
           No comps yet. Capture listings with the extension, associate them to
           cards, then press <strong>Sync</strong>.
         </Alert>
       )}
 
-      {cards?.length > 0 && (
+      {view === "cards" && cards?.length > 0 && (
         <>
           {/* The grid leads, and the per-card comp view below is its
               drill-down. That inversion is what v2 is about: you no longer
