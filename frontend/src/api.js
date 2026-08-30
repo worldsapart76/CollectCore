@@ -1462,14 +1462,26 @@ export async function fetchTradeOwnership(catalogItemIds) {
 // Admin only. Reads the listing captures pushed up by the browser extension.
 // Design: docs/photocard_market_intel_plan.md.
 
-export async function listMarketComps() {
-  const res = await fetch(`${API}/market/comps`);
-  return handleJsonResponse(res, 'Failed to load comps');
-}
-
 export async function getMarketComps(itemId) {
   const res = await fetch(`${API}/market/comps/${itemId}`);
   return handleJsonResponse(res, 'Failed to load comps for card');
+}
+
+// Every card worth looking at, with paid / buy / sell side by side.
+export async function getMarketGrid() {
+  const res = await fetch(`${API}/market/grid`);
+  return handleJsonResponse(res, 'Failed to load the market grid');
+}
+
+// What happened to a listing that is no longer up. `sold` needs a price and
+// becomes a comp; `gone` only removes it as something to buy.
+export async function setListingOutcome(listingId, body) {
+  const res = await fetch(`${API}/market/listings/${listingId}/outcome`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to record the outcome');
 }
 
 export async function listMarketplaces() {

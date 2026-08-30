@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, Alert } from "../components/primitives";
 import {
-  listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
+  getMarketGrid, getMarketComps, setListingOutcome,
+  listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
   deleteFeeComponent, setOfferDiscount, setBoxSize,
@@ -19,59 +20,6 @@ import {
 
 const usd = (cents) =>
   cents == null ? "—" : `$${(cents / 100).toFixed(2)}`;
-
-// Filters over the tracked-card list.
-//
-// Compact and always visible rather than a collapsible panel: the list is the
-// thing being filtered and it sits directly underneath, so hiding the controls
-// would cost a click on every use.
-function CardFilters({
-  q, setQ, onlySold, setOnlySold, onlyBuy, setOnlyBuy,
-  onlyLots, setOnlyLots, shown, total,
-}) {
-  const box = {
-    display: "flex", alignItems: "center", gap: 4,
-    fontSize: 11, color: "#444", cursor: "pointer", whiteSpace: "nowrap",
-  };
-  return (
-    <div style={{ marginBottom: 6 }}>
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Filter cards…"
-        style={{
-          width: "100%", boxSizing: "border-box", padding: "4px 6px",
-          fontSize: 13, border: "1px solid #ddd", borderRadius: 4,
-        }}
-      />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "4px 0 2px" }}>
-        <label style={box}>
-          <input type="checkbox" checked={onlySold}
-                 onChange={(e) => setOnlySold(e.target.checked)} />
-          has sold comps
-        </label>
-        <label style={box}>
-          <input type="checkbox" checked={onlyBuy}
-                 onChange={(e) => setOnlyBuy(e.target.checked)} />
-          buyable now
-        </label>
-        <label style={box}>
-          <input type="checkbox" checked={onlyLots}
-                 onChange={(e) => setOnlyLots(e.target.checked)} />
-          lot-only
-        </label>
-      </div>
-      <div style={{ fontSize: 11, color: "#666" }}>
-        {/* The true total, always. A count that silently means "the filtered
-            page" is how "60 match" ended up on screen for every search in the
-            extension. */}
-        {shown === total
-          ? `${total.toLocaleString()} cards tracked`
-          : `${shown.toLocaleString()} of ${total.toLocaleString()} cards`}
-      </div>
-    </div>
-  );
-}
 
 // Amounts in a marketplace's OWN currency. JPY and KRW have no minor unit, so
 // ¥350 is stored as 350 — dividing by 100 and printing a dollar sign is how a
@@ -129,37 +77,290 @@ function Spread({ label, stats, scaleMax, color }) {
   );
 }
 
+// The card grid — the front door of the market workspace.
+//
+// v1 was card-first: you had to already know which card to look up. Every real
+// decision is about a listing, and the question people actually arrive with is
+// "what in this pile is worth acting on". So the grid leads, sorted by the
+// margin that answers it, and the per-card comp view becomes its drill-down.
+//
+// See docs/photocard_market_intel_plan.md -> v2, the market workspace.
+
+// Rendered per source rather than as one number: nineteen Mercari comps two
+// days old beside one Neokyo listing three weeks old is a different picture
+// from "20 comps", and the overall figure hides the part that decides whether
+// to trust it.
+const SOURCE_INITIAL = { mercari_us: "M", neokyo: "N", pocamarket: "P", ebay: "E" };
+
+function ageDays(iso) {
+  if (!iso) return null;
+  const then = new Date(iso.length <= 10 ? `${iso}T00:00:00Z` : iso);
+  if (Number.isNaN(then.getTime())) return null;
+  return Math.max(0, Math.round((Date.now() - then.getTime()) / 86400000));
+}
+
+function CompCell({ comps }) {
+  if (!comps?.length) return <span style={{ color: "#bbb" }}>—</span>;
+  return (
+    <span style={{ whiteSpace: "nowrap" }}>
+      {comps.map((s) => {
+        const d = ageDays(s.last_seen);
+        // Anything over a fortnight is quietly suspect: an "active" listing
+        // that old may simply be gone, and the row would rank on a price
+        // nobody can pay any more.
+        const stale = d != null && d > 14;
+        return (
+          <span
+            key={s.marketplace}
+            title={`${s.marketplace}: ${s.n} sighting(s), newest ${s.last_seen || "?"}`}
+            style={{ marginRight: 6, color: stale ? "#b45309" : "#666" }}
+          >
+            {SOURCE_INITIAL[s.marketplace] || s.marketplace[0].toUpperCase()}
+            {s.n}
+            {d != null && <span style={{ color: "#aaa" }}>·{d}d</span>}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function Margin({ cents }) {
+  if (cents == null) return <span style={{ color: "#bbb" }}>—</span>;
+  const good = cents >= 0;
+  return (
+    <span style={{ color: good ? "#166534" : "#b91c1c" }}>
+      {good ? "+" : "−"}
+      {usd(Math.abs(cents))}
+    </span>
+  );
+}
+
+// Sorting puts nulls last in BOTH directions. A card with no margin is not
+// "the worst margin" — it is an unknown, and letting unknowns win either end
+// of the sort buries the rows the grid exists to surface.
+function compare(a, b, key, dir) {
+  const av = a[key];
+  const bv = b[key];
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (typeof av === "string") return dir * av.localeCompare(bv);
+  return dir * (av - bv);
+}
+
+const COLUMNS = [
+  { key: "label", label: "card", align: "left" },
+  { key: "held", label: "own", title: "copies held — owned, trade or pending outgoing" },
+  { key: "paid_cents", label: "paid", title: "cost basis (card-level estimate)" },
+  { key: "buy_single_cents", label: "buy", title: "cheapest landed, single-card listing" },
+  { key: "buy_lot_cents", label: "via lot", title: "cheapest landed per card inside a lot — buying it means buying the whole lot" },
+  { key: "sell_net_cents", label: "sell", title: "median sold, net of selling fees" },
+  { key: "flip_cents", label: "flip", title: "sell − paid: margin on what you already hold" },
+  { key: "arb_cents", label: "arb", title: "sell − cheapest buy: margin on what you could source" },
+  { key: "comps", label: "comps", sortable: false },
+];
+
+function MarketGrid({ cards, selected, onSelect }) {
+  const [q, setQ] = useState("");
+  const [onlySold, setOnlySold] = useState(false);
+  const [onlyBuy, setOnlyBuy] = useState(false);
+  const [onlyWanted, setOnlyWanted] = useState(false);
+  const [onlyHeld, setOnlyHeld] = useState(false);
+  // Best opportunity first, because "what should I act on" is the question the
+  // grid exists to answer. Anything else is a click away.
+  const [sort, setSort] = useState({ key: "arb_cents", dir: -1 });
+
+  // Flattened once so sorting and filtering both read plain numbers rather
+  // than reaching into nested objects on every comparison.
+  const rows = (cards || []).map((c) => ({
+    ...c,
+    paid_cents: c.paid?.cost_cents ?? null,
+    buy_single_cents: c.buy_single?.per_card_cents ?? null,
+    buy_lot_cents: c.buy_lot?.per_card_cents ?? null,
+  }));
+
+  const shown = rows
+    .filter((c) => {
+      if (onlySold && !c.n_sold) return false;
+      if (onlyBuy && !c.buy_single && !c.buy_lot) return false;
+      if (onlyWanted && !c.wanted) return false;
+      if (onlyHeld && !c.held) return false;
+      if (!q.trim()) return true;
+      const hay = (c.label || "").toLowerCase();
+      // Every word must match, so adding words narrows — the same rule as the
+      // extension's picker. A search behaving differently in two places is
+      // worse than either behaviour on its own.
+      return q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+    })
+    .sort((a, b) => compare(a, b, sort.key, sort.dir) || a.item_id - b.item_id);
+
+  function sortBy(key) {
+    setSort((s) =>
+      s.key === key ? { key, dir: -s.dir } : { key, dir: key === "label" ? 1 : -1 }
+    );
+  }
+
+  const chk = {
+    display: "flex", alignItems: "center", gap: 4,
+    fontSize: 11, color: "#444", cursor: "pointer", whiteSpace: "nowrap",
+  };
+  const th = {
+    padding: "4px 6px", textAlign: "right", fontSize: 11, color: "#444",
+    borderBottom: "1px solid #ddd", cursor: "pointer", whiteSpace: "nowrap",
+    background: "#fafafa", position: "sticky", top: 0,
+  };
+  const td = { padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Filter cards…"
+          style={{ flex: "0 0 240px", padding: "4px 6px", fontSize: 13,
+                   border: "1px solid #ddd", borderRadius: 4 }}
+        />
+        <label style={chk}>
+          <input type="checkbox" checked={onlyBuy}
+                 onChange={(e) => setOnlyBuy(e.target.checked)} />
+          buyable now
+        </label>
+        <label style={chk}>
+          <input type="checkbox" checked={onlySold}
+                 onChange={(e) => setOnlySold(e.target.checked)} />
+          has sold comps
+        </label>
+        <label style={chk}>
+          <input type="checkbox" checked={onlyWanted}
+                 onChange={(e) => setOnlyWanted(e.target.checked)} />
+          wanted
+        </label>
+        <label style={chk}>
+          <input type="checkbox" checked={onlyHeld}
+                 onChange={(e) => setOnlyHeld(e.target.checked)} />
+          I hold one
+        </label>
+        <span style={{ fontSize: 11, color: "#666", marginLeft: "auto" }}>
+          {/* The true total, always. A count that silently means "the visible
+              page" is how "60 match" ended up on screen for every search in
+              the extension. */}
+          {shown.length === rows.length
+            ? `${rows.length.toLocaleString()} cards`
+            : `${shown.length.toLocaleString()} of ${rows.length.toLocaleString()} cards`}
+        </span>
+      </div>
+
+      <div style={{ maxHeight: "62vh", overflow: "auto", border: "1px solid #ddd", borderRadius: 6 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              {COLUMNS.map((col) => (
+                <th
+                  key={col.key}
+                  title={col.title}
+                  onClick={col.sortable === false ? undefined : () => sortBy(col.key)}
+                  style={{
+                    ...th,
+                    textAlign: col.align || "right",
+                    cursor: col.sortable === false ? "default" : "pointer",
+                  }}
+                >
+                  {col.label}
+                  {sort.key === col.key && (sort.dir === -1 ? " ▾" : " ▴")}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={COLUMNS.length} style={{ padding: 10, color: "#666" }}>
+                  Nothing matches those filters.
+                </td>
+              </tr>
+            )}
+            {shown.map((c) => (
+              <tr
+                key={c.item_id}
+                onClick={() => onSelect(c.item_id)}
+                style={{
+                  borderTop: "1px solid #f0f0f0", cursor: "pointer",
+                  background: selected === c.item_id ? "#eef6ff" : "transparent",
+                }}
+              >
+                <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                  {c.wanted && (
+                    <span title="on your wanted list" style={{ color: "#b45309" }}>★ </span>
+                  )}
+                  {c.label}
+                </td>
+                <td style={td}>{c.held || <span style={{ color: "#bbb" }}>—</span>}</td>
+                <td style={td}>
+                  {c.paid_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    <span title={`${c.paid.tier_name || c.paid.source || "manual"} — estimated`}>
+                      {usd(c.paid_cents)}
+                    </span>
+                  )}
+                </td>
+                <td style={td}>
+                  {c.buy_single_cents == null
+                    ? <span style={{ color: "#bbb" }}>—</span>
+                    : usd(c.buy_single_cents)}
+                </td>
+                <td style={td}>
+                  {c.buy_lot_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    // The commitment travels with the number: acting on a
+                    // $12.50 per-card figure inside an 8-card lot costs $118.
+                    <span title={`inside a ${c.buy_lot.line_count}-card lot — buying it costs ${usd(c.buy_lot.landed_cents)} landed`}>
+                      {usd(c.buy_lot_cents)}
+                      <span style={{ color: "#999" }}>/{c.buy_lot.line_count}</span>
+                    </span>
+                  )}
+                </td>
+                <td style={td}>
+                  {c.sell_net_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    <span title={`median of ${c.n_sold} sold, net of ${c.sell_marketplace} fees`}>
+                      {usd(c.sell_net_cents)}
+                      {/* A margin built on two comps is not the claim a margin
+                          built on nineteen is. */}
+                      <span style={{ color: c.n_sold < 3 ? "#b45309" : "#aaa" }}>
+                        {" "}({c.n_sold})
+                      </span>
+                    </span>
+                  )}
+                </td>
+                <td style={td}><Margin cents={c.flip_cents} /></td>
+                <td style={td}>
+                  <Margin cents={c.arb_cents} />
+                  {c.arb_via_lot && (
+                    <span title="cheapest route is inside a lot" style={{ color: "#999" }}> ᴸ</span>
+                  )}
+                </td>
+                <td style={{ ...td, textAlign: "left" }}><CompCell comps={c.comps} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function MarketIntelPage() {
   const [cards, setCards] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [fx, setFx] = useState(null);
   const [error, setError] = useState("");
-  // List filters. Every capture of a bundle adds a row per card on it, so one
-  // 8-card lot lands eight entries -- the list gets long from ordinary use
-  // rather than from any milestone worth waiting for.
-  const [q, setQ] = useState("");
-  const [onlySold, setOnlySold] = useState(false);
-  const [onlyBuy, setOnlyBuy] = useState(false);
-  const [onlyLots, setOnlyLots] = useState(false);
 
-  // Every typed word must match somewhere in the label, so adding words
-  // narrows -- the same rule as the extension's picker, because a search that
-  // behaves differently in two places is worse than either behaviour.
-  const shown = (cards || []).filter((c) => {
-    if (onlySold && !c.n_sold) return false;
-    if (onlyBuy && !c.n_buy) return false;
-    if (onlyLots && !c.lots_only) return false;
-    if (!q.trim()) return true;
-    const hay = (c.label || "").toLowerCase();
-    return q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
-  });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listMarketComps()
+    getMarketGrid()
       .then((d) => setCards(d.cards || []))
-      .catch((e) => setError(e.message || "Failed to load comps"));
+      .catch((e) => setError(e.message || "Failed to load the grid"));
     listFxRates().then(setFx).catch(() => {});
   }, []);
 
@@ -186,7 +387,7 @@ export default function MarketIntelPage() {
       // now has no USD value until this fills it in.
       await backfillFxUsd();
       setFx(await listFxRates());
-      setCards((await listMarketComps()).cards || []);
+      setCards((await getMarketGrid()).cards || []);
       if (selected) setDetail(await getMarketComps(selected));
     } catch (e) {
       setError(e.message || "Failed to save rate");
@@ -222,7 +423,7 @@ export default function MarketIntelPage() {
       <FeesPanel
         onError={setError}
         onChanged={async () => {
-          setCards((await listMarketComps()).cards || []);
+          setCards((await getMarketGrid()).cards || []);
           if (selected) setDetail(await getMarketComps(selected));
         }}
       />
@@ -238,82 +439,30 @@ export default function MarketIntelPage() {
       )}
 
       {cards?.length > 0 && (
-        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-          {/* Card list */}
-          <div style={{ flex: "0 0 340px" }}>
-            <CardFilters
-              q={q} setQ={setQ}
-              onlySold={onlySold} setOnlySold={setOnlySold}
-              onlyBuy={onlyBuy} setOnlyBuy={setOnlyBuy}
-              onlyLots={onlyLots} setOnlyLots={setOnlyLots}
-              shown={shown.length}
-              total={cards.length}
-            />
-          <div style={{ maxHeight: "66vh", overflowY: "auto", border: "1px solid #ddd", borderRadius: 6 }}>
-            {shown.length === 0 && (
-              <div style={{ padding: "10px", fontSize: 12, color: "#666" }}>
-                Nothing matches those filters.
+        <>
+          {/* The grid leads, and the per-card comp view below is its
+              drill-down. That inversion is what v2 is about: you no longer
+              have to already know which card you came to look at. */}
+          <MarketGrid cards={cards} selected={selected} onSelect={setSelected} />
+
+          <div style={{ marginTop: 14 }}>
+            {!selected && (
+              <div style={{ color: "#666", fontSize: 13 }}>
+                Pick a row for its price history and buying options.
               </div>
             )}
-            {shown.map((c) => {
-              const active = c.n_active ? { min: c.active_usd_min, max: c.active_usd_max } : null;
-              const sold = c.n_sold ? { min: c.sold_usd_min, max: c.sold_usd_max } : null;
-              return (
-                <button
-                  key={c.item_id}
-                  onClick={() => setSelected(c.item_id)}
-                  style={{
-                    display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
-                    border: "none", borderBottom: "1px solid #eee", cursor: "pointer",
-                    background: selected === c.item_id ? "#eef6ff" : "#fff",
-                  }}
-                >
-                  <div style={{ fontSize: 13, marginBottom: 2 }}>{c.label}</div>
-                  <div style={{ fontSize: 11, color: "#666" }}>
-                    {c.lots_only ? (
-                      // Seen only inside multi-card listings. Deliberately no
-                      // price: a bundle's total is not this card's value, and
-                      // showing one would be the error the sole-line rule
-                      // exists to prevent. The row exists so the card is
-                      // reachable at all -- without it, capturing a bundle and
-                      // linking its cards produced nothing visible anywhere.
-                      <span>
-                        in {c.n_lots} {c.n_lots === 1 ? "lot" : "lots"} · no
-                        single-card comps yet
-                      </span>
-                    ) : (
-                      <>
-                        {sold ? `sold ${usd(sold.min)}–${usd(sold.max)} (${c.n_sold})` : "no sales"}
-                        {" · "}
-                        {active ? `asks ${usd(active.min)}–${usd(active.max)} (${c.n_active})` : "no asks"}
-                        {c.n_lots > 0 && <span> · in {c.n_lots} lots</span>}
-                      </>
-                    )}
-                    {c.n_unconverted > 0 && (
-                      <span style={{ color: "#b45309" }}> · {c.n_unconverted} unconverted</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          </div>
-
-          {/* Detail */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {!selected && <div style={{ color: "#666", fontSize: 13 }}>Select a card.</div>}
             {selected && !detail && <div style={{ color: "#666" }}>Loading…</div>}
             {detail && (
               <CardDetail
                 detail={detail}
                 onChanged={async () => {
                   setDetail(await getMarketComps(selected));
-                  setCards((await listMarketComps()).cards || []);
+                  setCards((await getMarketGrid()).cards || []);
                 }}
               />
             )}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -979,7 +1128,60 @@ function BasisLine({ itemId, basis, soldMedian, net, fees, vsActive, onChanged }
   );
 }
 
+// "This one is not up any more" — two outcomes, never merged.
+//
+// Sold WITH a price is a new comp: revisiting a listing you captured is free
+// price discovery, and it is the cheapest data this module will ever get.
+// Gone is only the absence of an option. A proxy listing that vanishes says
+// nothing about what it fetched, so a guessed price would become a comp and
+// drag the median down for every disappearance — which is why the server
+// refuses a sale with no price rather than assuming the ask.
+function ListingOutcome({ listing, onDone, onError }) {
+  const [busy, setBusy] = useState(false);
+
+  async function mark(outcome) {
+    let price = null;
+    if (outcome === "sold") {
+      const entered = prompt(
+        `What did it sell for, in ${listing.currency}?
+
+` +
+          "If you do not know, cancel and use Gone instead — a guessed price " +
+          "becomes a comp and drags this card's median."
+      );
+      if (entered == null) return;
+      const n = Number(entered);
+      if (!Number.isFinite(n) || n <= 0) return onError("Enter a positive number.");
+      const exp = EXPONENT[listing.currency] ?? 2;
+      price = Math.round(n * 10 ** exp);
+    }
+    setBusy(true);
+    try {
+      await setListingOutcome(listing.listing_id, { outcome, price_cents: price });
+      await onDone();
+    } catch (e) {
+      onError(e.message || "Failed to record it");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const btn = {
+    border: "1px solid #ddd", borderRadius: 3, background: "#fff",
+    padding: "1px 5px", cursor: "pointer", fontSize: 11, color: "#555",
+  };
+  return (
+    <div style={{ display: "flex", gap: 4, whiteSpace: "nowrap" }}>
+      <button disabled={busy} onClick={() => mark("sold")} style={btn}
+              title="It sold — records the price as a comp">sold</button>
+      <button disabled={busy} onClick={() => mark("gone")} style={btn}
+              title="No longer listed, price unknown — removes it as a buying option, adds no comp">gone</button>
+    </div>
+  );
+}
+
 function CardDetail({ detail, onChanged }) {
+  const [localError, setLocalError] = useState("");
   const series = detail.series || [];
   const activeVals = series.filter((r) => r.listing_state === "active" && r.price_usd != null).map((r) => r.price_usd);
   const soldVals = series.filter((r) => r.listing_state === "sold" && r.price_usd != null).map((r) => r.price_usd);
@@ -990,6 +1192,7 @@ function CardDetail({ detail, onChanged }) {
 
   return (
     <div>
+      {localError && <Alert tone="error">{localError}</Alert>}
       <BasisLine
         itemId={detail.item_id}
         basis={detail.basis}
@@ -1085,14 +1288,15 @@ function CardDetail({ detail, onChanged }) {
           </p>
           <div style={{ border: "1px solid #ddd", borderRadius: 6 }}>
             {detail.buy_options.map((o) => (
-              <a key={o.listing_id} href={o.listing_url} target="_blank" rel="noreferrer"
+              <div key={o.listing_id}
                  style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px",
-                          borderBottom: "1px solid #eee", textDecoration: "none", color: "inherit" }}>
+                          borderBottom: "1px solid #eee", color: "inherit" }}>
                 <img src={o.thumbnail_url} alt="" loading="lazy"
                      style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, background: "#f0f0f0" }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {o.title_raw}
+                    <a href={o.listing_url} target="_blank" rel="noreferrer"
+                       style={{ color: "inherit" }}>{o.title_raw}</a>
                   </div>
                   <div style={{ fontSize: 11, color: "#666" }}>
                     {o.marketplace} · {money(o.price_cents, o.currency)}
@@ -1116,7 +1320,8 @@ function CardDetail({ detail, onChanged }) {
                     </>
                   )}
                 </div>
-              </a>
+                <ListingOutcome listing={o} onDone={onChanged} onError={setLocalError} />
+              </div>
             ))}
           </div>
         </>
