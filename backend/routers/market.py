@@ -9,6 +9,7 @@ catalog, the pricing tables, or /pcs/. The only link to the library is a
 nullable item_id on a line.
 """
 
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -132,6 +133,9 @@ class Capture(BaseModel):
     shippingPayerCode: Optional[str] = None
     description: Optional[str] = None
     sellerId: Optional[str] = None
+    # {originalFieldName: ISO8601}. Which key means posted vs sold is still
+    # unconfirmed, so it is stored as found rather than mapped on the way in.
+    dates: Optional[Dict[str, str]] = None
     capturedAt: str
     lines: List[CaptureLine] = Field(default_factory=list)
     sightings: List[Sighting] = Field(default_factory=list)
@@ -175,10 +179,10 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     " item_condition, category, category_id, brand,"
                     " thumbnail_url, search_query, is_lot, suspected_lot,"
                     " via_fallback, capture_tier, shipping_payer, description,"
-                    " seller_id, first_seen_at, last_seen_at) "
+                    " seller_id, source_dates, first_seen_at, last_seen_at) "
                     "VALUES (:mp, :ext, :url, :title, :cond, :cat, :cat_id,"
                     " :brand, :thumb, :q, :lot, :slot, :fb, :tier, :ship,"
-                    " :descr, :seller, :first, :last) "
+                    " :descr, :seller, :sdates, :first, :last) "
                     "RETURNING listing_id"
                 ),
                 {
@@ -199,6 +203,7 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     "ship": cap.shippingPayerCode,
                     "descr": cap.description,
                     "seller": cap.sellerId,
+                    "sdates": json.dumps(cap.dates) if cap.dates else None,
                     "first": first_seen,
                     "last": last_seen,
                 },
@@ -221,7 +226,8 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     "                     ELSE capture_tier END,"
                     " shipping_payer = COALESCE(:ship, shipping_payer),"
                     " description = COALESCE(:descr, description),"
-                    " seller_id = COALESCE(:seller, seller_id) "
+                    " seller_id = COALESCE(:seller, seller_id),"
+                    " source_dates = COALESCE(:sdates, source_dates) "
                     "WHERE listing_id = :id"
                 ),
                 {
@@ -232,6 +238,7 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     "ship": cap.shippingPayerCode,
                     "descr": cap.description,
                     "seller": cap.sellerId,
+                    "sdates": json.dumps(cap.dates) if cap.dates else None,
                     "id": listing_id,
                 },
             )

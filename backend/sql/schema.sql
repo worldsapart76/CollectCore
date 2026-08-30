@@ -2058,6 +2058,13 @@ CREATE TABLE IF NOT EXISTS mkt_listing (
     shipping_payer  TEXT,
     description     TEXT,
     seller_id       TEXT,
+    -- Date-ish fields found on the marketplace's own item object, kept as a
+    -- JSON map under their ORIGINAL keys. Mercari shows both "Posted" and
+    -- "Sold" on a listing, but which field carries which is not yet known, and
+    -- guessing wrong fails silently. Stored raw so the semantics can be read
+    -- off real captures; promote to proper posted_at / sold_at columns once
+    -- confirmed, backfilling from here.
+    source_dates    TEXT,
     first_seen_at   TEXT NOT NULL,
     last_seen_at    TEXT NOT NULL,
 

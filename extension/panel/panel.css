@@ -408,3 +408,23 @@ button.danger {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
+
+/* Per-row remove. Muted until hover: the common action on a row is Identify,
+   and a delete competing for attention next to it invites misclicks. */
+.row-remove {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: 4px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.row-remove:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}

@@ -80,6 +80,16 @@ function row(rec) {
   else if (rec.suspectedLot) meta.append(tag('possible lot?', 'warn'));
   if (rec.viaFallback) meta.append(tag('DOM fallback', 'warn'));
   if (rec.sightings?.length > 1) meta.append(tag(`seen ${rec.sightings.length}×`));
+  // 'detail' means shipping and description are known for this row; on a sweep
+  // row they are merely unlooked-at.
+  if (rec.captureTier === 'detail') meta.append(tag('detail'));
+  meta.append(tag(rec.syncedAt ? 'synced' : 'not synced', rec.syncedAt ? '' : 'warn'));
+  // Dates discovered on the item, shown under their ORIGINAL field names so
+  // the one that means "sold" can be identified from a real capture instead of
+  // assumed. See datesFrom() in content/fiber.js.
+  for (const [k, iso] of Object.entries(rec.dates || {})) {
+    meta.append(tag(`${k} ${iso.slice(0, 10)}`));
+  }
 
   const lines = rec.lines || [];
   const assoc = document.createElement('button');
@@ -90,8 +100,25 @@ function row(rec) {
     : 'Identify →';
   assoc.addEventListener('click', () => openAssociate(rec));
 
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'row-remove';
+  del.title = rec.syncedAt
+    ? 'Remove from this queue (CollectCore keeps it)'
+    : 'Delete — NOT synced, this is the only copy';
+  del.textContent = '✕';
+  del.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!rec.syncedAt &&
+        !confirm('This capture has not been synced — deleting it loses it. Continue?')) {
+      return;
+    }
+    await send({ type: 'REMOVE_ONE', key: rec.key });
+    renderList();
+  });
+
   body.append(name, meta, assoc);
-  li.append(img, body);
+  li.append(img, body, del);
   return li;
 }
 
@@ -409,10 +436,14 @@ $('sync').addEventListener('click', async () => {
       res.reason === 'signin' ? SIGNIN_HINT : `Sync failed: ${res.reason}`;
     return;
   }
+  // Only now is the server a second copy, so only now is clearing safe.
+  await send({ type: 'MARK_SYNCED', keys: captures.map((c) => c.key) });
+  renderList();
+
   const d = res.data;
   $('index-status').textContent =
     `Synced ${d.received} — ${d.listings_new} new listings, ` +
-    `${d.sightings_new} new sightings.`;
+    `${d.sightings_new} new sightings. Safe to clear synced.`;
 });
 
 $('refresh').addEventListener('click', () => refreshCards());
@@ -449,9 +480,40 @@ $('export').addEventListener('click', async () => {
   URL.revokeObjectURL(url);
 });
 
+// Clearing defaults to the SAFE half: records the server already has. An
+// unsynced capture is the only copy in existence, so wiping those has to be
+// asked for separately rather than being the same button.
 $('clear').addEventListener('click', async () => {
-  if (!confirm('Delete every captured listing? This cannot be undone.')) return;
+  const all = await send({ type: 'GET_ALL' });
+  const recs = all?.records || [];
+  const synced = recs.filter((r) => r.syncedAt).length;
+  const unsynced = recs.length - synced;
+
+  if (!recs.length) {
+    $('index-status').textContent = 'Nothing to clear.';
+    return;
+  }
+  if (synced) {
+    if (!confirm(
+      `Remove ${synced} synced capture${synced === 1 ? '' : 's'}? ` +
+      `CollectCore keeps them.` +
+      (unsynced ? `
+
+${unsynced} unsynced will be kept here.` : '')
+    )) return;
+    const res = await send({ type: 'CLEAR_SYNCED' });
+    $('index-status').textContent = `Removed ${res?.removed ?? 0} synced.`;
+    renderList();
+    return;
+  }
+  if (!confirm(
+    `None of these ${recs.length} have been synced — this is the only copy ` +
+    `and deleting cannot be undone.
+
+Delete anyway?`
+  )) return;
   await send({ type: 'CLEAR_ALL' });
+  $('index-status').textContent = 'Cleared.';
   renderList();
 });
 

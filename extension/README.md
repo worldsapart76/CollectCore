@@ -54,7 +54,34 @@ anything else looks completely normal — no overlays, no panel.
 | **Arm a card** | The Mode button. Every capture then auto-associates to it. |
 | **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
 | **Sync** | *Sync* pushes captures to CollectCore. Safe to press repeatedly. |
-| **Export** | *Export JSON* — local backup / offline handoff. |
+| **Clear** | Removes **synced** captures only. Unsynced ones are kept unless you confirm a second prompt. |
+| **Remove one** | The **✕** on a row. Warns first if that row has never synced. |
+| **Export** | *Export JSON* — downloads your **captures** as a backup. |
+| **Import** | Loads a **card index** file. *Not* the inverse of Export — see below. |
+
+### Keeping the queue clean
+
+The panel is a **work queue**, not storage. The lifecycle is:
+
+1. **Capture** — from a tile or a listing page
+2. **Identify** — associate it to a card
+3. **Sync** — CollectCore now has it permanently, keyed on
+   `marketplace:externalId`
+4. **Clear** — removes the synced ones from the queue
+
+Every row shows **synced** or **not synced**, and *Clear* only touches the
+synced ones. That distinction is the whole safety property: an unsynced capture
+is **the only copy that exists**, so nothing removes it without a specific
+confirmation.
+
+Re-capturing a listing you have already synced resets it to *not synced*, which
+is correct — a new sighting means the price moved or it sold, and that needs
+pushing again.
+
+> **Export and Import are not a pair**, despite sitting next to each other.
+> *Export* downloads your captures. *Import* loads a **card index** file, the
+> offline fallback for when the index cannot be fetched from prod. There is no
+> capture-import; the server copy is the restore path.
 
 ## The card index
 

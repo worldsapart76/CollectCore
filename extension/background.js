@@ -243,6 +243,10 @@ async function capture({
     if (item.itemCondition && !existing.itemCondition) {
       existing.itemCondition = item.itemCondition;
     }
+    if (item.dates) existing.dates = { ...(existing.dates || {}), ...item.dates };
+    // Re-seen means changed: a price move or a sale is exactly what a second
+    // sighting records, so this needs pushing again.
+    existing.syncedAt = null;
 
     await putObservation(existing);
     return { key, deduped: true, record: existing };
@@ -275,6 +279,13 @@ async function capture({
     description: item.description || null,
     sellerId: item.sellerId ?? null,
     photos: item.photos || null,
+    // Date-ish fields found on the item, under their original keys. Which one
+    // means posted and which means sold is decided from real captures, not
+    // guessed here — see datesFrom() in content/fiber.js.
+    dates: item.dates || null,
+    // Set by the panel after a successful sync. Until then a record is the
+    // only copy that exists, which is why Clear is destructive.
+    syncedAt: null,
     // True when the page-world fiber read failed and the DOM tile scrape
     // carried the capture. Surfaced in the panel: a silent degrade here is
     // exactly how bad data got collected once already.
@@ -381,6 +392,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         broadcastStoreChanged();
         sendResponse({ ok: true });
         break;
+      // Mark what a sync just pushed, so "clear the ones I am done with" can
+      // mean something safer than "clear everything".
+      case 'MARK_SYNCED': {
+        const now = new Date().toISOString();
+        let n = 0;
+        for (const key of msg.keys || []) {
+          const rec = await getObservation(key);
+          if (!rec) continue;
+          rec.syncedAt = now;
+          await putObservation(rec);
+          n++;
+        }
+        broadcastStoreChanged();
+        sendResponse({ ok: true, marked: n });
+        break;
+      }
+      // Only removes records the server already has. A capture that never
+      // synced is the only copy in existence, so it is never swept by this.
+      case 'CLEAR_SYNCED': {
+        const all = await allObservations();
+        let n = 0;
+        for (const rec of all) {
+          if (!rec.syncedAt) continue;
+          await deleteObservation(rec.key);
+          n++;
+        }
+        broadcastStoreChanged();
+        sendResponse({ ok: true, removed: n });
+        break;
+      }
+      case 'REMOVE_ONE': {
+        await deleteObservation(msg.key);
+        broadcastStoreChanged();
+        sendResponse({ ok: true });
+        break;
+      }
       case 'IS_ACTIVE':
         sendResponse({
           ok: true,

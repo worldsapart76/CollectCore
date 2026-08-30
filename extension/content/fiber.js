@@ -33,6 +33,46 @@
     return null;
   }
 
+  // Mercari shows "Posted 08/27/26" and "Sold 20h ago" on a listing, so both
+  // dates exist in the item object. Their FIELD NAMES are not known, and
+  // guessing them wrong fails silently — a missing date looks the same as a
+  // listing that has none.
+  //
+  // So collect by shape instead: any date-ish key carrying a plausible
+  // timestamp. Mercari uses epoch SECONDS in places and milliseconds in
+  // others, and the two differ by 1000x — treating one as the other yields
+  // either 1970 or the year 55000, so the magnitude decides.
+  //
+  // Everything found is kept under its original key. Which one means "posted"
+  // and which means "sold" is then read off real data instead of assumed.
+  const DATE_KEY_RE = /(date|created|updated|published|posted|sold|expire|time)/i;
+
+  function asIso(v) {
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      // 1e11 sits between "seconds since 1970" (~1.7e9 today) and
+      // "milliseconds" (~1.7e12), so it separates the two cleanly.
+      const ms = v < 1e11 ? v * 1000 : v;
+      const d = new Date(ms);
+      const y = d.getUTCFullYear();
+      return y >= 2000 && y <= 2100 ? d.toISOString() : null;
+    }
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+    return null;
+  }
+
+  function datesFrom(item) {
+    const out = {};
+    for (const [k, v] of Object.entries(item)) {
+      if (!DATE_KEY_RE.test(k)) continue;
+      const iso = asIso(v);
+      if (iso) out[k] = iso;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
   function tryParse(json) {
     try {
       return JSON.parse(json);
@@ -145,6 +185,7 @@
       photos: Array.isArray(item.photos)
         ? item.photos.map((p) => (typeof p === 'string' ? p : p?.uri ?? null)).filter(Boolean)
         : null,
+      dates: datesFrom(item),
     });
   }
 
@@ -180,6 +221,7 @@
         categoryId: item.categoryId ?? null,
         brand: item.brand ?? null,
         thumbnail: item.thumbnail ?? null,
+        dates: datesFrom(item),
       });
     }
 

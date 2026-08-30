@@ -151,6 +151,7 @@ def _run_migrations(conn) -> None:
             ("shipping_payer", "ALTER TABLE mkt_listing ADD COLUMN shipping_payer TEXT"),
             ("description", "ALTER TABLE mkt_listing ADD COLUMN description TEXT"),
             ("seller_id", "ALTER TABLE mkt_listing ADD COLUMN seller_id TEXT"),
+            ("source_dates", "ALTER TABLE mkt_listing ADD COLUMN source_dates TEXT"),
         ):
             if col not in cols:
                 raw.execute(ddl)
