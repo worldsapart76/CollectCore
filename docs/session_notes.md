@@ -94,6 +94,18 @@ updates the listing and appends a sighting, keeping the older observation.
 `DELETE /market/listings/{id}` is the other half, for captures that should not
 exist at all; it removes children explicitly, since FK cascades never fire here.
 
+The first real refresh surfaced two more. A listing re-captured after its local
+record was cleared comes back with **no lines** — associations live only in the
+extension — and the ingest's `if cap.lines:` guard already kept the server's,
+but nothing said so, so a row reading *needs identifying* looked like lost work.
+Ingest now returns per capture what the server holds; the panel tags those rows
+`N on server` and drops them from the nag count. And the **sync result was
+unreadable**: written to the status line after the list re-rendered, then
+destroyed twice over (`renderList()` un-awaited, plus the `STORE_CHANGED`
+broadcast from marking synced), so a sync that worked looked like one never
+pressed. The note is held in state now and survives re-renders — failures
+included.
+
 **Next:** v2 step 3 — per-copy cost basis and the ledger. Capture is done for
 now: all four sources are built and verified against real pages.
 

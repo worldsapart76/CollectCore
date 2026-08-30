@@ -521,6 +521,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         broadcastStoreChanged();
         sendResponse({ ok: true });
         break;
+      // What the server holds for each listing after a sync.
+      //
+      // A listing re-captured after its local record was cleared arrives with
+      // no lines -- the card associations live only here -- and reads in the
+      // panel as unidentified work. It is not: a capture with no lines leaves
+      // the server's alone. Recording the server's count is what lets the
+      // panel say so instead of nagging for work that was never lost.
+      case 'SET_SERVER_LINES': {
+        let n = 0;
+        for (const r of msg.results || []) {
+          const rec = await getObservation(obsKey(r.marketplace, r.externalId));
+          if (!rec) continue;
+          rec.serverLines = r.linesOnServer ?? 0;
+          rec.listingId = r.listingId ?? rec.listingId ?? null;
+          await putObservation(rec);
+          n++;
+        }
+        sendResponse({ ok: true, updated: n });
+        break;
+      }
       // Mark what a sync just pushed, so "clear the ones I am done with" can
       // mean something safer than "clear everything".
       case 'MARK_SYNCED': {

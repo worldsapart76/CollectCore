@@ -179,7 +179,21 @@ buttons rather than one button with two meanings.
 
 The store merges by key: capturing a listing it already holds appends a
 sighting, refreshes the fields, keeps the lines, and clears `syncedAt` so the
-next **Sync** pushes it. On the server the same thing happens one level up —
+next **Sync** pushes it.
+
+**A refresh cannot unidentify a listing.** The card associations live only in
+the extension, so a listing re-captured after its local record was cleared comes
+back with **no lines** — and the server leaves its own alone in that case.
+Replacing wholesale there would destroy the identification through an omission
+rather than a decision. A capture that *does* bring lines is still
+authoritative: removing a card in the extension removes it on the server.
+
+The sync response says which happened per listing, and the panel tags a record
+`N on server` when its cards are recorded there but not here. Those rows are
+also left out of the *needs identifying* count — nagging about a listing whose
+cards are already on file invites re-doing work that was never lost. **`0 new
+listings` in the sync result is the evidence a refresh merged into the listing
+it was meant to** rather than creating a second row beside it. On the server the same thing happens one level up —
 listings are keyed on `(marketplace, external_id)` — so a refreshed capture
 updates the existing listing and adds a sighting rather than creating a second
 row. **The older observation is kept**; it really was seen at that price, and

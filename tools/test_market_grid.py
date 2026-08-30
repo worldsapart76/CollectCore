@@ -288,6 +288,54 @@ check("the buy side prices it off the newest sighting",
       opts[was_id]["landed_cents"], 800 + 300)
 check("and the earlier sighting is still on file", now_n >= 2, True)
 
+print("\n--- a re-capture with no lines does not unidentify ---")
+# The card associations live in the EXTENSION. A listing re-captured after its
+# local record was cleared comes back with no lines at all, and replacing lines
+# wholesale there would silently unidentify every card on it -- destroying work
+# through an omission rather than a decision.
+def lines_on(ext):
+    return s.execute(text(
+        "SELECT COUNT(*) FROM mkt_listing_line ln JOIN mkt_listing l"
+        "  ON l.listing_id = ln.listing_id WHERE l.external_id = :e"),
+        {"e": ext}).scalar()
+
+check("the lot came in with two cards", lines_on("nk1"), 2)
+r = c.post("/market/captures", json={"captures": [
+    {"marketplace": "neokyo", "currency": "JPY", "externalId": "nk1",
+     "name": "SKZ 2-card set", "capturedAt": "2026-09-04T00:00:00Z",
+     "lines": [],
+     "sightings": [{"observedAt": "2026-09-04T00:00:00Z", "priceCents": 1800,
+                    "priceUsd": 1200, "listingState": "active",
+                    "rawStatus": "on_sale"}]},
+]})
+check("the re-capture is accepted", r.status_code, 200)
+check("and the cards are still on it", lines_on("nk1"), 2)
+check("it merged rather than making a second listing",
+      r.json()["listings_new"], 0)
+
+# The panel cannot know any of that on its own, so the response says it --
+# otherwise a record that reads as unidentified work is indistinguishable from
+# one that really is.
+res = {x["externalId"]: x for x in r.json()["results"]}
+check("the response reports what the server holds",
+      res["nk1"]["linesOnServer"], 2)
+check("and that the capture did not replace them",
+      res["nk1"]["linesReplaced"], False)
+
+# A capture that DOES bring lines is still authoritative: removing a card in
+# the extension has to remove it here.
+r2 = c.post("/market/captures", json={"captures": [
+    {"marketplace": "neokyo", "currency": "JPY", "externalId": "nk1",
+     "name": "SKZ 2-card set", "capturedAt": "2026-09-05T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 101, "label": "Hyunjin", "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-05T00:00:00Z", "priceCents": 1800,
+                    "priceUsd": 1200, "listingState": "active",
+                    "rawStatus": "on_sale"}]},
+]})
+check("a capture WITH lines still replaces them", lines_on("nk1"), 1)
+check("and says so", {x["externalId"]: x for x in r2.json()["results"]}
+      ["nk1"]["linesReplaced"], True)
+
 print("\n--- a sale with no price is refused ---")
 r = c.post(f"/market/listings/{lid}/outcome", json={"outcome": "sold"})
 check("refused", r.status_code, 400)

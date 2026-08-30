@@ -115,6 +115,13 @@ function row(rec) {
   // row they are merely unlooked-at.
   if (rec.captureTier === 'detail') meta.append(tag('detail'));
   meta.append(tag(rec.syncedAt ? 'synced' : 'not synced', rec.syncedAt ? '' : 'warn'));
+  // The server's answer, not this record's. A listing re-captured after its
+  // local record was cleared arrives with no lines and reads as unidentified
+  // work; the cards are on the server, and a capture with no lines leaves them
+  // there. Without this the honest move looks like the lossy one.
+  if (!(rec.lines || []).length && rec.serverLines > 0) {
+    meta.append(tag(`${rec.serverLines} on server`));
+  }
   // Dates discovered on the item, shown under their ORIGINAL field names so
   // the one that means "sold" can be identified from a real capture instead of
   // assumed. See datesFrom() in content/fiber.js.
@@ -213,11 +220,15 @@ async function renderList() {
   );
 
   $('count').textContent = String(records.length);
-  const todo = records.filter((r) => !(r.lines || []).length).length;
+  // Identified on the server counts as identified: nagging about a listing
+  // whose cards are already recorded invites re-doing work that was never lost.
+  const todo = records.filter(
+    (r) => !(r.lines || []).length && !(r.serverLines > 0)
+  ).length;
   $('empty').hidden = records.length > 0;
   $('list').replaceChildren(...records.map(row));
 
-  await renderIndexStatus(todo);
+  await renderIndexStatus(todo, statusNote);
 }
 
 function ago(ms) {
@@ -228,7 +239,24 @@ function ago(ms) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
+// The result of the last thing the user pressed -- synced, cleared, imported,
+// or failed.
+//
+// It used to be written straight to the status line after the list re-rendered,
+// and was destroyed twice over before anyone could read it: renderList() was
+// not awaited, and marking records synced broadcasts STORE_CHANGED, which
+// re-renders again. So a sync that worked and a sync that was never pressed
+// looked identical, which is exactly the question that could not be answered
+// from the panel. Held here instead, and re-rendered with everything else.
+let statusNote = '';
+
+function setStatus(note) {
+  statusNote = note;
+  renderIndexStatus();
+}
+
 async function renderIndexStatus(todo = null, note = '') {
+  note = note || statusNote;
   const store = await cardIndex.load();
   if (!store) {
     $('index-status').textContent =
@@ -473,7 +501,7 @@ async function toggleArmed() {
   // tile clicks seed line 1 with it.
   const store = await cardIndex.load();
   if (!store) {
-    $('index-status').textContent = 'Import a card index first.';
+    setStatus('Import a card index first.');
     return;
   }
   current = null;
@@ -518,11 +546,11 @@ $('sync').addEventListener('click', async () => {
   const got = await send({ type: 'GET_ALL' });
   const captures = got?.records || [];
   if (!captures.length) {
-    $('index-status').textContent = 'Nothing to sync.';
+    setStatus('Nothing to sync.');
     return;
   }
 
-  $('index-status').textContent = `Syncing ${captures.length}…`;
+  setStatus(`Syncing ${captures.length}…`);
   const res = await apiFetch('/market/captures', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -530,18 +558,26 @@ $('sync').addEventListener('click', async () => {
   });
 
   if (!res.ok) {
-    $('index-status').textContent =
-      res.reason === 'signin' ? SIGNIN_HINT : `Sync failed: ${res.reason}`;
+    setStatus(res.reason === 'signin' ? SIGNIN_HINT : `Sync failed: ${res.reason}`);
     return;
   }
   // Only now is the server a second copy, so only now is clearing safe.
   await send({ type: 'MARK_SYNCED', keys: captures.map((c) => c.key) });
-  renderList();
 
+  // What the server already holds for each listing, so a record re-captured
+  // after being cleared locally stops reading as unidentified work. Its cards
+  // are on the server; the extension simply no longer has a copy of them.
   const d = res.data;
-  $('index-status').textContent =
+  await send({ type: 'SET_SERVER_LINES', results: d.results || [] });
+  await renderList();
+
+  // "0 new listings" is the evidence that a refresh merged into the listing it
+  // was meant to, rather than creating a second row beside it -- so it is
+  // worth saying even though it reads like a nothing-happened number.
+  setStatus(
     `Synced ${d.received} — ${d.listings_new} new listings, ` +
-    `${d.sightings_new} new sightings. Safe to clear synced.`;
+    `${d.sightings_new} new sightings. Safe to clear synced.`
+  );
 });
 
 $('refresh').addEventListener('click', () => refreshCards());
@@ -553,9 +589,9 @@ $('import-file').addEventListener('change', async (e) => {
   try {
     const payload = JSON.parse(await file.text());
     const saved = await cardIndex.save(payload);
-    $('index-status').textContent = `Imported ${saved.count.toLocaleString()} cards.`;
+    setStatus(`Imported ${saved.count.toLocaleString()} cards.`);
   } catch (err) {
-    $('index-status').textContent = `Import failed: ${err.message}`;
+    setStatus(`Import failed: ${err.message}`);
   }
   e.target.value = '';
   renderList();
@@ -588,7 +624,7 @@ $('clear').addEventListener('click', async () => {
   const unsynced = recs.length - synced;
 
   if (!recs.length) {
-    $('index-status').textContent = 'Nothing to clear.';
+    setStatus('Nothing to clear.');
     return;
   }
   if (synced) {
@@ -600,7 +636,7 @@ $('clear').addEventListener('click', async () => {
 ${unsynced} unsynced will be kept here.` : '')
     )) return;
     const res = await send({ type: 'CLEAR_SYNCED' });
-    $('index-status').textContent = `Removed ${res?.removed ?? 0} synced.`;
+    setStatus(`Removed ${res?.removed ?? 0} synced.`);
     renderList();
     return;
   }
@@ -611,7 +647,7 @@ ${unsynced} unsynced will be kept here.` : '')
 Delete anyway?`
   )) return;
   await send({ type: 'CLEAR_ALL' });
-  $('index-status').textContent = 'Cleared.';
+  setStatus('Cleared.');
   renderList();
 });
 

@@ -187,6 +187,12 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
     listings_new = sightings_new = lines_new = 0
     # {(currency, YYYY-MM-DD): (usd_per_unit, native_price_it_came_from)}
     implied_fx: Dict[Any, Any] = {}
+    # One entry per capture, so the panel can tell "this still needs
+    # identifying" from "the server already knows what is in it". A record
+    # re-captured after being cleared locally arrives with no lines and looks
+    # unidentified, when the identification is safe on the server -- and
+    # nothing in the aggregate counts below can say so.
+    results: List[Dict[str, Any]] = []
 
     for cap in batch.captures:
         currency = cap.currency or marketplace_currency(db, cap.marketplace)
@@ -277,6 +283,14 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
         # the user's current answer for what is in this listing, and a removed
         # card must actually disappear. SQLite FK cascades never fire (only
         # init_db's connection sets the pragma), so the delete is explicit.
+        #
+        # A capture with NO lines leaves the server's alone, and that guard is
+        # load-bearing. Refreshing a listing whose local record was cleared
+        # sends it back with no lines -- the associations live only in the
+        # extension -- and replacing wholesale there would silently unidentify
+        # every card on it. Deleting a line is done in the app, where the
+        # lines are visible; it is not something a re-capture should be able to
+        # do by omission.
         if cap.lines:
             db.execute(
                 text("DELETE FROM mkt_listing_line WHERE listing_id = :id"),
@@ -303,6 +317,23 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     },
                 )
                 lines_new += 1
+
+        # What the server holds for this listing NOW -- which is the capture's
+        # own lines when it brought some, and whatever survived when it did
+        # not. Read back rather than inferred, so a line that failed to insert
+        # cannot be reported as identified.
+        on_server = db.execute(text(
+            "SELECT COUNT(*) FROM mkt_listing_line WHERE listing_id = :id"),
+            {"id": listing_id}).scalar() or 0
+        results.append({
+            "marketplace": cap.marketplace,
+            "externalId": cap.externalId,
+            "listingId": listing_id,
+            "linesOnServer": on_server,
+            # False means the capture brought no lines and the server's were
+            # left alone -- the case that looks like lost work and is not.
+            "linesReplaced": bool(cap.lines),
+        })
 
         for s in cap.sightings:
             if s.priceUsd is not None:
@@ -386,6 +417,7 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
         "sightings_new": sightings_new,
         "lines_written": lines_new,
         "fx_rates_new": rates_new,
+        "results": results,
     }
 
 

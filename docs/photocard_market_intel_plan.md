@@ -2086,6 +2086,26 @@ No backup changes needed.
     observation is kept** — it really was seen at that price — and the buy side
     reads only the newest.
 
+    **Two things the first refresh surfaced.** A listing re-captured after its
+    local record was cleared comes back with **no lines**, because the card
+    associations live only in the extension. The ingest's `if cap.lines:` guard
+    already meant the server kept its own — but nothing said so, and a panel row
+    reading *needs identifying* over a listing whose cards are safely recorded
+    is indistinguishable from one where the work really was lost. Ingest now
+    returns per capture what the server holds and whether the capture replaced
+    it; the panel tags those rows `N on server` and leaves them out of the nag
+    count. The guard itself is now load-bearing and tested: destroying an
+    identification through an omission rather than a decision is not something
+    a re-capture should be able to do.
+
+    And the **sync result was unreadable** — written to the status line after
+    the list re-rendered, then destroyed twice over, since `renderList()` was
+    not awaited and marking records synced broadcasts `STORE_CHANGED`, which
+    re-renders again. A sync that worked and a sync never pressed looked
+    identical. The note is now held in state and re-rendered with everything
+    else, which also makes a failure (`Sync failed: signin`) stay on screen.
+    `0 new listings` is the evidence a refresh merged into the right listing.
+
     **`DELETE /market/listings/{id}`** is the other half, and deliberately rare.
     `gone` is the ordinary end of a listing and it *keeps* the price history,
     which is real evidence about what a card was offered at. Delete is for
