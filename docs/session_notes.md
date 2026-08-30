@@ -6,6 +6,45 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-29 (US CDT) — Detail-page capture BUILT + WORKING (third block)
+
+Capture from a listing's own page, not just search tiles. Confirmed working
+end to end: capture (singles and lots) → link to cards → sync → clear.
+
+- **Supersedes the enrich tier**, which is deleted from the plan rather than
+  deferred. Its queue, throttle and session handling existed to make automated
+  fetching defensible; a tab the user opened needs none of it.
+- **Capture is a session, not a tab.** Activation was per tab, so every newly
+  opened listing came up dormant with no button — fatal for a workflow whose
+  whole shape is "open several tabs, capture the good ones, close them".
+- **Mercari's detail page uses different field names than its tiles**, which
+  cost several rounds: `itemId` not `id`, `photoUrl` not `thumbnail`,
+  `shippingPayer` not `shippingPayerCode`, and `itemCondition` is an object
+  rather than a string. A listing is also spread across several objects — the
+  richest has no photo — so the item is composed across candidates. Table in
+  `extension/README.md`.
+- **Dates resolved:** `created` = posted, `lastSoldAt` = sold, confirmed
+  against a listing showing "Posted 08/27/26" / "Sold 20h ago". Stored raw in
+  `mkt_listing.source_dates` pending promotion to real columns.
+- **Two real bugs found on the way:** the detail stamp ran last and could be
+  silently starved by a throw in the "Similar items" tile loop; and explicit
+  nulls from the normaliser overwrote good scraped values. Both fixed.
+- **`listingState` no longer defaults to sold.** `status === 'on_sale' ?
+  'active' : 'sold'` was safe while tiles were the only source; with a second
+  vocabulary in play it would turn any unrecognised status into a FAKE SALE,
+  which quietly drags a card's sold median. Both ends now matched explicitly.
+- **Queue is clearable.** Records carry `syncedAt`; Clear removes only synced
+  rows, and wiping unsynced ones takes a separate confirmation.
+
+**Process note worth keeping:** four rounds went into a "(partial read)" badge
+that was flagging healthy captures — it lit whenever any field came from the
+page rather than the item object, including the photo, which is the same photo
+either way. The data had been complete the whole time. Removed rather than
+tuned again. Debug the data, not the indicator.
+
+**Next:** net-not-gross (fees, absorbed shipping, the offer gap, and "to net $X
+list at $Y"), then promote `source_dates` to `posted_at`/`sold_at`, then Neokyo.
+
 ### 2026-08-29 (US CDT) — Origin ship dates + cost basis BUILT + DEPLOYED (`fd551e3`)
 
 Same day as the capture/comps entry below, second working block. Turns the comp

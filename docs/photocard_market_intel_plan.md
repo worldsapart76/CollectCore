@@ -1422,7 +1422,11 @@ No backup changes needed.
    `marketplace:externalId`. Carries `shipping_payer`, `description`,
    `seller_id` and the photo set, with `capture_tier` recording which surface a
    row came from. Ingest upgrades sweep→detail and never downgrades.
-9. **Per-card override + margin in the comp view** —
+9. **Detail-page capture WORKING** — verified end to end 2026-08-29: singles
+   and lots captured, linked, synced, cleared. Session-wide activation;
+   composed across candidate objects; Mercari's detail field names recorded in
+   `extension/README.md`.
+10. **Per-card override + margin in the comp view** —
    `PUT /market/cost-basis/item/{id}`, marked `source = 'manual'` and preserved
    by the sweep. The card detail reads
    *cost $2.50 (Older era) · margin $10.50 vs sold median $13.00 · ESTIMATED*.
