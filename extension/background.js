@@ -214,8 +214,20 @@ async function cacheImage(key, url) {
 
 // `status` is the source of truth for state, never which filter was running —
 // the default Mercari search mixes `trading` (sold) rows in with `on_sale`.
+// Anything-not-'on_sale' means sold was safe while tiles were the only source.
+// It is not safe now: a detail page may spell the status differently, and that
+// default turns every unrecognised value into a FAKE SALE -- the one kind of
+// bad row that quietly drags a card's sold median around.
+//
+// So both ends are matched explicitly and the fallback is 'active', which at
+// worst adds an ask to a panel the comp view already treats as the weaker
+// evidence. rawStatus is stored alongside, so an unknown vocabulary shows up
+// in the data instead of being silently absorbed.
 function listingState(status) {
-  return status === 'on_sale' ? 'active' : 'sold';
+  const s = String(status || '').toLowerCase();
+  if (/sold|trading|closed|completed/.test(s)) return 'sold';
+  if (/on_sale|onsale|active|available|listed/.test(s)) return 'active';
+  return 'active';
 }
 
 // Titles are the only bundle signal available at sweep time. A miss here is

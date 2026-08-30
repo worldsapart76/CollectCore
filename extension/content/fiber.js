@@ -196,6 +196,30 @@
     // inspection, and a silent partial match is what produced a capture with a
     // price but no name. Printing what WAS found turns the next fix into a
     // reading rather than another guess.
+    // Compose across candidates rather than picking one.
+    //
+    // Mercari spreads a listing over several objects: the richest carries name,
+    // price, condition, shipping and the dates but NO photo, while a smaller
+    // sibling carries photoUrl. Taking only the best-scoring object left the
+    // image missing, which forced the DOM fallback and kept every detail
+    // capture flagged as a partial read.
+    //
+    // Highest score wins any field it actually has; the rest fill gaps only.
+    if (best) {
+      const ranked = seenCandidates
+        .map((c) => ({ c, score: itemScore(c) }))
+        .sort((a, b) => b.score - a.score);
+      const composite = {};
+      for (const { c } of ranked) {
+        for (const [k, v] of Object.entries(c)) {
+          if (v === null || v === undefined || v === '') continue;
+          if (composite[k] === undefined) composite[k] = v;
+        }
+      }
+      best = composite;
+      bestScore = itemScore(composite);
+    }
+
     lastScan = {
       nodes: visited,
       candidates: seenCandidates.length,
