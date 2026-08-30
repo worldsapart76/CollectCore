@@ -151,6 +151,7 @@
   // diagnosable from the panel -- a page console full of Mercari's own errors
   // is not somewhere a diagnostic gets noticed.
   let lastScan = null;
+  let lastPhotoShape = null;
 
   function findDetailItem(wantId) {
     let root = anyFiber();
@@ -225,6 +226,7 @@
       candidates: seenCandidates.length,
       bestScore,
       keys: best ? Object.keys(best).slice(0, 30) : [],
+      photoShape: lastPhotoShape,
       // Keys of the runner-up candidates, which is what says where the real
       // object might be hiding.
       others: seenCandidates.slice(0, 4).map((c) => Object.keys(c).slice(0, 20)),
@@ -270,11 +272,23 @@
     const raw = item.photos || item.imageUrls || item.images;
     if (Array.isArray(raw) && raw.length) {
       const urls = raw
-        .map((p) =>
-          typeof p === 'string' ? p : p?.uri ?? p?.url ?? p?.thumbnail ?? null
-        )
+        .map((p) => {
+          if (typeof p === 'string') return p;
+          if (!p || typeof p !== 'object') return null;
+          // Mercari has used several shapes for a photo entry; take the first
+          // value that looks like a URL rather than guessing at the key.
+          const direct =
+            p.uri ?? p.url ?? p.thumbnail ?? p.imageUrl ?? p.photoUrl ?? p.src;
+          if (typeof direct === 'string' && direct) return direct;
+          for (const v of Object.values(p)) {
+            if (typeof v === 'string' && /^https?:\/\//.test(v)) return v;
+          }
+          return null;
+        })
         .filter(Boolean);
       if (urls.length) return urls;
+      // Shape unknown: record it so the next fix is a reading, not a guess.
+      lastPhotoShape = Object.keys(raw[0] || {}).slice(0, 12);
     }
     // Detail pages carry a single photoUrl rather than a list.
     const one = item.photoUrl || item.thumbnail;

@@ -302,6 +302,7 @@ async function capture({
     // Once a clean read lands, stop calling the record degraded.
     if (existing.viaFallback && !item._viaFallback) existing.viaFallback = false;
     if (item._scanKeys) existing.scanKeys = item._scanKeys;
+    existing.borrowed = item._borrowed || null;
     if (item.dates) existing.dates = { ...(existing.dates || {}), ...item.dates };
     // Re-seen means changed: a price move or a sale is exactly what a second
     // sighting records, so this needs pushing again.
@@ -345,6 +346,8 @@ async function capture({
     // What the detail fiber scan actually found, so a bad read can be
     // diagnosed from the panel instead of from a noisy page console.
     scanKeys: item._scanKeys || null,
+    // Which fields the page had to supply because the fiber lacked them.
+    borrowed: item._borrowed || null,
     // Set by the panel after a successful sync. Until then a record is the
     // only copy that exists, which is why Clear is destructive.
     syncedAt: null,

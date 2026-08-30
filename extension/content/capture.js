@@ -351,16 +351,25 @@
     merged.id = urlId;
 
     // Anything the fiber left empty, take from the page.
-    let borrowed = false;
+    const borrowed = [];
     for (const k of ['name', 'thumbnail', 'price', 'status']) {
       const missing =
         merged[k] === null || merged[k] === undefined || merged[k] === '';
       if (missing && scraped && scraped[k] !== null && scraped[k] !== '') {
         merged[k] = scraped[k];
-        borrowed = true;
+        borrowed.push(k);
       }
     }
-    if (borrowed || !stamped) merged._viaFallback = true;
+
+    // Only a borrowed NAME or PRICE is a degraded read. A thumbnail taken from
+    // the page's own img tag is the same photo by another route, and flagging
+    // the whole capture over it made every detail capture look degraded while
+    // its actual data was complete.
+    const degraded = !stamped || borrowed.some((k) => k === 'name' || k === 'price');
+    if (degraded) merged._viaFallback = true;
+    // Recorded either way, so "why is this flagged" is answerable from the
+    // panel instead of from another round of guessing.
+    if (borrowed.length) merged._borrowed = borrowed;
     if (scan) merged._scanKeys = scan;
     return merged;
   }
@@ -393,6 +402,9 @@
       : item._viaFallback
         ? '+ Capture (partial read)'
         : '+ Capture';
+    // "partial read" now means the NAME or PRICE came from the page rather
+    // than the item object -- a borrowed thumbnail is the same photo by
+    // another route and no longer counts.
     // Conditional writes only -- see syncDot. An unconditional textContent
     // assignment is a childList mutation, and the observer that calls this
     // watches for exactly that.

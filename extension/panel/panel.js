@@ -94,13 +94,18 @@ function row(rec) {
   // Fiber-scan diagnostic, shown only when the read was poor. Mercari's own
   // page console is far too noisy for a diagnostic to be noticed in, and this
   // is the information needed to find where the real item object lives.
+  if (rec.borrowed?.length) meta.append(tag(`page: ${rec.borrowed.join(', ')}`));
+
   const scan = rec.scanKeys;
-  if (scan && (!rec.name || rec.viaFallback)) {
+  if (scan && (!rec.name || rec.viaFallback || rec.borrowed?.length)) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =
       `fiber scan: ${scan.candidates ?? 0} candidate(s), best score ` +
-      `${scan.bestScore ?? 0} — [${(scan.keys || []).join(', ') || 'none'}]` +
+      `${scan.bestScore ?? 0}` +
+      (rec.borrowed?.length ? ` · from page: ${rec.borrowed.join(', ')}` : '') +
+      (scan.photoShape ? ` · photo entry keys: [${scan.photoShape.join(', ')}]` : '') +
+      ` — [${(scan.keys || []).join(', ') || 'none'}]` +
       ((scan.others || []).length > 1
         ? ` · others: ${scan.others.slice(1).map((k) => `[${k.join(', ')}]`).join(' ')}`
         : '');
