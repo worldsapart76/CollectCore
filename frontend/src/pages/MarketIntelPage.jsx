@@ -1156,13 +1156,24 @@ function FeesPanel({ onError, onChanged }) {
       .catch((e) => onError(e.message || "Failed to load fees"));
   }, [open, rows, onError]);
 
+  // Deliberately asks about a typical ORDER, not what the shipping fee covers.
+  //
+  // "$12 for up to 40 cards" makes 40 the obvious answer and it is the wrong
+  // one: the fee is only $0.30 a card if forty cards actually turn up in the
+  // box. Buy six and it is $2.00 a card, so answering with the capacity
+  // understates every purchase on that marketplace roughly sevenfold -- and
+  // understated cost is the direction that talks you into a bad buy.
   async function editBoxSize(m) {
     const entered = prompt(
-      `${m.marketplace_name} — how many cards a typical box holds.
+      `${m.marketplace_name} — how many cards you TYPICALLY buy in one shipment.
 
 ` +
         "Per-box costs (shipping, handling, wire fees) are divided by this to " +
-        "get a per-card share. Leave blank to clear it.",
+        "get a per-card share.\n\n" +
+        "Not what the fee covers — if shipping is $12 for up to 40 cards but " +
+        "you usually buy 6, answer 6. Answering 40 would price those 6 cards " +
+        "as though the box were full.\n\n" +
+        "Leave blank to clear it.",
       m.buy?.typical_items_per_shipment ?? ""
     );
     if (entered == null) return;
@@ -1242,7 +1253,7 @@ function FeesPanel({ onError, onChanged }) {
                 </button>
                 <button
                   onClick={() => editBoxSize(m)}
-                  title="How many cards a typical consolidated box holds. Divides the per-box cost lines."
+                  title="How many cards you typically buy in one shipment — not what the shipping fee covers. Divides the per-box cost lines into a per-card share."
                   style={{
                     border: "1px solid #ddd", borderRadius: 3, background: "#fff",
                     padding: "1px 6px", cursor: "pointer", fontSize: 12,
@@ -1259,9 +1270,23 @@ function FeesPanel({ onError, onChanged }) {
               </div>
               {m.buy?.box_unallocated && (
                 <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>
-                  Per-box costs are set but no box size is — they are left out
-                  rather than charged whole to a single card. Set{" "}
-                  <strong>box size</strong> above.
+                  Per-box costs are set but no box size is, so they are{" "}
+                  <strong>left out entirely</strong> — every purchase here is
+                  understated by them. Charging one whole to a single card would
+                  be worse than leaving it out, which is why nothing is guessed.
+                  {/* A warning that names a control and does not offer it sends
+                      the reader hunting along a header row for a small button.
+                      Same prompt, at the point the problem is stated. */}
+                  <button
+                    onClick={() => editBoxSize(m)}
+                    style={{
+                      marginLeft: 6, border: "1px solid #d97706", borderRadius: 3,
+                      background: "#fff", padding: "1px 6px", cursor: "pointer",
+                      fontSize: 11, color: "#b45309",
+                    }}
+                  >
+                    Set box size
+                  </button>
                 </div>
               )}
               {m[m.side === "buy" ? "buy" : "sell"]?.fx_missing && (
