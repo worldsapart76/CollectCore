@@ -1537,6 +1537,19 @@ export async function deleteFeeComponent(id) {
   return handleJsonResponse(res, 'Failed to remove cost line');
 }
 
+// How many cards a typical consolidated box holds. Divides the per-shipment
+// cost lines into a per-card share; without it they are left out and flagged,
+// because charging a whole box's shipping to one card is a wrong answer rather
+// than an approximate one.
+export async function setBoxSize(code, n) {
+  const res = await fetch(`${API}/market/marketplaces/${code}/box-size`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typical_items_per_shipment: n }),
+  });
+  return handleJsonResponse(res, 'Failed to save box size');
+}
+
 export async function setOfferDiscount(code, pct) {
   const res = await fetch(`${API}/market/marketplaces/${code}/offer-discount`, {
     method: 'PUT',

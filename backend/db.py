@@ -192,6 +192,23 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_listing.%s", col)
 
+    # Migration: cost-line scope, and how many cards a typical box holds.
+    if "mkt_fee_component" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(mkt_fee_component)").fetchall()}
+        if "scope" not in cols:
+            raw.execute("ALTER TABLE mkt_fee_component ADD COLUMN scope TEXT "
+                        "NOT NULL DEFAULT 'per_item'")
+            logger.info("Migration: added mkt_fee_component.scope")
+    if "lkup_mkt_marketplaces" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(lkup_mkt_marketplaces)").fetchall()}
+        if "typical_items_per_shipment" not in cols:
+            raw.execute("ALTER TABLE lkup_mkt_marketplaces ADD COLUMN "
+                        "typical_items_per_shipment INTEGER")
+            logger.info(
+                "Migration: added lkup_mkt_marketplaces.typical_items_per_shipment")
+
     # Migration: source-origin ship dates.
     # Origin-level, not card-level: 88 origin rows date all 11,323 photocards,
     # and every card has an origin (source_origin_id has no NULLs in prod). The
@@ -430,43 +447,46 @@ def _seed_fee_components(raw) -> None:
     overwritten, and a component deleted on purpose stays deleted only until a
     restart re-adds it at zero, which is harmless.
     """
-    # (marketplace, side, label, sort)
+    # (marketplace, side, label, scope, sort)
     COMPONENTS = (
         # Mercari US -- both sides. The buyer protection fee is visible on
         # every listing page; the selling side is what a sale nets.
-        ("mercari_us", "sell", "Selling fee", 1),
-        ("mercari_us", "sell", "Payment processing", 2),
-        ("mercari_us", "sell", "Shipping I absorb", 3),
-        ("mercari_us", "buy", "Buyer protection fee", 1),
-        ("mercari_us", "buy", "Shipping I pay", 2),
-        ("mercari_us", "buy", "Sales tax", 3),
+        ("mercari_us", "sell", "Selling fee", "per_item", 1),
+        ("mercari_us", "sell", "Payment processing", "per_item", 2),
+        ("mercari_us", "sell", "Shipping I absorb", "per_item", 3),
+        ("mercari_us", "buy", "Buyer protection fee", "per_item", 1),
+        ("mercari_us", "buy", "Shipping I pay", "per_item", 2),
+        ("mercari_us", "buy", "Sales tax", "per_item", 3),
 
-        # Neokyo -- buy only. A proxy purchase has more cost lines than a
-        # direct one, and they land at different times: some per item, some
-        # per consolidated box.
-        ("neokyo", "buy", "Service fee", 1),
-        ("neokyo", "buy", "Domestic shipping (JP)", 2),
-        ("neokyo", "buy", "Payment fee (PayPal)", 3),
-        ("neokyo", "buy", "International shipping", 4),
-        ("neokyo", "buy", "Customs / import duty", 5),
+        # Neokyo -- buy only, and the reason `scope` exists. Costs land at
+        # three granularities: per listing (the service fee), proportional to
+        # price (PayPal, import tax), and ONCE PER BOX regardless of contents
+        # (shipping, handling, wire fees). Charging that last group per card
+        # would inflate a 40-card box eightfold.
+        ("neokyo", "buy", "Service fee (per listing)", "per_item", 1),
+        ("neokyo", "buy", "PayPal fee", "per_item", 2),
+        ("neokyo", "buy", "Import tax / duty", "per_item", 3),
+        ("neokyo", "buy", "International shipping (per box)", "per_shipment", 4),
+        ("neokyo", "buy", "Handling fee (per box)", "per_shipment", 5),
+        ("neokyo", "buy", "PayPal wire fees (per box)", "per_shipment", 6),
 
-        ("pocamarket", "buy", "Service fee", 1),
-        ("pocamarket", "buy", "Domestic shipping (KR)", 2),
-        ("pocamarket", "buy", "Payment fee", 3),
-        ("pocamarket", "buy", "International shipping", 4),
-        ("pocamarket", "buy", "Customs / import duty", 5),
+        ("pocamarket", "buy", "Service fee (per listing)", "per_item", 1),
+        ("pocamarket", "buy", "Payment fee", "per_item", 2),
+        ("pocamarket", "buy", "Import tax / duty", "per_item", 3),
+        ("pocamarket", "buy", "International shipping (per box)", "per_shipment", 4),
+        ("pocamarket", "buy", "Handling fee (per box)", "per_shipment", 5),
 
-        ("ebay", "sell", "Final value fee", 1),
-        ("ebay", "sell", "Payment processing", 2),
-        ("ebay", "sell", "Shipping I absorb", 3),
-        ("ebay", "buy", "Shipping I pay", 1),
-        ("ebay", "buy", "Sales tax", 2),
+        ("ebay", "sell", "Final value fee", "per_item", 1),
+        ("ebay", "sell", "Payment processing", "per_item", 2),
+        ("ebay", "sell", "Shipping I absorb", "per_item", 3),
+        ("ebay", "buy", "Shipping I pay", "per_item", 1),
+        ("ebay", "buy", "Sales tax", "per_item", 2),
     )
-    for code, side, label, order in COMPONENTS:
+    for code, side, label, scope, order in COMPONENTS:
         raw.execute(
             "INSERT OR IGNORE INTO mkt_fee_component "
-            "(marketplace_code, side, label, sort_order) VALUES (?, ?, ?, ?)",
-            (code, side, label, order),
+            "(marketplace_code, side, label, scope, sort_order) VALUES (?, ?, ?, ?, ?)",
+            (code, side, label, scope, order),
         )
 
     # Carry over whatever was already entered under the old flat columns, so

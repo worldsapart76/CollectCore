@@ -4,7 +4,7 @@ import {
   listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
-  deleteFeeComponent, setOfferDiscount,
+  deleteFeeComponent, setOfferDiscount, setBoxSize,
 } from "../api";
 
 // Price comps from the browser-extension captures.
@@ -294,6 +294,37 @@ function FeeComponentRow({ c, currency, exponent, onError, refresh }) {
           {c.fixed_minor ? money(c.fixed_minor, currency, exponent) : "—"}
         </button>
       </td>
+      <td style={{ padding: "3px 6px", textAlign: "right" }}>
+        <button
+          disabled={busy}
+          title={
+            c.scope === "per_shipment"
+              ? "Lands once per box — divided by the typical box size"
+              : "Applies to each listing"
+          }
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await updateFeeComponent(c.component_id, {
+                scope: c.scope === "per_shipment" ? "per_item" : "per_shipment",
+              });
+              await refresh();
+            } catch (e) {
+              onError(e.message || "Failed to save");
+            } finally {
+              setBusy(false);
+            }
+          }}
+          style={{
+            border: "1px solid #ddd", borderRadius: 3, cursor: "pointer", fontSize: 10,
+            padding: "1px 5px",
+            background: c.scope === "per_shipment" ? "#e0e7ff" : "#f3f4f6",
+            color: c.scope === "per_shipment" ? "#3730a3" : "#6b7280",
+          }}
+        >
+          {c.scope === "per_shipment" ? "per box" : "per item"}
+        </button>
+      </td>
       <td style={{ padding: "3px 6px", textAlign: "right", width: 24 }}>
         <button
           disabled={busy}
@@ -354,7 +385,7 @@ function FeeSide({ market, side, onError, refresh }) {
           ))}
           {!comps.length && (
             <tr>
-              <td colSpan={4} style={{ padding: "3px 6px", color: "#999", fontSize: 12 }}>
+              <td colSpan={5} style={{ padding: "3px 6px", color: "#999", fontSize: 12 }}>
                 nothing set
               </td>
             </tr>
@@ -384,6 +415,29 @@ function FeesPanel({ onError, onChanged }) {
       .then((d) => setRows(d.marketplaces || []))
       .catch((e) => onError(e.message || "Failed to load fees"));
   }, [open, rows, onError]);
+
+  async function editBoxSize(m) {
+    const entered = prompt(
+      `${m.marketplace_name} — how many cards a typical box holds.
+
+` +
+        "Per-box costs (shipping, handling, wire fees) are divided by this to " +
+        "get a per-card share. Leave blank to clear it.",
+      m.buy?.typical_items_per_shipment ?? ""
+    );
+    if (entered == null) return;
+    const t = entered.trim();
+    const n = t === "" ? null : Number(t);
+    if (n !== null && (!Number.isInteger(n) || n < 1)) {
+      return onError("Enter a whole number of 1 or more, or leave blank.");
+    }
+    try {
+      await setBoxSize(m.marketplace_code, n);
+      await refresh();
+    } catch (e) {
+      onError(e.message || "Failed to save");
+    }
+  }
 
   async function editOffer(m) {
     const entered = prompt(
@@ -446,11 +500,30 @@ function FeesPanel({ onError, onChanged }) {
                 >
                   offer gap {((m.offer_discount_pct || 0) * 100).toFixed(0)}%
                 </button>
+                <button
+                  onClick={() => editBoxSize(m)}
+                  title="How many cards a typical consolidated box holds. Divides the per-box cost lines."
+                  style={{
+                    border: "1px solid #ddd", borderRadius: 3, background: "#fff",
+                    padding: "1px 6px", cursor: "pointer", fontSize: 12,
+                  }}
+                >
+                  {m.buy?.typical_items_per_shipment
+                    ? `${m.buy.typical_items_per_shipment}/box`
+                    : "box size —"}
+                </button>
               </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 <FeeSide market={m} side="buy" onError={onError} refresh={refresh} />
                 <FeeSide market={m} side="sell" onError={onError} refresh={refresh} />
               </div>
+              {m.buy?.box_unallocated && (
+                <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>
+                  Per-box costs are set but no box size is — they are left out
+                  rather than charged whole to a single card. Set{" "}
+                  <strong>box size</strong> above.
+                </div>
+              )}
               {m[m.side === "buy" ? "buy" : "sell"]?.fx_missing && (
                 <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>
                   No {m.currency} exchange rate on file — these cannot be converted to

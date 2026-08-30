@@ -1011,20 +1011,32 @@ def fee_model(db, marketplace: str, side: str = "sell",
     dollar figure.
     """
     mrow = db.execute(text(
-        "SELECT currency, offer_discount_pct FROM lkup_mkt_marketplaces "
-        "WHERE marketplace_code = :m"
+        "SELECT currency, offer_discount_pct, typical_items_per_shipment "
+        "FROM lkup_mkt_marketplaces WHERE marketplace_code = :m"
     ), {"m": marketplace}).fetchone()
     currency = (mrow[0] if mrow else "USD") or "USD"
     offer = (mrow[1] if mrow else 0.0) or 0.0
+    per_box_items = (mrow[2] if mrow else None) or None
 
     parts = db.execute(text(
-        "SELECT component_id, label, pct, fixed_minor FROM mkt_fee_component "
+        "SELECT component_id, label, pct, fixed_minor, scope FROM mkt_fee_component "
         "WHERE marketplace_code = :m AND side = :s AND is_active = 1 "
         "ORDER BY sort_order, label"
     ), {"m": marketplace, "s": side}).mappings().all()
 
+    # A percentage is proportional to price, so it is per-item and per-box
+    # equivalently and needs no amortising. Only FIXED per-box amounts do.
     total_pct = sum(p["pct"] or 0.0 for p in parts)
-    total_fixed = sum(p["fixed_minor"] or 0 for p in parts)
+    item_fixed = sum((p["fixed_minor"] or 0)
+                     for p in parts if p["scope"] != "per_shipment")
+    box_fixed = sum((p["fixed_minor"] or 0)
+                    for p in parts if p["scope"] == "per_shipment")
+
+    # Divided across a typical box. Without that figure the per-box lines are
+    # left OUT and flagged, never guessed at: a ¥8,039 box cost charged to one
+    # card instead of forty is not an approximation, it is a wrong answer.
+    box_share = round(box_fixed / per_box_items) if (per_box_items and box_fixed) else 0
+    total_fixed = item_fixed + box_share
 
     # Fees are a standing cost, not a historical observation, so today's rate
     # is the right one — unlike a sighting, which must use the rate as of when
@@ -1042,6 +1054,14 @@ def fee_model(db, marketplace: str, side: str = "sell",
         "components": [dict(p) for p in parts],
         "total_pct": total_pct,
         "total_fixed_minor": total_fixed,
+        "item_fixed_minor": item_fixed,
+        "box_fixed_minor": box_fixed,
+        "box_share_minor": box_share,
+        "typical_items_per_shipment": per_box_items,
+        # Per-box costs exist but there is no box size to divide them by, so
+        # they are excluded. Said out loud, because silently dropping them
+        # understates every purchase on this marketplace.
+        "box_unallocated": bool(box_fixed and not per_box_items),
         # None, never 0, when a non-USD marketplace has no rate on file:
         # treating a missing rate as zero would silently understate every cost
         # on that marketplace.
@@ -1115,6 +1135,9 @@ class ComponentIn(BaseModel):
     pct: Optional[float] = None
     # Minor units of the MARKETPLACE's currency — not cents, not USD.
     fixed_minor: Optional[int] = None
+    # 'per_item' or 'per_shipment'. A per_shipment fixed amount lands once on
+    # a consolidated box and is divided by typical_items_per_shipment.
+    scope: Optional[str] = None
 
 
 @router.get("/fees")
@@ -1151,13 +1174,17 @@ def create_fee_component(body: ComponentIn, db=Depends(get_db)):
             status_code=400,
             detail="marketplace_code, side ('buy' or 'sell') and label are required.")
     _validate_component(body.pct, body.fixed_minor)
+    scope = body.scope or "per_item"
+    if scope not in ("per_item", "per_shipment"):
+        raise HTTPException(status_code=400,
+                            detail="scope must be 'per_item' or 'per_shipment'.")
     try:
         cid = db.execute(text(
             "INSERT INTO mkt_fee_component "
-            "(marketplace_code, side, label, pct, fixed_minor, sort_order) "
-            "VALUES (:m, :s, :l, :p, :f, 99) RETURNING component_id"
+            "(marketplace_code, side, label, pct, fixed_minor, scope, sort_order) "
+            "VALUES (:m, :s, :l, :p, :f, :sc, 99) RETURNING component_id"
         ), {"m": body.marketplace_code, "s": body.side, "l": body.label.strip(),
-            "p": body.pct or 0.0, "f": body.fixed_minor or 0}).scalar_one()
+            "p": body.pct or 0.0, "f": body.fixed_minor or 0, "sc": scope}).scalar_one()
         db.commit()
     except HTTPException:
         raise
@@ -1181,6 +1208,11 @@ def update_fee_component(component_id: int, body: ComponentIn, db=Depends(get_db
         sets.append("fixed_minor = :f"); params["f"] = body.fixed_minor
     if body.label is not None and body.label.strip():
         sets.append("label = :l"); params["l"] = body.label.strip()
+    if body.scope is not None:
+        if body.scope not in ("per_item", "per_shipment"):
+            raise HTTPException(status_code=400,
+                                detail="scope must be 'per_item' or 'per_shipment'.")
+        sets.append("scope = :sc"); params["sc"] = body.scope
     if not sets:
         return {"ok": True, "changed": False}
     res = db.execute(text(
@@ -1213,6 +1245,30 @@ def set_offer_discount(code: str, body: OfferDiscountIn, db=Depends(get_db)):
     res = db.execute(text(
         "UPDATE lkup_mkt_marketplaces SET offer_discount_pct = :v "
         "WHERE marketplace_code = :m"), {"v": body.offer_discount_pct, "m": code})
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"No marketplace '{code}'.")
+    db.commit()
+    return {"ok": True}
+
+
+class BoxSizeIn(BaseModel):
+    typical_items_per_shipment: Optional[int] = None
+
+
+@router.put("/marketplaces/{code}/box-size")
+def set_box_size(code: str, body: BoxSizeIn, db=Depends(get_db)):
+    """How many cards a typical consolidated box holds.
+
+    Divides the per_shipment cost lines into a per-card share. Null clears it,
+    which puts those lines back to unallocated-and-flagged rather than
+    silently charging a whole box's shipping to one card.
+    """
+    n = body.typical_items_per_shipment
+    if n is not None and n < 1:
+        raise HTTPException(status_code=400, detail="Must be at least 1, or empty.")
+    res = db.execute(text(
+        "UPDATE lkup_mkt_marketplaces SET typical_items_per_shipment = :n "
+        "WHERE marketplace_code = :m"), {"n": n, "m": code})
     if res.rowcount == 0:
         raise HTTPException(status_code=404, detail=f"No marketplace '{code}'.")
     db.commit()

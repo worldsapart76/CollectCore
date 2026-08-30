@@ -2027,7 +2027,11 @@ CREATE TABLE IF NOT EXISTS lkup_mkt_marketplaces (
     -- How far below the ask buyers typically settle. Sold prices are already
     -- net of this (they are accepted offers), so it does NOT come off a sold
     -- comp -- it is what a LIST price has to be padded by to clear a target.
-    offer_discount_pct   REAL NOT NULL DEFAULT 0
+    offer_discount_pct   REAL NOT NULL DEFAULT 0,
+    -- How many cards a typical consolidated box holds. Divides the
+    -- per_shipment cost lines into a per-card estimate. NULL means unknown,
+    -- and those lines are then left OUT and flagged rather than guessed at.
+    typical_items_per_shipment INTEGER
 );
 
 INSERT OR IGNORE INTO lkup_mkt_marketplaces
@@ -2063,6 +2067,18 @@ CREATE TABLE IF NOT EXISTS mkt_fee_component (
     marketplace_code TEXT NOT NULL,
     side             TEXT NOT NULL,          -- 'buy' | 'sell'
     label            TEXT NOT NULL,
+    -- Costs arrive at different granularities and cannot all be charged per
+    -- card. A real Neokyo box: ¥350 per LISTING, PayPal 3.6% proportional to
+    -- price, import tax 23.65% also proportional, but shipping ¥6,700 +
+    -- handling ¥500 + wire fees ¥839 land ONCE ON THE BOX regardless of how
+    -- many cards are in it. Charging that per card would inflate a 40-card
+    -- box eightfold.
+    --   per_item      applies to each listing (a pct here is proportional to
+    --                 price, so it is per-item and per-box equivalently)
+    --   per_shipment  lands once per consolidated box; divided by
+    --                 lkup_mkt_marketplaces.typical_items_per_shipment to
+    --                 estimate a per-card share
+    scope            TEXT NOT NULL DEFAULT 'per_item',  -- per_item|per_shipment
     pct              REAL NOT NULL DEFAULT 0,
     fixed_minor      INTEGER NOT NULL DEFAULT 0,
     sort_order       INTEGER NOT NULL DEFAULT 0,
