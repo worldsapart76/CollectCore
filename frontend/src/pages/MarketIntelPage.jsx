@@ -518,7 +518,49 @@ function CostBasisPanel({ onError }) {
 // The estimate is labelled everywhere it appears. On a blended basis an
 // individual card's margin is noise -- only the aggregate is sound -- so the
 // number must never read as measured.
-function BasisLine({ itemId, basis, soldMedian, net, fees, onChanged }) {
+// Where a proposed list price stands among the listings competing with it now.
+//
+// This is the sanity check for a RARE card: comp volume can be genuinely thin,
+// so gating on sold count would go quiet on exactly the cards most in need of
+// a price. Ask-vs-ask works regardless of how many have sold.
+//
+// It reports the standing and stops there. "Undercuts everything" is good news
+// on a card you want gone and bad news on one you do not, and the app has no
+// business deciding which.
+function AskStanding({ vsActive }) {
+  if (!vsActive || vsActive.list_cents == null) return null;
+
+  if (!vsActive.n_active) {
+    return (
+      <span style={{ color: "#666" }} title="No live competition to price against.">
+        nothing else listed right now
+      </span>
+    );
+  }
+
+  const { cheaper, dearer, n_active: n, standing, active_min, active_max } = vsActive;
+  const tone =
+    standing === "undercuts_all" ? "#b45309"
+      : standing === "above_all" ? "#b91c1c"
+        : "#15803d";
+  const text =
+    standing === "undercuts_all"
+      ? `cheapest of ${n + 1} — others start at ${usd(active_min)}`
+      : standing === "above_all"
+        ? `dearest of ${n + 1} — others top out at ${usd(active_max)}`
+        : `${cheaper} cheaper, ${dearer} dearer of ${n} listed`;
+
+  return (
+    <span
+      style={{ color: tone }}
+      title={`Current asking prices: ${usd(active_min)}–${usd(active_max)} across ${n} listing(s).`}
+    >
+      {text}
+    </span>
+  );
+}
+
+function BasisLine({ itemId, basis, soldMedian, net, fees, vsActive, onChanged }) {
   const [busy, setBusy] = useState(false);
 
   async function edit() {
@@ -595,6 +637,7 @@ function BasisLine({ itemId, basis, soldMedian, net, fees, onChanged }) {
               list at <strong>{usd(net.list_to_net)}</strong>
             </span>
           )}
+          <AskStanding vsActive={vsActive} />
           {fees && !fees.configured && (
             <span
               title="No fees or shipping set for this marketplace, so these figures are gross."
@@ -647,6 +690,7 @@ function CardDetail({ detail, onChanged }) {
         soldMedian={soldStats?.median ?? null}
         net={detail.net}
         fees={detail.fees}
+        vsActive={detail.vs_active}
         onChanged={onChanged}
       />
 

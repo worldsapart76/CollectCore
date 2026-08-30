@@ -522,6 +522,42 @@ def comps_summary(db=Depends(get_db)):
     return {"cards": cards}
 
 
+
+def _ask_position(list_cents: Optional[int], active: List[int]) -> Dict[str, Any]:
+    """Where `list_cents` would rank among the current asking prices.
+
+    Deliberately NOT a verdict on whether the price is right -- it reports the
+    standing and lets the caller judge. `n_active` of 0 is a real answer, not a
+    missing one: no competition is itself worth knowing, and it is common on
+    exactly the rare cards where sold comps are thin.
+    """
+    asks = sorted(a for a in active if a is not None)
+    out: Dict[str, Any] = {
+        "n_active": len(asks),
+        "active_min": asks[0] if asks else None,
+        "active_max": asks[-1] if asks else None,
+        "active_median": (
+            asks[len(asks) // 2] if len(asks) % 2
+            else (asks[len(asks) // 2 - 1] + asks[len(asks) // 2]) // 2
+        ) if asks else None,
+        "list_cents": list_cents,
+        "cheaper": None,
+        "dearer": None,
+        "standing": None,
+    }
+    if list_cents is None or not asks:
+        return out
+    out["cheaper"] = sum(1 for a in asks if a < list_cents)
+    out["dearer"] = sum(1 for a in asks if a > list_cents)
+    if out["cheaper"] == 0:
+        out["standing"] = "undercuts_all"
+    elif out["dearer"] == 0:
+        out["standing"] = "above_all"
+    else:
+        out["standing"] = "mid_pack"
+    return out
+
+
 @router.get("/comps/{item_id}")
 def comps_for_card(item_id: int, db=Depends(get_db)):
     """Full sighting series for one card, plus its excluded-lot appearances.
@@ -605,6 +641,20 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         "currency": "USD",
         "basis": basis,
         "fees": {**fm, "marketplace": mkt},
+        # Where a proposed list price would sit among the listings actually
+        # competing with it right now.
+        #
+        # This is the check that matters for a RARE card, where comp volume is
+        # genuinely thin and gating on sold count would just suppress the cards
+        # most in need of a price. It compares like with like -- your ask
+        # against their asks -- and answers the two ways a price goes wrong:
+        # under everything on the market (money left behind) or over everything
+        # (it will not move while cheaper copies exist).
+        "vs_active": _ask_position(
+            list_price_for(basis["cost_cents"] + margin, fm)
+            if margin is not None and basis else None,
+            active,
+        ),
         # Gross is what the market paid; net is what you would keep. Both are
         # returned because the difference is the entire point.
         "net": {

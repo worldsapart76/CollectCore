@@ -848,6 +848,46 @@ Non-card lines (album, magazine, merch) take the same outcomes — they can be
 resold, kept, or absorbed. Allocating a share away from the cards without
 giving it somewhere to land just leaks it.
 
+## Outliers, thin comps, and pricing against the live market
+
+**The sold median already absorbs lowball outliers**, which is why it is the
+headline rather than the average. Measured on a real case — a keychain selling
+$30–41 with one $15 lowball — the median moves **$1.50**; the mean moves $3.00
+and keeps sinking as more lowballs land. A $5 sale and a $15 sale shift the
+median identically, because it only moves one position along the sorted list.
+
+The outlier still shows, deliberately: the range reads `$15.00–$41.00 (7)` and
+the quartile box leaves it outside as a visible tail. It tells you the floor
+exists without letting it set the price.
+
+### Volume is the wrong gate
+
+The obvious next move — warn when there are few sold comps — is wrong here.
+**Rare cards genuinely have thin comps**, and they are exactly the cards most in
+need of a price, so a volume gate goes quiet precisely where help is wanted.
+
+### Ask-vs-ask is the check that works
+
+Compare the proposed **list price** against the **asks currently live**. Both
+are asking prices, so it is like for like — unlike sold-vs-ask, which compares
+two different things — and it works at any comp volume, including one rival or
+none.
+
+It answers the two ways a price goes wrong:
+
+| standing | meaning |
+|---|---|
+| `undercuts_all` | under everything live — money left behind |
+| `above_all` | over everything live — will not move while cheaper copies exist |
+| `mid_pack` | *N* cheaper, *M* dearer |
+
+`n_active: 0` is a real answer, not a missing one: no competition is worth
+knowing, and it is common on the rare cards where sold comps are thin.
+
+**It reports the standing and stops.** "Cheapest of 6" is good news on a card
+you want gone and bad news on one you do not, and the module has no business
+deciding which.
+
 ## Gross is not net — fees, shipping, and the offer gap
 
 Every figure the comp view shows today is **gross**. A sold median of $13.00
