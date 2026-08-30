@@ -1649,6 +1649,44 @@ No backup changes needed.
     photographed, the same page with every string translated away, and the page
     under Chrome translation.
 
+14. **Buy side, landed** — the comparison the module was built for, which had
+    no view. A Neokyo listing appeared only under *Excluded lots*, which reads
+    as a data-quality problem rather than as a place to buy the card.
+
+    Excluding a bundle from the price SERIES stays correct — a two-card lot at
+    ¥3,399 is not this card at ¥3,399 — but that says nothing about whether
+    buying it is a good idea, and divided by its card count it is exactly the
+    per-card acquisition price. A **Buying** panel now lists every active
+    listing on a marketplace with `side IN ('buy','both')`, priced all-in
+    through `landed_cost()` with that marketplace's own buy-side fee model, and
+    divided by line count. Cheapest first, with the spread against the **net**
+    sold median stated outright.
+
+    Two bugs surfaced building it:
+
+    - **A lot's price rendered through a dollar formatter** — ¥3,399 displayed
+      as "$33.99". The same currency bug as the fee fields, one layer down; the
+      lots query carries no currency, so the panel had nothing else to use.
+      Third instance of this bug. Any query feeding a price to the UI must
+      select `currency` and `price_usd` alongside `price_cents`.
+    - **A buy-only marketplace's asks counted as sell-side competition.**
+      `_ask_position` answers "where would my ask stand among the listings a
+      buyer sees instead of mine" — Neokyo is somewhere you buy and never
+      somewhere you list, so its asks were moving that standing for no reason.
+      Now filtered to `side IN ('sell','both')`.
+
+15. **Tracked-card list filters** — every bundle capture adds a row per card on
+    it, so one 8-card lot lands eight entries and the list grows from ordinary
+    use. A filter box over labels plus *has sold comps* / *buyable now* /
+    *lot-only*, with `n_buy` added to `/comps` so the last one is answerable
+    without opening each card. Word-AND matching, the same rule as the
+    extension's picker.
+
+    Also: a card seen **only** inside bundles is now listed at all. The
+    sole-line rule had kept it out of `/comps` entirely, so it had comp data at
+    `/comps/{item_id}` and no row anywhere to reach it from — capture, link,
+    sync, and the app showed nothing, which reads as a broken sync.
+
 ### Next
 
 - **Japanese title matching.** Neokyo capture works but its titles do not filter
