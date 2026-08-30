@@ -306,8 +306,15 @@
       soldFrom: (text) =>
         /\bsold\s*out\b|\bunavailable\b|판매완료|품절/i.test(text),
       // Unverified: the CDN host has not been seen. A wrong guess costs a
-      // missing thumbnail, never a failed capture.
+      // missing thumbnail, never a failed capture -- and `portrait` below
+      // falls back to every image when nothing on the guessed host qualifies.
       photoHost: /pocamarket|cloudfront\.net|amazonaws\.com/i,
+      // NO `largest` fallback, on purpose. The marketing hero behind the app
+      // frame is the largest image on the page, so falling back to it would
+      // put the same two tilted cards on every capture -- a plausible,
+      // identical, invisible wrong answer, which is the failure this whole
+      // module keeps rediscovering. No thumbnail is the honest outcome.
+      photoOrder: ['og', 'portrait'],
     },
   };
 
@@ -877,25 +884,64 @@
     return '';
   }
 
-  function detailPhoto() {
-    // Largest photo on the site's own image CDN, EXCEPT that a not-yet-decoded
-    // image reports zero dimensions -- so the first match is taken as a
-    // baseline and only replaced by something measurably bigger. Requiring
-    // area > 0 to win is what left the button unrendered on pages whose photos
-    // had not loaded.
+  // Every way a listing's own photo can be found, best first per site.
+  //
+  // "Largest image on the site's CDN" is a good rule right up until a page
+  // shares its DOM with something bigger. Pocamarket renders as a mobile app
+  // frame with the marketing landing page still beside it, and its hero -- two
+  // tilted cards, set large -- beat every listing photo on the site. That
+  // failure is the invisible kind: the same plausible image on every capture.
+  const PHOTO_SOURCES = {
+    // The page's own declaration about itself, which beats any inference drawn
+    // from how the page looks -- the same reason the title chain prefers a
+    // site's own markers. Deliberately NOT filtered by photoHost: a share image
+    // is often served from a different bucket, and the page naming it is
+    // stronger evidence than a host pattern guessed from one screenshot.
+    og: () =>
+      document
+        .querySelector('meta[property="og:image"]')
+        ?.getAttribute('content')
+        ?.trim() || null,
+
+    // Largest image TALLER than it is wide. A photocard is 55x85mm, so a
+    // listing photo of one is portrait or near-square whatever else is unknown
+    // about the page; a marketing composition laid out across a hero is not.
+    // Falls back to every image when nothing on the CDN qualifies, so a wrong
+    // guess at the CDN host costs nothing here -- the shape does the work.
+    portrait: () =>
+      largestPhoto((img, w, h) => h > w && w > 0 && SITE.photoHost.test(img)) ??
+      largestPhoto((img, w, h) => h > w && w > 0),
+
+    largest: () => largestPhoto((img) => SITE.photoHost.test(img)),
+  };
+
+  // Biggest image passing `keep`. A not-yet-decoded image reports zero
+  // dimensions, so the first match is taken as a baseline and only replaced by
+  // something measurably bigger -- requiring area > 0 to win is what left the
+  // capture button unrendered on pages whose photos had not loaded.
+  function largestPhoto(keep) {
     let best = null;
     let bestArea = -1;
     for (const img of document.querySelectorAll('img')) {
       const src = img.currentSrc || img.src || '';
-      if (!SITE.photoHost.test(src)) continue;
-      const area =
-        (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      if (!keep(src, w, h)) continue;
+      const area = w * h;
       if (area > bestArea) {
         bestArea = area;
         best = src;
       }
     }
     return best;
+  }
+
+  function detailPhoto() {
+    for (const key of SITE.photoOrder || ['largest']) {
+      const src = PHOTO_SOURCES[key]?.();
+      if (src) return src;
+    }
+    return null;
   }
 
   // DOM fallback for a listing's own page.

@@ -73,6 +73,13 @@ half of it. Against the real card index the full title lands on Hyunjin · This
 & That and the version alone lands on **Bang Chan** · This & That. Half a name
 is not a weaker match, it is a wrong one.
 
+The **photo had the same bug**: `detailPhoto` took the largest image on the
+site's CDN, and the landing page's hero of two tilted cards is the biggest
+image on the page — so every Pocamarket capture carried the same picture. Photo
+selection is now a per-site order like the title's: `og:image` first, then the
+largest image *taller than it is wide*. No `largest` fallback on that site — a
+generic image on every row reads as data, a missing one reads as missing.
+
 `titleReject` now guards **every** title source rather than just the ranked
 shortlist — a fix for Neokyo too, whose og:title and document title both say
 "Item Details". A capture with no name is flagged in the panel; a plausible

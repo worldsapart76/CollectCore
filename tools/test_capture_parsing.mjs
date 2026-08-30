@@ -8,7 +8,7 @@ import fs from 'node:fs';
 
 const src = fs.readFileSync('extension/content/capture.js', 'utf8');
 const HOOK =
-  '  globalThis.__cc = { SITES, money, idFromLastSegment, readPrice, TITLE_SOURCES, SITE, detailTitle };\n})();';
+  '  globalThis.__cc = { SITES, money, idFromLastSegment, readPrice, TITLE_SOURCES, SITE, detailTitle, detailPhoto };\n})();';
 const patched = src.replace(/\}\)\(\);\s*$/, HOOK);
 if (patched === src) throw new Error('could not find the IIFE close');
 
@@ -23,7 +23,7 @@ function eq(label, got, want) {
 // it joins every selector into one query, so returning the fixture regardless
 // of selector exercises exactly what it relies on — DOM order, the reject
 // list, and the length guard.
-function loadFor(hostname, pathname, headings = []) {
+function loadFor(hostname, pathname, headings = [], extra = {}) {
   globalThis.location = {
     hostname, pathname,
     origin: `https://${hostname}`,
@@ -33,12 +33,29 @@ function loadFor(hostname, pathname, headings = []) {
   globalThis.document = {
     documentElement: { classList: { add() {}, remove() {} } },
     body: { dataset: {}, appendChild() {}, innerText: '' },
-    querySelector: () => null,
+    // `extra.meta` is the page's own declarations about itself -- og:title,
+    // og:image. Those beat any inference drawn from how the page looks, so the
+    // fixture has to be able to carry them.
+    querySelector: (sel) => {
+      const m = String(sel).match(/meta\[property="([^"]+)"\]/);
+      if (!m) return null;
+      const v = extra.meta?.[m[1]];
+      return v ? { getAttribute: () => v } : null;
+    },
     // Fixture elements. `chrome` marks one as living in the site's header,
     // nav or footer -- titleCandidates() excludes those structurally, which is
     // the part that has to keep working when the page is translated.
-    querySelectorAll: () =>
-      headings.map((h) => {
+    querySelectorAll: (sel) => {
+      // `extra.images` is [src, width, height]. Dimensions matter: a photocard
+      // is portrait and a marketing hero laid out across a page is not, which
+      // is the only thing telling them apart when both sit in one DOM.
+      if (String(sel) === 'img') {
+        return (extra.images || []).map(([src, w, h]) => ({
+          currentSrc: src, src, naturalWidth: w, naturalHeight: h,
+          width: w, height: h, dataset: {}, getAttribute: () => null,
+        }));
+      }
+      return headings.map((h) => {
         // [text, kind, fontSizePx, selectorItMatches].
         //
         // `kind: 'chrome'` puts the element inside the site's
@@ -62,7 +79,8 @@ function loadFor(hostname, pathname, headings = []) {
           closest: (sel) => (kind === 'chrome' ? { sel } : null),
           matches: (sel) => marked && sel.includes('.translate'),
         };
-      }),
+      });
+    },
     getElementById: () => null,
     addEventListener() {}, removeEventListener() {},
     createElement: () => ({ classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, style: {}, addEventListener() {} }),
@@ -490,6 +508,61 @@ eq('eBay strips its screen-reader prefix through the chain',
    docTitleFor('www.ebay.com', '/itm/123456789012',
      'Stray Kids Hyunjin Photocard | eBay'),
    'Stray Kids Hyunjin Photocard');
+
+
+console.log('--- Pocamarket: the listing photo, not the marketing hero ---');
+// The landing page shares the DOM with the app frame, and its hero -- two
+// tilted cards, set large -- is the biggest image on the page. "Largest on the
+// CDN" therefore put the same two cards on every capture: plausible,
+// identical, and invisible, which is the failure this module keeps hitting.
+const HERO = 'https://pocamarket.com/assets/hero-cards.png';
+const CARD = 'https://pocamarket.com/upload/498832.jpg';
+
+eq('og:image wins outright, because the page states it',
+   loadFor('pocamarket.com', '/search/detail/498832', [], {
+     meta: { 'og:image': CARD },
+     images: [[HERO, 1200, 640]],
+   }).detailPhoto(), CARD);
+
+eq('without og, shape beats size',
+   loadFor('pocamarket.com', '/search/detail/498832', [], {
+     images: [[HERO, 1200, 640], [CARD, 400, 620]],
+   }).detailPhoto(), CARD);
+
+// The CDN host was guessed from one screenshot, so it must not be load-bearing.
+eq('a wrong CDN guess costs nothing -- the shape still decides',
+   loadFor('pocamarket.com', '/search/detail/498832', [], {
+     images: [[HERO, 1200, 640], ['https://cdn.example.net/x/498832.jpg', 400, 620]],
+   }).detailPhoto(), 'https://cdn.example.net/x/498832.jpg');
+
+// No `largest` fallback here on purpose: a generic image on every row reads as
+// data, where a missing one reads as missing.
+eq('a landscape-only page yields NO photo rather than the hero',
+   loadFor('pocamarket.com', '/search/detail/498832', [], {
+     images: [[HERO, 1200, 640]],
+   }).detailPhoto(), null);
+eq('and that is the declared order', pm.photoOrder.join(), 'og,portrait');
+
+console.log('--- the other sites keep the size rule ---');
+// Mercari and Neokyo have no landing page in the DOM, and a listing photo
+// there is simply the biggest one on its CDN -- including landscape shots of
+// a card laid flat, which a portrait rule would throw away.
+eq('mercari takes the largest on its CDN',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['https://static.mercdn.net/photos/a.jpg', 200, 200],
+              ['https://static.mercdn.net/photos/b.jpg', 800, 600]],
+   }).detailPhoto(), 'https://static.mercdn.net/photos/b.jpg');
+eq('and ignores anything off it',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['https://ads.example.com/huge.png', 2000, 2000],
+              ['https://static.mercdn.net/photos/a.jpg', 200, 200]],
+   }).detailPhoto(), 'https://static.mercdn.net/photos/a.jpg');
+// A not-yet-decoded image reports 0x0; taking the first match as a baseline is
+// what keeps the capture button from vanishing on a page mid-load.
+eq('an undecoded photo is still a photo',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['https://static.mercdn.net/photos/a.jpg', 0, 0]],
+   }).detailPhoto(), 'https://static.mercdn.net/photos/a.jpg');
 
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

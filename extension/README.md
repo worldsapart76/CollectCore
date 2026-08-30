@@ -441,6 +441,17 @@ seller-written sentence.
   that is what its fee amounts are entered in and what it actually charges; but
   `priceFrom` still reads won for a switched display, and `nativeCurrency`
   keeps the two apart. Labelling a won figure USD is a ~1,300x error.
+- **The photo comes from `og:image`, then from shape — never from size.**
+  "Largest image on the site's CDN" works everywhere else and fails here: the
+  landing page shares the DOM with the app frame, and its hero of two tilted
+  cards is the biggest image on the page, so every capture got the same
+  picture. `photoOrder: ['og', 'portrait']` — the page's own declaration first,
+  then the largest image *taller than it is wide*, since a photocard is 55x85mm
+  and a marketing composition laid across a hero is not.
+
+  There is **no `largest` fallback** for this site on purpose. A generic image
+  on every row reads as data; a missing one reads as missing.
+
 - **Its postage is per SHIPMENT, so it is deliberately not captured.** "Ship to
   United States from 12.00 USD — same fee up to 40 items" is a box cost, and
   recording it per listing would charge $12 forty times. It belongs in the fee

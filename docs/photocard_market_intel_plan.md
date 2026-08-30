@@ -2047,9 +2047,26 @@ No backup changes needed.
     in the panel; one with a plausible name identical on every row is not, and
     that is the failure this module keeps rediscovering.
 
+    **The photo had the same shape of bug**, found the same way. `detailPhoto`
+    took the largest image on the site's CDN, which is right everywhere else
+    and wrong here: the landing page shares the DOM with the app frame and its
+    hero of two tilted cards is the biggest image on the page, so every
+    Pocamarket capture carried the same picture. Photo selection is now a
+    per-site order like the title's — `['og', 'portrait']`: the page's own
+    `og:image` first, then the largest image *taller than it is wide*, a
+    photocard being 55x85mm and a marketing composition not. **No `largest`
+    fallback** on this site: a generic image on every row reads as data, a
+    missing one reads as missing.
+
+    The `portrait` rule falls back to every image when nothing on the guessed
+    CDN host qualifies, so the host pattern — inferred from one screenshot — is
+    not load-bearing. The test fixture now carries `<img>` dimensions and
+    `<meta>` tags, because photo selection had no coverage at all and that is
+    how it shipped wrong.
+
     `detailTitle()` is now exercised end to end rather than only in pieces — a
     correct cleaner and a correct source still combine into a wrong name.
-    119 cases in `tools/test_capture_parsing.mjs`.
+    127 cases in `tools/test_capture_parsing.mjs`.
 
 ### Next
 
