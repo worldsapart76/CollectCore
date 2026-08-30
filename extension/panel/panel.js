@@ -103,6 +103,9 @@ function row(rec) {
     dbg.textContent =
       `fiber scan: ${scan.candidates ?? 0} candidate(s), best score ` +
       `${scan.bestScore ?? 0}` +
+      (scan.stamped === false ? ` · NO STAMP: ${scan.why || scan.error || '?'}` : '') +
+      (scan.stamped === true ? ` · stamped ${scan.bytes}b` : '') +
+      (scan.error ? ` · error: ${scan.error}` : '') +
       (rec.borrowed?.length ? ` · from page: ${rec.borrowed.join(', ')}` : '') +
       (scan.photoShape ? ` · photo entry keys: [${scan.photoShape.join(', ')}]` : '') +
       ` — [${(scan.keys || []).join(', ') || 'none'}]` +

@@ -320,6 +320,17 @@
     };
   }
 
+  function publishScan(extra) {
+    try {
+      document.body.dataset.ccDetailScan = JSON.stringify({
+        ...(lastScan || {}),
+        ...extra,
+      });
+    } catch {
+      /* never let a diagnostic break capture */
+    }
+  }
+
   function stampDetail() {
     const wantId = detailIdFromUrl();
     if (!wantId) {
@@ -333,20 +344,42 @@
 
     const item = findDetailItem(wantId);
     if (!item) {
-      // Nothing usable from the fiber. The content script's DOM fallback still
-      // produces a capture, so publish the scan result for it rather than
-      // leaving no trace of why the fiber came up empty.
-      document.body.dataset.ccDetailScan = JSON.stringify(lastScan || {});
+      publishScan({ stamped: false, why: 'no candidate matched the listing id' });
       if (stamped) delete document.body.dataset.ccDetailItem;
       return;
     }
-    document.body.dataset.ccDetailItem = JSON.stringify(normalize(item, wantId));
+
+    // Serialising is its own failure mode: the composite is assembled from
+    // React props, so a value that will not stringify silently produced no
+    // stamp at all and looked identical to finding nothing.
+    let json;
+    try {
+      json = JSON.stringify(normalize(item, wantId));
+    } catch (err) {
+      publishScan({
+        stamped: false,
+        why: `normalize/stringify failed: ${err && err.message}`,
+      });
+      return;
+    }
+    document.body.dataset.ccDetailItem = json;
+    publishScan({ stamped: true, bytes: json.length });
   }
 
   function stamp() {
     // Dormant unless the content script has switched capture on, so ordinary
     // Mercari browsing does no work at all.
     if (!document.documentElement.classList.contains('cc-active')) return;
+
+    // FIRST, and isolated. A detail page carries a full grid of "Similar
+    // items" tiles, and anything thrown while stamping one of them used to
+    // mean the detail stamp below simply never ran -- with no error anywhere,
+    // which read as "the fiber found nothing".
+    try {
+      stampDetail();
+    } catch (err) {
+      publishScan({ error: String(err && err.message ? err.message : err) });
+    }
 
     for (const anchor of document.querySelectorAll(TILE)) {
       // A stamp is only valid while the anchor still points at the same
@@ -379,8 +412,6 @@
       });
     }
 
-    // Detail pages also carry result tiles (related items), so both run.
-    stampDetail();
   }
 
   // href is watched alongside childList so a recycled anchor gets re-stamped

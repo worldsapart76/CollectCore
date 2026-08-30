@@ -344,7 +344,13 @@
       scan = null;
     }
 
-    const merged = { ...(scraped || {}), ...(stamped || {}) };
+    // Explicit nulls in the stamp must not clobber a value the page DID have:
+    // normalize() emits every field, so spreading it wholesale overwrote good
+    // scraped values with null and then "borrowed" them straight back.
+    const merged = { ...(scraped || {}) };
+    for (const [k, v] of Object.entries(stamped || {})) {
+      if (v !== null && v !== undefined && v !== '') merged[k] = v;
+    }
     // The URL is authoritative for WHICH listing this is. The fiber may key on
     // a bare numeric id, and letting that through made the click-time identity
     // check fail against the URL and refuse the capture.
