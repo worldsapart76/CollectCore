@@ -121,7 +121,19 @@ indefinitely and you choose when to ship, so boxes go out full and 40 against
 "$12 up to 40 items" is honest. Neokyo's 45-day clock ships whatever
 accumulated, so its capacity is a fiction there.
 
-**Next:** v2 step 3 — per-copy cost basis and the ledger. Capture is done for
+**Four backlog items declined 2026-08-30**, recorded in the plan doc's new
+*Declined* table rather than deleted, so they stop being re-proposed as
+remaining work: Japanese title matching (the picker says outright that it
+cannot filter, and the search box covers it), thumbnail upload to R2 (blobs
+live in the browser where identification happens; what is lost is portability
+between machines), ship-name aliases, and a distinct "Wanted, no source" view
+(the grid's `wanted` filter covers it). Each row carries a *revisit when*.
+
+**Next: data collection, not code.** The remaining outstanding item is filling
+in the fee components — until they carry real numbers, "landed" is price plus
+captured shipping and every margin in the grid is optimistic. v2 step 3, the
+ledger, is deferred by decision until there is enough real data to judge
+whether the current shape of the analysis is sufficient. Capture is done for
 now: all four sources are built and verified against real pages.
 
 ### 2026-08-30 (US CDT) — v2 step 2 BUILT: the lot analyzer

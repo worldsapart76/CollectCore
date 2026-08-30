@@ -1460,7 +1460,7 @@ question v1 has no screen for.
 |---|---|---|
 | **Card grid** | what do I hold, what can I get, what can I sell? | the front door |
 | **Lot analyzer** | is this specific lot worth buying? | from a lot |
-| **Wanted, no source** | where should I go browse next? | the to-do list |
+| **Wanted, no source** | where should I go browse next? | the to-do list — **folded into the grid's `wanted` filter** rather than built separately; see *Declined* |
 
 The v1 comp view survives as the **drill-down** from a grid row, not as the
 landing page.
@@ -1761,12 +1761,20 @@ everything, prune later if volume ever justifies it.
   `images.collectcoreapp.com` — the same client and custom domain used for
   `catalog/` and `admin/`. Not in the backup ZIP; R2 is independently durable.
 
-> **NOT BUILT — known gap.** The extension stores the blob locally as designed,
-> but `POST /market/captures` sends only `thumbnailUrl`, so server-side
-> thumbnails are hotlinked to Mercari's CDN and **will rot when listings
-> close**. The bytes exist in the browser; nothing ships them. Closing this
-> means posting the blobs on sync and uploading to R2 — worth doing before the
-> comp view's audit thumbnails start going blank.
+> **NOT BUILT, and DECLINED 2026-08-30.** The extension stores the blob
+> locally as designed, but `POST /market/captures` sends only `thumbnailUrl`,
+> so server-side thumbnails are hotlinked to the marketplace's CDN and **will
+> rot when listings close**.
+>
+> Decided not to close it. The bytes are in the browser where identification
+> actually happens, which is the job the asymmetry above was about; a blank
+> thumbnail on a *historical* comp is the cosmetic case the earlier draft
+> correctly identified. What it costs is portability — captures do not follow
+> you to another machine — and that is not a constraint today.
+>
+> Revisit if captures ever need to be worked from a second machine, or if the
+> comp view's audit thumbnails going blank turns out to matter in practice.
+> Nothing else depends on it.
 - **Pruning, if ever needed:** an observation associated to a single catalog
   card has a library image already, so its captured image is the first
   candidate to drop. Unassociated and lot images are never pruned.
@@ -2159,28 +2167,39 @@ No backup changes needed.
 
 ### Next
 
-**Steps 1 and 2 of the v2 market workspace are built** (card grid +
-sold/gone marking; lot analyzer). **Next is step 3, per-copy cost basis and the
-ledger** — box → purchase → line → outcome → sale, FIFO on
-`COALESCE(purchase_date, copy.created_at)`. It is the largest of the three and
-only sharpens `paid` for cards held in multiples, so card-level basis stands in
-the meantime and the grid says so. Everything below is real but sits behind it.
+**The build is paused deliberately, and the next step is data collection, not
+code.** Steps 1 and 2 of the v2 market workspace are built (card grid +
+sold/gone marking; lot analyzer) and all four capture sources are verified.
+Step 3, the ledger, is **deferred by decision** until there is enough real data
+to judge whether the current shape of the analysis is sufficient.
+
+What is actually outstanding is **filling in the fee components**. Until they
+carry real numbers, "landed" is price plus whatever shipping was captured, and
+every arb and flip margin in the grid is optimistic — which is the direction
+that talks you into a bad buy. That is data entry, not a build.
 
 Steps 1 and 2 are both **first cuts to be reviewed against real captured
 lots.** Where the analyzer turns out to be more machinery than the decision
 needs, cut it.
 
-- **Japanese title matching.** Neokyo capture works but its titles do not filter
-  the card picker: `lib/matcher.js` tokenizes Latin only, so a Japanese title
-  yields no chips. The picker now says so outright rather than returning the
-  whole library as an apparent match, and the search box is the workaround.
-  Segmentation plus a kana/kanji alias layer is the fix; `ALIASES` is the seam.
-- **Thumbnail upload to R2** — see the known gap under Images.
 - **Ledger** — box → purchase → line → outcome → sale. Now also the home of
-  **per-copy cost basis**, which is step 3 of the v2 build.
-- **Ship-name aliases** (`Minsung`, `Hyunlix`, `Seungjin`). Sellers use them
-  constantly; needs the alias table to map to member *pairs*, not single
-  members.
+  **per-copy cost basis**, which is step 3 of the v2 build. **Deferred by
+  decision 2026-08-30**, pending enough collected data to judge whether the
+  current shape of the analysis is sufficient — it only sharpens `paid` for
+  cards held in multiples, and card-level basis is honest meanwhile because the
+  grid says so.
+
+### Declined 2026-08-30 — not gaps, decisions
+
+Kept here rather than deleted so they stop being re-proposed as remaining work.
+Each has a working alternative already in place; none blocks anything.
+
+| | Why it is fine | Revisit when |
+|---|---|---|
+| **Japanese title matching** | `lib/matcher.js` tokenizes Latin only, so a Neokyo title yields no picker chips. The picker **says so outright** rather than returning the whole library as an apparent match, and the search box does the job. Pre-filtering is a convenience, not a capability. | Manual searching starts costing real time. `ALIASES` is the seam; segmentation plus a kana/kanji layer is the fix. |
+| **Thumbnail upload to R2** | Blobs live in the browser, where identification happens. What is lost is portability between machines. | Captures need working from a second machine. |
+| **Ship-name aliases** (`Minsung`, `Hyunlix`, `Seungjin`) | Sellers use them constantly and the matcher cannot map them, because they resolve to member **pairs** rather than single members. Manual search covers it. | The alias table grows a pair-mapping shape for another reason. |
+| **A distinct "Wanted, no source" view** | The v2 design named it as one of three views; in practice the grid's `wanted` filter covers it, though "not buyable" is not directly expressible. | The grid's design changes, or browsing-target triage becomes a routine step. |
 
 ### Not planned for v1
 
@@ -2188,9 +2207,8 @@ Comp charting beyond the quartile bands; automatic sync; any `/pcs/` exposure of
 price data.
 
 **All four declared sources have parsers, and all four are verified against
-real pages** (entries 12-13, 17-19). Capture is done for now; the next build is
-v2 step 3, per-copy cost basis and the ledger. The **enrich tier** left this document entirely: it is
-superseded by detail-page capture, not deferred.
+real pages** (entries 12-13, 17-19). Capture is done. The **enrich tier** left
+this document entirely: it is superseded by detail-page capture, not deferred.
 
 ## Open Questions
 
