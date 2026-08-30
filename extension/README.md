@@ -48,7 +48,8 @@ anything else looks completely normal — no overlays, no panel.
 |---|---|
 | **Turn on** | Click the toolbar icon. The side panel opens; capture dots appear on results. |
 | **Capture** | Click the **+** on any result tile. It turns green. |
-| **Un-capture** | Click the **✓** again. |
+| **Capture a listing you opened** | Click **+ Capture**, bottom-right of the listing's own page. |
+| **Un-capture** | Click the **✓** again, on either surface. |
 | **Identify** | *Identify →* on a captured row, then click the matching card. |
 | **Arm a card** | The Mode button. Every capture then auto-associates to it. |
 | **Turn off** | Press **Esc**, or close the side panel with its **✕**. |
@@ -121,12 +122,35 @@ browsing.
 
 The toolbar badge reads **ON** while the current tab is capturing.
 
+## Two places to capture from
+
+**Search results** — a **+** on each tile. Fast for noting many listings without
+opening anything.
+
+**A listing's own page** — a **+ Capture** button, bottom right. Use it when you
+have opened the listing anyway to look at the photos or read the description.
+Open tabs while browsing, capture the ones worth tracking, close them.
+
+You never need both. Capturing a tile and later capturing that same listing's
+page produces **one record**, not two — everything keys on
+`marketplace:externalId` — and the second capture fills in what the first could
+not see.
+
 ## What it captures
 
 Read off React's fiber on each result tile (verified 2026-08-28):
 
 `id` · `name` · `price` (integer USD cents) · `status` · `itemCondition` ·
 `category` / `categoryId` · `brand` · `thumbnail`
+
+**Only from a listing's own page:** `shippingPayerCode` (who pays shipping),
+the full `description`, the seller id, and the complete photo set. All of these
+are null or empty in search tiles, which is the entire reason that second
+surface exists — you cannot work out a real margin without knowing who paid for
+shipping.
+
+A row's `capture_tier` says which surface it came from. On a `sweep` row a null
+shipping payer means **"not looked at yet"**, never "no shipping".
 
 Plus, added at capture: the search query, page URL, timestamp, a
 `suspectedLot` flag from title keywords, and the thumbnail re-requested at
@@ -226,4 +250,9 @@ is a USD-only assumption.
 
 Capture parsers for Neokyo, Pocamarket, and eBay. Lot line entry beyond a
 card list (quantities, non-card items, unidentified placeholders). Automatic
-sync. Any comp UI inside CollectCore itself.
+sync. Image blobs still stay local — sync sends the thumbnail URL only.
+
+The planned **enrich** tier — queueing ids and fetching detail pages in the
+background — was dropped rather than deferred. Its queue, throttle and session
+handling existed only to make automated fetching defensible, and none of it is
+needed when you open the tab yourself.

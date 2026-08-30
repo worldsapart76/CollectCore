@@ -219,8 +219,112 @@
     }
   }
 
+  // --- Detail page ---------------------------------------------------------
+  //
+  // A listing's own page is where shippingPayerCode, the description and the
+  // full photo set live -- all null or empty in search tiles.
+  //
+  // This replaces the planned "enrich" tier. Enrich needed a queue, a
+  // background fetcher, a throttle and session handling, all of it to make
+  // AUTOMATED fetching defensible. None of that is required when the human
+  // opened the tab, which is how these listings get looked at anyway.
+  //
+  // The button sits fixed on the page rather than inside a link, so unlike the
+  // tile dot there is nothing to navigate away from.
+
+  const BAR_ID = 'cc-detail-bar';
+
+  function detailItem() {
+    const raw = document.body.dataset.ccDetailItem;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  function decorateDetail() {
+    const item = detailItem();
+    let bar = document.getElementById(BAR_ID);
+
+    // Mercari is an SPA: navigating from a listing back to search leaves the
+    // bar behind unless it is torn down when the stamp goes.
+    if (!item) {
+      bar?.remove();
+      return;
+    }
+
+    if (!bar) {
+      bar = document.createElement('button');
+      bar.id = BAR_ID;
+      bar.type = 'button';
+      bar.addEventListener('click', onDetailClick);
+      document.body.appendChild(bar);
+    }
+    syncDetailBar(bar, item);
+  }
+
+  function syncDetailBar(bar, item) {
+    const on = captured.has(keyFor(item.id));
+    const label = on ? '✓ Captured' : '+ Capture';
+    // Conditional writes only -- see syncDot. An unconditional textContent
+    // assignment is a childList mutation, and the observer that calls this
+    // watches for exactly that.
+    if (bar.textContent !== label) bar.textContent = label;
+    if (bar.classList.contains('cc-on') !== on) bar.classList.toggle('cc-on', on);
+    if (bar.classList.contains('cc-error')) bar.classList.remove('cc-error');
+  }
+
+  async function onDetailClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Re-read at click time. The SPA can navigate between listings in place,
+    // so anything read when the bar was created may describe a different card.
+    const item = detailItem();
+    const bar = document.getElementById(BAR_ID);
+    if (!bar) return;
+    if (!item || item.id !== detailIdFromUrl()) {
+      bar.classList.add('cc-error');
+      bar.textContent = 'Could not read this listing — reload';
+      return;
+    }
+
+    const key = keyFor(item.id);
+    if (captured.has(key)) {
+      await send({ type: 'UNCAPTURE', key });
+      captured.delete(key);
+      syncDetailBar(bar, item);
+      return;
+    }
+
+    const res = await send({
+      type: 'CAPTURE',
+      payload: {
+        item,
+        marketplace: SITE.code,
+        currency: SITE.currency,
+        listingUrl: SITE.urlFor(item.id),
+        pageUrl: location.href,
+        searchQuery: null, // arrived at directly, not through a search
+      },
+    });
+    if (!res) return; // orphaned, or the worker refused it
+    captured.add(key);
+    // The confirmation matters more here than on a tile: the whole workflow is
+    // open a tab, capture, close it. Closing on an unconfirmed capture is how
+    // a listing gets silently lost.
+    syncDetailBar(bar, item);
+  }
+
+  function detailIdFromUrl() {
+    return location.pathname.match(/\/item\/(m\d+)/)?.[1] || null;
+  }
+
   function decorateAll() {
     document.querySelectorAll(SITE.tiles).forEach(decorate);
+    decorateDetail();
   }
 
   let decoratePending = false;
@@ -238,10 +342,14 @@
       const dot = anchor.querySelector(`:scope > .${DOT_CLASS}`);
       if (dot) syncDot(anchor, dot);
     });
+    const bar = document.getElementById(BAR_ID);
+    const di = detailItem();
+    if (bar && di) syncDetailBar(bar, di);
   }
 
   function removeOverlay() {
     document.querySelectorAll(`.${DOT_CLASS}`).forEach((d) => d.remove());
+    document.getElementById(BAR_ID)?.remove();
   }
 
   // --- Activation ----------------------------------------------------------
@@ -265,7 +373,9 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['href'],
+      // data-cc-detail-item is watched so the bar appears once the page world
+      // resolves the item, and is torn down on SPA navigation away from it.
+      attributeFilter: ['href', 'data-cc-detail-item'],
     });
 
     document.addEventListener('keydown', onKeydown, true);

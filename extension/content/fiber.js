@@ -41,6 +41,113 @@
     }
   }
 
+  // ── Detail page ────────────────────────────────────────────────────────────
+  //
+  // A listing's own page carries what tiles cannot: shippingPayerCode, the full
+  // photo set, and the description. There is no result anchor to walk up from,
+  // so the item is found by SHAPE instead of by position: scan the fiber tree
+  // for any prop object whose id matches the one in the URL.
+  //
+  // Shape-matching rather than a fixed hop count on purpose. The detail page is
+  // a different component tree from the search grid, and matching on identity
+  // survives Mercari reorganising either one — there is nothing to re-measure.
+
+  const DETAIL_ID_RE = /\/item\/(m\d+)/;
+
+  function detailIdFromUrl() {
+    return location.pathname.match(DETAIL_ID_RE)?.[1] || null;
+  }
+
+  function anyFiber() {
+    // Any mounted element will do — every fiber can reach the root via .return.
+    for (const el of document.querySelectorAll('div, main, section, span')) {
+      const k = Object.keys(el).find((x) => x.startsWith('__reactFiber$'));
+      if (k) return el[k];
+    }
+    return null;
+  }
+
+  function looksLikeItem(v, wantId) {
+    return (
+      v &&
+      typeof v === 'object' &&
+      v.id === wantId &&
+      ('name' in v || 'price' in v || 'status' in v)
+    );
+  }
+
+  // Bounded, cycle-safe walk. The cap matters: an unbounded fiber traversal on
+  // a busy page is exactly the kind of thing that froze the tab once already.
+  const MAX_NODES = 20000;
+
+  function findDetailItem(wantId) {
+    let root = anyFiber();
+    if (!root) return null;
+    while (root.return) root = root.return;
+
+    const seen = new Set();
+    const stack = [root];
+    let visited = 0;
+
+    while (stack.length && visited < MAX_NODES) {
+      const node = stack.pop();
+      if (!node || seen.has(node)) continue;
+      seen.add(node);
+      visited++;
+
+      const props = node.memoizedProps;
+      if (props && typeof props === 'object') {
+        // The prop name differs between pages, so check the values rather than
+        // guessing at `item`.
+        for (const v of Object.values(props)) {
+          if (looksLikeItem(v, wantId)) return v;
+        }
+        if (looksLikeItem(props, wantId)) return props;
+      }
+      if (node.child) stack.push(node.child);
+      if (node.sibling) stack.push(node.sibling);
+    }
+    return null;
+  }
+
+  function stampDetail() {
+    const wantId = detailIdFromUrl();
+    if (!wantId) {
+      if (document.body.dataset.ccDetailItem) delete document.body.dataset.ccDetailItem;
+      return;
+    }
+    const stamped = document.body.dataset.ccDetailItem
+      ? tryParse(document.body.dataset.ccDetailItem)?.id
+      : null;
+    if (stamped === wantId) return;
+
+    const item = findDetailItem(wantId);
+    if (!item) {
+      // Nothing usable. Clear rather than leave a stamp describing the previous
+      // listing -- Mercari is an SPA and navigates between items in place.
+      if (stamped) delete document.body.dataset.ccDetailItem;
+      return;
+    }
+    document.body.dataset.ccDetailItem = JSON.stringify({
+      id: item.id,
+      name: item.name ?? null,
+      price: item.price ?? null,
+      status: item.status ?? null,
+      itemCondition: item.itemCondition ?? null,
+      category: item.category ?? null,
+      categoryId: item.categoryId ?? null,
+      brand: item.brand ?? null,
+      thumbnail: item.thumbnail ?? null,
+      // The whole reason this surface exists -- all null in tiles.
+      shippingPayerCode: item.shippingPayerCode ?? null,
+      description: item.description ?? null,
+      sellerId: item.seller?.id ?? item.sellerId ?? null,
+      photos: Array.isArray(item.photos)
+        ? item.photos.map((p) => (typeof p === 'string' ? p : p?.uri ?? null)).filter(Boolean)
+        : null,
+    });
+  }
+
   function stamp() {
     // Dormant unless the content script has switched capture on, so ordinary
     // Mercari browsing does no work at all.
@@ -75,6 +182,9 @@
         thumbnail: item.thumbnail ?? null,
       });
     }
+
+    // Detail pages also carry result tiles (related items), so both run.
+    stampDetail();
   }
 
   // href is watched alongside childList so a recycled anchor gets re-stamped

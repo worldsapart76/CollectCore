@@ -228,6 +228,22 @@ async function capture({
     existing.priceCents = item.price;
     existing.listingState = sighting.listingState;
     existing.rawStatus = item.status;
+
+    // A detail capture following a tile capture is the common path -- sweep a
+    // page, then open the interesting ones. Without this the richer fields
+    // would be silently dropped on exactly that path, which is the one that
+    // matters. Upgrade-only: never let a later sweep null out detail data.
+    if (item.shippingPayerCode !== undefined) {
+      existing.captureTier = 'detail';
+      existing.shippingPayerCode = item.shippingPayerCode ?? null;
+      if (item.description) existing.description = item.description;
+      if (item.sellerId != null) existing.sellerId = item.sellerId;
+      if (item.photos?.length) existing.photos = item.photos;
+    }
+    if (item.itemCondition && !existing.itemCondition) {
+      existing.itemCondition = item.itemCondition;
+    }
+
     await putObservation(existing);
     return { key, deduped: true, record: existing };
   }
@@ -252,7 +268,13 @@ async function capture({
     searchQuery: searchQuery || null,
     pageUrl: pageUrl || null,
     capturedAt: new Date().toISOString(),
-    captureTier: 'sweep',
+    // 'detail' when the capture came from the listing's own page, which is the
+    // only place these three exist -- tiles return null/empty for all of them.
+    captureTier: item.shippingPayerCode !== undefined ? 'detail' : 'sweep',
+    shippingPayerCode: item.shippingPayerCode ?? null,
+    description: item.description || null,
+    sellerId: item.sellerId ?? null,
+    photos: item.photos || null,
     // True when the page-world fiber read failed and the DOM tile scrape
     // carried the capture. Surfaced in the panel: a silent degrade here is
     // exactly how bad data got collected once already.

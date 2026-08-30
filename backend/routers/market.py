@@ -125,6 +125,13 @@ class Capture(BaseModel):
     isLot: bool = False
     suspectedLot: bool = False
     viaFallback: bool = False
+    # Detail-page capture only; absent on sweeps. None means "not looked at",
+    # which is NOT the same as "no shipping" — the fee model must never read a
+    # null here as free shipping.
+    captureTier: str = "sweep"
+    shippingPayerCode: Optional[str] = None
+    description: Optional[str] = None
+    sellerId: Optional[str] = None
     capturedAt: str
     lines: List[CaptureLine] = Field(default_factory=list)
     sightings: List[Sighting] = Field(default_factory=list)
@@ -167,9 +174,11 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     " marketplace, external_id, listing_url, title_raw,"
                     " item_condition, category, category_id, brand,"
                     " thumbnail_url, search_query, is_lot, suspected_lot,"
-                    " via_fallback, first_seen_at, last_seen_at) "
+                    " via_fallback, capture_tier, shipping_payer, description,"
+                    " seller_id, first_seen_at, last_seen_at) "
                     "VALUES (:mp, :ext, :url, :title, :cond, :cat, :cat_id,"
-                    " :brand, :thumb, :q, :lot, :slot, :fb, :first, :last) "
+                    " :brand, :thumb, :q, :lot, :slot, :fb, :tier, :ship,"
+                    " :descr, :seller, :first, :last) "
                     "RETURNING listing_id"
                 ),
                 {
@@ -186,6 +195,10 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     "lot": int(cap.isLot),
                     "slot": int(cap.suspectedLot),
                     "fb": int(cap.viaFallback),
+                    "tier": cap.captureTier,
+                    "ship": cap.shippingPayerCode,
+                    "descr": cap.description,
+                    "seller": cap.sellerId,
                     "first": first_seen,
                     "last": last_seen,
                 },
@@ -197,15 +210,28 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
             # there (is_lot), and for the newest sighting time.
             db.execute(
                 text(
+                    # Upgrade-only on the detail fields. A later sweep of a
+                    # listing already opened must not null out its shipping or
+                    # description, so COALESCE keeps what is known and the tier
+                    # only ever climbs.
                     "UPDATE mkt_listing SET "
                     " is_lot = :lot, suspected_lot = :slot,"
-                    " last_seen_at = MAX(last_seen_at, :last) "
+                    " last_seen_at = MAX(last_seen_at, :last),"
+                    " capture_tier = CASE WHEN :tier = 'detail' THEN 'detail'"
+                    "                     ELSE capture_tier END,"
+                    " shipping_payer = COALESCE(:ship, shipping_payer),"
+                    " description = COALESCE(:descr, description),"
+                    " seller_id = COALESCE(:seller, seller_id) "
                     "WHERE listing_id = :id"
                 ),
                 {
                     "lot": int(cap.isLot),
                     "slot": int(cap.suspectedLot),
                     "last": last_seen,
+                    "tier": cap.captureTier,
+                    "ship": cap.shippingPayerCode,
+                    "descr": cap.description,
+                    "seller": cap.sellerId,
                     "id": listing_id,
                 },
             )

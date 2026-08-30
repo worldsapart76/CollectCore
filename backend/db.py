@@ -142,6 +142,20 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_sighting.%s", col)
 
+    # Migration: detail-page capture fields on mkt_listing.
+    if "mkt_listing" in tables:
+        cols = {r[1] for r in raw.execute("PRAGMA table_info(mkt_listing)").fetchall()}
+        for col, ddl in (
+            ("capture_tier",
+             "ALTER TABLE mkt_listing ADD COLUMN capture_tier TEXT NOT NULL DEFAULT 'sweep'"),
+            ("shipping_payer", "ALTER TABLE mkt_listing ADD COLUMN shipping_payer TEXT"),
+            ("description", "ALTER TABLE mkt_listing ADD COLUMN description TEXT"),
+            ("seller_id", "ALTER TABLE mkt_listing ADD COLUMN seller_id TEXT"),
+        ):
+            if col not in cols:
+                raw.execute(ddl)
+                logger.info("Migration: added mkt_listing.%s", col)
+
     # Migration: source-origin ship dates.
     # Origin-level, not card-level: 88 origin rows date all 11,323 photocards,
     # and every card has an origin (source_origin_id has no NULLs in prod). The

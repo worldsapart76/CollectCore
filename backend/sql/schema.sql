@@ -2051,6 +2051,13 @@ CREATE TABLE IF NOT EXISTS mkt_listing (
     -- True when the page-world fiber read failed and the DOM scrape carried
     -- the capture, so degraded rows are auditable rather than silent.
     via_fallback    INTEGER NOT NULL DEFAULT 0,
+    -- Detail-page capture only. All three are null or empty in search tiles,
+    -- so on a capture_tier='sweep' row a NULL here means "not looked at yet",
+    -- NOT "no shipping" — the fee model must not read it as free shipping.
+    capture_tier    TEXT NOT NULL DEFAULT 'sweep',   -- sweep|detail
+    shipping_payer  TEXT,
+    description     TEXT,
+    seller_id       TEXT,
     first_seen_at   TEXT NOT NULL,
     last_seen_at    TEXT NOT NULL,
 

@@ -1417,7 +1417,12 @@ No backup changes needed.
    through the generic lookup admin.
 7. **Cost tiers** — `mkt_cost_tier` + `mkt_item_cost`, scoped to the sale pile,
    preview-before-assign.
-8. **Per-card override + margin in the comp view** —
+8. **Detail-page capture** (Mercari US) — a `+ Capture` button on a listing's
+   own page, sharing the tile pipeline and deduping against it on
+   `marketplace:externalId`. Carries `shipping_payer`, `description`,
+   `seller_id` and the photo set, with `capture_tier` recording which surface a
+   row came from. Ingest upgrades sweep→detail and never downgrades.
+9. **Per-card override + margin in the comp view** —
    `PUT /market/cost-basis/item/{id}`, marked `source = 'manual'` and preserved
    by the sweep. The card detail reads
    *cost $2.50 (Older era) · margin $10.50 vs sold median $13.00 · ESTIMATED*.
@@ -1425,9 +1430,6 @@ No backup changes needed.
 
 ### Next
 
-- **Detail-page capture** (Mercari US). Replaces the enrich tier — same `+`,
-  same pipeline, new surface. Unlocks `shippingPayerCode`, full photos and
-  description, and matches how listings already get browsed.
 - **Net, not gross.** Per-marketplace fee/shipping/offer-discount assumptions,
   applied to comps, plus the "list at X to net Y" figure. The comp view is
   currently gross and reads as more profit than it is.
