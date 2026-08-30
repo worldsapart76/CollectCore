@@ -458,23 +458,29 @@ def _seed_fee_components(raw) -> None:
         ("mercari_us", "buy", "Shipping I pay", "per_item", 2),
         ("mercari_us", "buy", "Sales tax", "per_item", 3),
 
-        # Neokyo -- buy only, and the reason `scope` exists. Costs land at
-        # three granularities: per listing (the service fee), proportional to
-        # price (PayPal, import tax), and ONCE PER BOX regardless of contents
-        # (shipping, handling, wire fees). Charging that last group per card
-        # would inflate a 40-card box eightfold.
+        # Proxy buying, split by what is actually PREDICTABLE.
+        #
+        # The service fee and the percentages are known before you buy. Box
+        # shipping is not: it prices on weight and volume, so the same 40
+        # items cost wildly different amounts depending on whether albums and
+        # DVDs went in with the cards. Measured across two real shipments,
+        # per-card shipping ran $0.47 on a card-heavy box and $1.21-1.56 on a
+        # mixed one -- a 3x spread that no per-box figure divided by a typical
+        # count can predict.
+        #
+        # So it is a per-card ESTIMATE the user tunes from their own orders,
+        # not a modelled box. Actual shipping goes on the real purchase in the
+        # ledger; this exists only so a comp can answer "roughly what will this
+        # land at" before anything is bought.
         ("neokyo", "buy", "Service fee (per listing)", "per_item", 1),
         ("neokyo", "buy", "PayPal fee", "per_item", 2),
         ("neokyo", "buy", "Import tax / duty", "per_item", 3),
-        ("neokyo", "buy", "International shipping (per box)", "per_shipment", 4),
-        ("neokyo", "buy", "Handling fee (per box)", "per_shipment", 5),
-        ("neokyo", "buy", "PayPal wire fees (per box)", "per_shipment", 6),
+        ("neokyo", "buy", "Shipping + handling + wire (est. per card)", "per_item", 4),
 
         ("pocamarket", "buy", "Service fee (per listing)", "per_item", 1),
         ("pocamarket", "buy", "Payment fee", "per_item", 2),
         ("pocamarket", "buy", "Import tax / duty", "per_item", 3),
-        ("pocamarket", "buy", "International shipping (per box)", "per_shipment", 4),
-        ("pocamarket", "buy", "Handling fee (per box)", "per_shipment", 5),
+        ("pocamarket", "buy", "Shipping + handling (est. per card)", "per_item", 4),
 
         ("ebay", "sell", "Final value fee", "per_item", 1),
         ("ebay", "sell", "Payment processing", "per_item", 2),
@@ -488,6 +494,17 @@ def _seed_fee_components(raw) -> None:
             "(marketplace_code, side, label, scope, sort_order) VALUES (?, ?, ?, ?, ?)",
             (code, side, label, scope, order),
         )
+
+    # The previous seed modelled shipping as a per-box line divided by a
+    # typical box size. Real shipments showed that does not predict anything:
+    # per-card shipping varied 3x with box contents. Drop those rows -- but
+    # ONLY where nothing was entered, so a filled-in figure is never destroyed.
+    raw.execute(
+        "DELETE FROM mkt_fee_component "
+        " WHERE scope = 'per_shipment' AND pct = 0 AND fixed_minor = 0 "
+        "   AND label IN ('International shipping (per box)',"
+        "                 'Handling fee (per box)', 'PayPal wire fees (per box)')"
+    )
 
     # Carry over whatever was already entered under the old flat columns, so
     # the redesign does not quietly discard it. Runs once: the UPDATE only
