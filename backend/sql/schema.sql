@@ -2142,6 +2142,12 @@ CREATE TABLE IF NOT EXISTS mkt_listing (
     -- off real captures; promote to proper posted_at / sold_at columns once
     -- confirmed, backfilling from here.
     source_dates    TEXT,
+    -- No longer purchasable, price UNKNOWN. Deliberately not a sighting:
+    -- "sold at a known price" is a new comp and free price discovery, while
+    -- "gone" is only the absence of an option. A proxy listing that vanishes
+    -- says nothing about what it fetched, so letting gone mean sold-at-the-ask
+    -- would inflate the sold median with every disappearance.
+    delisted_at     TEXT,
     first_seen_at   TEXT NOT NULL,
     last_seen_at    TEXT NOT NULL,
 

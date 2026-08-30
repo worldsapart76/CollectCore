@@ -1,0 +1,190 @@
+"""The card grid, and sold-vs-gone marking, on a fresh DB.
+
+    python tools/test_market_grid.py <a scratch directory>
+
+Creates a throwaway database in that directory; touches nothing real, and sets
+COLLECTCORE_DISABLE_R2 so a dev run cannot reach production R2.
+
+Builds real photocard rows -- groups, members, origins, copies -- so labels,
+ownership and Wanted come from the same tables the library uses. A grid tested
+against synthetic ids would not catch a wrong join, and joins are most of what
+this endpoint is.
+"""
+import os, sys
+
+SCRATCH = sys.argv[1]
+os.environ["COLLECTCORE_DATA_DIR"] = SCRATCH
+os.environ["COLLECTCORE_DISABLE_R2"] = "1"
+sys.path.insert(0, os.path.abspath("backend"))
+
+import db as dbmod
+dbmod.init_db()
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from routers import market
+from db import SessionLocal
+
+app = FastAPI(); app.include_router(market.router)
+c = TestClient(app)
+s = SessionLocal()
+
+fails = []
+def check(label, got, want):
+    ok = got == want
+    print(f"{'ok  ' if ok else 'FAIL'}  {label}  got={got!r} want={want!r}")
+    if not ok: fails.append(label)
+
+
+def status_id(code):
+    return s.execute(text("SELECT ownership_status_id FROM lkup_ownership_statuses"
+                          " WHERE status_code = :c"), {"c": code}).scalar()
+
+
+# --- A small real library --------------------------------------------------
+type_id = s.execute(text("SELECT collection_type_id FROM lkup_collection_types"
+                         " WHERE collection_type_code = 'photocards'")).scalar()
+s.execute(text("INSERT INTO lkup_photocard_groups (group_id, group_name, group_code)"
+               " VALUES (1, 'Stray Kids', 'SKZ')"))
+s.execute(text("INSERT INTO lkup_photocard_members (member_id, member_code,"
+               " member_name, group_id, sort_order)"
+               " VALUES (1, 'hyunjin', 'Hyunjin', 1, 1),"
+               "        (2, 'felix', 'Felix', 1, 2)"))
+tlc = s.execute(text("SELECT top_level_category_id FROM lkup_top_level_categories"
+                     " LIMIT 1")).scalar()
+s.execute(text("INSERT INTO lkup_photocard_source_origins (source_origin_id,"
+               " group_id, top_level_category_id, source_origin_name)"
+               " VALUES (1, 1, :t, 'Rock Star')"), {"t": tlc})
+
+CARDS = {101: ("KM Station", 1), 102: ("Yes24", 2), 103: ("HMV", 1)}
+for item_id, (version, member) in CARDS.items():
+    s.execute(text("INSERT INTO tbl_items (item_id, collection_type_id,"
+                   " top_level_category_id) VALUES (:i, :t, :c)"),
+              {"i": item_id, "t": type_id, "c": tlc})
+    s.execute(text("INSERT INTO tbl_photocard_details (item_id, group_id,"
+                   " source_origin_id, version) VALUES (:i, 1, 1, :v)"),
+              {"i": item_id, "v": version})
+    s.execute(text("INSERT INTO xref_photocard_members (item_id, member_id)"
+                   " VALUES (:i, :m)"), {"i": item_id, "m": member})
+
+# 101: two copies held, one for trade. 102: wanted, no data at all.
+s.execute(text("INSERT INTO tbl_photocard_copies (item_id, ownership_status_id)"
+               " VALUES (101, :o), (101, :t)"),
+          {"o": status_id("owned"), "t": status_id("trade")})
+s.execute(text("INSERT INTO tbl_photocard_copies (item_id, ownership_status_id)"
+               " VALUES (102, :w)"), {"w": status_id("wanted")})
+
+# Cost basis on 101 only.
+s.execute(text("INSERT INTO mkt_item_cost (item_id, cost_cents, source, updated_at)"
+               " VALUES (101, 250, 'manual', CURRENT_TIMESTAMP)"))
+s.execute(text("UPDATE mkt_fee_component SET pct = 0.10 WHERE"
+               " marketplace_code='mercari_us' AND side='sell' AND seed_key='sell_fee'"))
+s.execute(text("UPDATE mkt_fee_component SET fixed_minor = 350 WHERE"
+               " marketplace_code='neokyo' AND side='buy' AND seed_key='svc'"))
+s.commit()
+
+# --- Captures --------------------------------------------------------------
+c.post("/market/captures", json={"captures": [
+    # 101 sold twice on Mercari US, single-card listings.
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "m1",
+     "name": "Hyunjin KM Station", "capturedAt": "2026-08-30T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 101, "label": "Hyunjin", "qty": 1}],
+     "sightings": [{"observedAt": "2026-08-28T00:00:00Z", "priceCents": 1800,
+                    "listingState": "sold", "rawStatus": "trading"}]},
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "m2",
+     "name": "Hyunjin KM Station", "capturedAt": "2026-08-30T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 101, "label": "Hyunjin", "qty": 1}],
+     "sightings": [{"observedAt": "2026-08-29T00:00:00Z", "priceCents": 2200,
+                    "listingState": "sold", "rawStatus": "trading"}]},
+    # 101 buyable two ways: a single at $16, and a 2-card Neokyo lot.
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "m3",
+     "name": "Hyunjin KM Station", "capturedAt": "2026-08-30T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 101, "label": "Hyunjin", "qty": 1}],
+     "sightings": [{"observedAt": "2026-08-30T00:00:00Z", "priceCents": 1600,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+    {"marketplace": "neokyo", "currency": "JPY", "externalId": "nk1",
+     "name": "SKZ 2-card set", "capturedAt": "2026-08-30T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 101, "label": "Hyunjin", "qty": 1},
+               {"lineType": "card", "cardId": 103, "label": "Hyunjin HMV", "qty": 1}],
+     "sightings": [{"observedAt": "2026-08-30T00:00:00Z", "priceCents": 2000,
+                    "priceUsd": 1300, "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+
+g = c.get("/market/grid")
+assert g.status_code == 200, g.text
+grid = {x["item_id"]: x for x in g.json()["cards"]}
+
+print("--- scope: market data, plus Wanted even with none ---")
+check("three cards in scope", sorted(grid), [101, 102, 103])
+check("the wanted card is there with no data", grid[102]["wanted"], True)
+check("and it has no comps", grid[102]["comps"], [])
+check("labels come from the library, not the capture",
+      grid[101]["label"], "Hyunjin · Rock Star · KM Station")
+
+print("\n--- what I hold ---")
+check("owned + trade both count as held", grid[101]["held"], 2)
+check("a wanted card is not held", grid[102]["held"], 0)
+check("basis is card-level and says so", g.json()["basis_is_per_card"], True)
+check("paid", grid[101]["paid"]["cost_cents"], 250)
+
+print("\n--- what it sells for ---")
+check("median of the two sold", grid[101]["sold_median_cents"], 2000)
+check("net of the 10% sell fee", grid[101]["sell_net_cents"], 1800)
+check("sold count", grid[101]["n_sold"], 2)
+check("flip = net - paid", grid[101]["flip_cents"], 1800 - 250)
+check("no flip margin on a card not held", grid[102]["flip_cents"], None)
+
+print("\n--- two buy numbers, never blended ---")
+single = grid[101]["buy_single"]
+lot = grid[101]["buy_lot"]
+check("cheapest single is the $16 Mercari listing", single["per_card_cents"], 1600)
+check("the lot is a separate number", lot["line_count"], 2)
+print(f"       lot: {lot['currency']} {lot['price_cents']} -> landed"
+      f" ${lot['landed_cents']/100:.2f} -> ${lot['per_card_cents']/100:.2f}/card")
+check("lot per-card is the landed total split", lot["per_card_cents"],
+      round(lot["landed_cents"] / 2))
+check("arb uses the cheaper route", grid[101]["arb_cents"],
+      1800 - min(single["per_card_cents"], lot["per_card_cents"]))
+check("and says when that route is a lot", grid[101]["arb_via_lot"],
+      lot["per_card_cents"] < single["per_card_cents"])
+# 103 is only ever inside the lot, so it has no single-card route at all.
+check("a lot-only card has no single route", grid[103]["buy_single"], None)
+check("but does have a lot route", grid[103]["buy_lot"]["line_count"], 2)
+
+print("\n--- comps per source, with age ---")
+by_src = {x["marketplace"]: x for x in grid[101]["comps"]}
+check("mercari comps counted", by_src["mercari_us"]["n"], 3)
+check("neokyo counted separately", by_src["neokyo"]["n"], 1)
+check("newest mercari sighting", by_src["mercari_us"]["last_seen"][:10], "2026-08-30")
+
+print("\n--- gone is not sold ---")
+lid = lot["listing_id"]
+r = c.post(f"/market/listings/{lid}/outcome", json={"outcome": "gone"})
+check("marking gone succeeds", r.status_code, 200)
+check("it adds no sighting", r.json()["sighting_added"], False)
+g2 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
+check("the lot stops being a buy option", g2[101]["buy_lot"], None)
+check("the single survives", g2[101]["buy_single"]["per_card_cents"], 1600)
+check("no phantom sold comp appeared", g2[101]["n_sold"], 2)
+
+print("\n--- sold WITH a price is a new comp ---")
+sid = g2[101]["buy_single"]["listing_id"]
+r = c.post(f"/market/listings/{sid}/outcome",
+           json={"outcome": "sold", "price_cents": 1500,
+                 "observed_at": "2026-08-31T00:00:00Z"})
+check("marking sold succeeds", r.status_code, 200)
+check("it records a sighting", r.json()["sighting_added"], True)
+g3 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
+check("the sale joined the series", g3[101]["n_sold"], 3)
+check("median moved to the middle of 15.00/18.00/22.00",
+      g3[101]["sold_median_cents"], 1800)
+check("and it is no longer buyable", g3[101]["buy_single"], None)
+
+print("\n--- a sale with no price is refused ---")
+r = c.post(f"/market/listings/{lid}/outcome", json={"outcome": "sold"})
+check("refused", r.status_code, 400)
+check("and says why", "gone instead" in r.json()["detail"], True)
+
+print("\n" + (f"{len(fails)} FAILED: {fails}" if fails else "all passed"))
+sys.exit(1 if fails else 0)

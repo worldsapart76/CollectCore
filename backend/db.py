@@ -187,6 +187,11 @@ def _run_migrations(conn) -> None:
             ("description", "ALTER TABLE mkt_listing ADD COLUMN description TEXT"),
             ("seller_id", "ALTER TABLE mkt_listing ADD COLUMN seller_id TEXT"),
             ("source_dates", "ALTER TABLE mkt_listing ADD COLUMN source_dates TEXT"),
+            # No longer purchasable, price unknown. Distinct from a sold
+            # sighting on purpose: a proxy listing that vanishes says nothing
+            # about what it fetched, and treating "gone" as "sold at the ask"
+            # would let every disappeared listing inflate the sold median.
+            ("delisted_at", "ALTER TABLE mkt_listing ADD COLUMN delisted_at TEXT"),
         ):
             if col not in cols:
                 raw.execute(ddl)

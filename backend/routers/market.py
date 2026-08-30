@@ -588,7 +588,7 @@ def comps_summary(db=Depends(get_db)):
             "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
             "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
             "WHERE ln.item_id IS NOT NULL AND s.listing_state = 'active' "
-            "  AND m.side IN ('buy', 'both') "
+            "  AND m.side IN ('buy', 'both') AND l.delisted_at IS NULL "
             "GROUP BY ln.item_id"))
     }
 
@@ -793,6 +793,8 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
             "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
             "WHERE ln.item_id = :id AND s.listing_state = 'active' "
             "  AND m.side IN ('buy', 'both') "
+            # Marked gone or sold: no longer a price anyone can pay.
+            "  AND l.delisted_at IS NULL "
             # Only the latest sighting of each listing: an older, higher price
             # for a listing still on sale is history, not an option.
             "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
@@ -1473,3 +1475,337 @@ def set_box_size(code: str, body: BoxSizeIn, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"No marketplace '{code}'.")
     db.commit()
     return {"ok": True}
+
+
+# ───────────────────────── The card grid ─────────────────────────────────────
+#
+# The front door, replacing "look up a card you already had in mind".
+#
+# Every card carries three values -- what it cost, what it could be bought for,
+# what it could be sold for -- and the two margins that fall out of them. See
+# `docs/photocard_market_intel_plan.md` -> v2, the market workspace.
+
+
+def _photocard_type_id(db) -> Optional[int]:
+    row = db.execute(text(
+        "SELECT collection_type_id FROM lkup_collection_types "
+        "WHERE collection_type_code = 'photocards'")).fetchone()
+    return row[0] if row else None
+
+
+def _labels_for(db, item_ids: List[int]) -> Dict[int, str]:
+    """`Hyunjin · Rock Star · KM Station`, the same shape the picker uses.
+
+    Built here rather than read off mkt_listing_line.label: that column holds
+    whatever the label was WHEN CAPTURED, so a card renamed since would show
+    under its old name in a view whose whole job is to be browsed.
+    """
+    if not item_ids:
+        return {}
+    ids = ",".join(str(int(i)) for i in item_ids)
+
+    members: Dict[int, List[str]] = {}
+    for item_id, name in db.execute(text(
+        "SELECT x.item_id, m.member_name "
+        "FROM xref_photocard_members x "
+        "JOIN lkup_photocard_members m ON m.member_id = x.member_id "
+        f"WHERE x.item_id IN ({ids}) "
+        "ORDER BY x.item_id, m.sort_order"
+    )):
+        members.setdefault(item_id, []).append(name)
+
+    out: Dict[int, str] = {}
+    # source_origin_id is nullable -- LEFT JOIN it, always.
+    for item_id, origin, version in db.execute(text(
+        "SELECT d.item_id, so.source_origin_name, d.version "
+        "FROM tbl_photocard_details d "
+        "LEFT JOIN lkup_photocard_source_origins so "
+        "       ON so.source_origin_id = d.source_origin_id "
+        f"WHERE d.item_id IN ({ids})"
+    )):
+        parts = [" + ".join(members.get(item_id, [])) or "—"]
+        if origin:
+            parts.append(origin)
+        if version:
+            parts.append(version)
+        out[item_id] = " · ".join(parts)
+    return out
+
+
+# Possession, not decision. `wanted` / `not_wanted` / `undecided` are standing
+# decisions about the card and do not mean a copy is in hand; `borrowed` is in
+# hand but not yours to sell. See CLAUDE.md on the two orthogonal facts.
+HELD_STATUSES = ("owned", "trade", "pending_outgoing")
+
+
+@router.get("/grid")
+def market_grid(db=Depends(get_db)):
+    """Every card worth looking at, with its three values side by side.
+
+    Scope is deliberately not the whole catalog: 11,347 rows in a table with no
+    virtualization is not a view, and the useful set is cards that have market
+    data plus cards marked Wanted -- the ones with no data being exactly the
+    reminder of where to go browsing next.
+    """
+    type_id = _photocard_type_id(db)
+
+    # ---- Scope ------------------------------------------------------------
+    with_data = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT item_id FROM mkt_listing_line "
+        "WHERE item_id IS NOT NULL"))}
+    wanted = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        "WHERE s.status_code = 'wanted'"))}
+    item_ids = sorted(with_data | wanted)
+    if not item_ids:
+        return {"cards": [], "generated_at": datetime.utcnow().isoformat()}
+
+    ids = ",".join(str(int(i)) for i in item_ids)
+    labels = _labels_for(db, item_ids)
+
+    # ---- What I hold ------------------------------------------------------
+    held: Dict[int, int] = {}
+    for item_id, n in db.execute(text(
+        "SELECT c.item_id, COUNT(*) FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        f"WHERE c.item_id IN ({ids}) AND s.status_code IN "
+        "  ('owned', 'trade', 'pending_outgoing') "
+        "GROUP BY c.item_id"
+    )):
+        held[item_id] = n
+
+    # ---- What I paid ------------------------------------------------------
+    # Card-level. Per-copy basis arrives with the ledger; until then this is a
+    # single figure for every copy and the response says so rather than
+    # implying a precision it does not have.
+    basis: Dict[int, Dict[str, Any]] = {}
+    for item_id, own_cents, source, tier_name, tier_cents in db.execute(text(
+        "SELECT c.item_id, c.cost_cents, c.source, t.tier_name, t.cost_cents "
+        "FROM mkt_item_cost c "
+        "LEFT JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id "
+        f"WHERE c.item_id IN ({ids})"
+    )):
+        cents = own_cents if own_cents is not None else tier_cents
+        if cents is None:
+            continue
+        basis[item_id] = {
+            "cost_cents": cents,
+            "source": source,
+            "tier_name": tier_name,
+            # Everything available today is an estimate; the ledger flips this.
+            "estimated": True,
+            "per_copy": False,
+        }
+
+    # ---- What it sells for ------------------------------------------------
+    # Sole-line SOLD sightings only. Asks are what sellers hope for, and a
+    # bundle's price is not this card's price.
+    sold_by_item: Dict[int, List[int]] = {}
+    sold_mkts: Dict[int, List[str]] = {}
+    for item_id, usd_cents, mkt in db.execute(text(
+        "SELECT ln.item_id, s.price_usd, l.marketplace "
+        "FROM mkt_sighting s "
+        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        f"WHERE ln.item_id IN ({ids}) AND s.listing_state = 'sold' "
+        "  AND s.price_usd IS NOT NULL "
+        "  AND (SELECT COUNT(*) FROM mkt_listing_line x"
+        "        WHERE x.listing_id = l.listing_id) = 1"
+    )):
+        sold_by_item.setdefault(item_id, []).append(usd_cents)
+        sold_mkts.setdefault(item_id, []).append(mkt)
+
+    # ---- What it would cost to buy ----------------------------------------
+    # Two numbers, never blended. The cheapest source for a card is often
+    # inside a lot, and one card cannot be bought out of an 8-card lot -- the
+    # lot can. A single "cheapest" column would rank listings that cannot be
+    # acted on: $12.50 is a real number and acting on it costs $118.
+    buy_rows = db.execute(text(
+        "SELECT ln.item_id, l.listing_id, l.marketplace, l.listing_url,"
+        " s.price_cents, s.currency, s.price_usd, s.observed_at,"
+        " (SELECT COUNT(*) FROM mkt_listing_line x"
+        "   WHERE x.listing_id = l.listing_id) AS line_count "
+        "FROM mkt_listing l "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+        "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
+        f"WHERE ln.item_id IN ({ids}) AND s.listing_state = 'active' "
+        "  AND m.side IN ('buy', 'both') "
+        # Gone means gone: a delisted listing is not a price you can pay.
+        "  AND l.delisted_at IS NULL "
+        "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
+        "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
+        "GROUP BY ln.item_id, l.listing_id"
+    )).mappings().all()
+
+    buy_fees: Dict[str, Any] = {}
+    best_single: Dict[int, Dict[str, Any]] = {}
+    best_lot: Dict[int, Dict[str, Any]] = {}
+    for r in buy_rows:
+        code = r["marketplace"]
+        if code not in buy_fees:
+            buy_fees[code] = fee_model(db, code, "buy")
+        landed = landed_cost(r["price_usd"], buy_fees[code])
+        if landed is None:
+            continue
+        n = max(1, r["line_count"] or 1)
+        option = {
+            "listing_id": r["listing_id"],
+            "marketplace": code,
+            "listing_url": r["listing_url"],
+            "price_cents": r["price_cents"],
+            "currency": r["currency"],
+            "line_count": n,
+            "landed_cents": landed,
+            "per_card_cents": int(round(landed / n)),
+            "observed_at": r["observed_at"],
+        }
+        target = best_single if n == 1 else best_lot
+        cur = target.get(r["item_id"])
+        if cur is None or option["per_card_cents"] < cur["per_card_cents"]:
+            target[r["item_id"]] = option
+
+    # ---- Comps per source, with age ---------------------------------------
+    # Per source and not overall: nineteen Mercari comps two days old and one
+    # Neokyo listing three weeks old is a different picture from "20 comps",
+    # and the overall number hides exactly the part that decides whether to
+    # trust it.
+    comps: Dict[int, List[Dict[str, Any]]] = {}
+    for item_id, mkt, n, last_seen in db.execute(text(
+        "SELECT ln.item_id, l.marketplace, COUNT(*), MAX(s.observed_at) "
+        "FROM mkt_sighting s "
+        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        f"WHERE ln.item_id IN ({ids}) "
+        "GROUP BY ln.item_id, l.marketplace"
+    )):
+        comps.setdefault(item_id, []).append(
+            {"marketplace": mkt, "n": n, "last_seen": last_seen})
+
+    # ---- Assemble ---------------------------------------------------------
+    sell_fees: Dict[str, Any] = {}
+    cards = []
+    for item_id in item_ids:
+        prices = sorted(sold_by_item.get(item_id, []))
+        sold_median = None
+        sell_net = None
+        sell_mkt = None
+        if prices:
+            mid = len(prices) // 2
+            sold_median = (prices[mid] if len(prices) % 2
+                           else (prices[mid - 1] + prices[mid]) // 2)
+            # The fee model belongs to wherever the sales actually happened.
+            ms = sold_mkts.get(item_id) or []
+            sell_mkt = max(set(ms), key=ms.count) if ms else "mercari_us"
+            if sell_mkt not in sell_fees:
+                sell_fees[sell_mkt] = fee_model(db, sell_mkt, "sell")
+            sell_net = net_proceeds(sold_median, sell_fees[sell_mkt])
+
+        paid = basis.get(item_id)
+        single = best_single.get(item_id)
+        lot = best_lot.get(item_id)
+
+        # Cheapest route that can actually be acted on, for the arb margin.
+        # A lot counts -- you can buy it -- but the commitment travels with it
+        # so the UI can say what acting on that number really costs.
+        routes = [o for o in (single, lot) if o]
+        cheapest = min(routes, key=lambda o: o["per_card_cents"]) if routes else None
+
+        cards.append({
+            "item_id": item_id,
+            "label": labels.get(item_id) or f"item {item_id}",
+            "held": held.get(item_id, 0),
+            "wanted": item_id in wanted,
+            "paid": paid,
+            "sold_median_cents": sold_median,
+            "sell_net_cents": sell_net,
+            "sell_marketplace": sell_mkt,
+            "n_sold": len(prices),
+            "buy_single": single,
+            "buy_lot": lot,
+            # sell - paid: margin on what is already held. Only meaningful
+            # when something IS held, so it stays None otherwise rather than
+            # reporting a profit on a card you do not have.
+            "flip_cents": (
+                sell_net - paid["cost_cents"]
+                if sell_net is not None and paid and held.get(item_id) else None
+            ),
+            # sell - buy: margin on what could be sourced.
+            "arb_cents": (
+                sell_net - cheapest["per_card_cents"]
+                if sell_net is not None and cheapest else None
+            ),
+            "arb_via_lot": bool(cheapest and cheapest["line_count"] > 1),
+            "comps": comps.get(item_id, []),
+        })
+
+    return {
+        "cards": cards,
+        "generated_at": datetime.utcnow().isoformat(),
+        # Card-level basis, stated so the UI never implies per-copy precision.
+        "basis_is_per_card": True,
+    }
+
+
+# ───────────────────────── Sold vs gone ──────────────────────────────────────
+
+
+class DelistIn(BaseModel):
+    """What happened to a listing that is no longer up.
+
+    Two different facts, and merging them corrupts the sell side. `sold` with a
+    price is a new comp -- revisiting a listing is free price discovery. `gone`
+    is the absence of an option and nothing more: a proxy listing that vanishes
+    says nothing about what it fetched, and treating it as a sale at the asking
+    price would inflate the median with every disappearance.
+    """
+    outcome: str                      # 'sold' | 'gone'
+    price_cents: Optional[int] = None  # sold only, in the listing's currency
+    observed_at: Optional[str] = None
+
+
+@router.post("/listings/{listing_id}/outcome")
+def listing_outcome(listing_id: int, body: DelistIn, db=Depends(get_db)):
+    row = db.execute(text(
+        "SELECT marketplace FROM mkt_listing WHERE listing_id = :i"
+    ), {"i": listing_id}).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such listing.")
+    when = body.observed_at or datetime.utcnow().isoformat()
+
+    if body.outcome == "gone":
+        db.execute(text(
+            "UPDATE mkt_listing SET delisted_at = :t WHERE listing_id = :i"),
+            {"t": when, "i": listing_id})
+        db.commit()
+        return {"ok": True, "outcome": "gone", "sighting_added": False}
+
+    if body.outcome != "sold":
+        raise HTTPException(status_code=400, detail="outcome must be sold or gone")
+    if body.price_cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail="A sold price is required. If the price is unknown, "
+                   "record it as gone instead — a guessed sale price becomes "
+                   "a comp and drags the median.")
+
+    currency = marketplace_currency(db, row[0])
+    fx = rate_for(db, currency, when)
+    usd = to_usd_minor(body.price_cents, currency, fx)
+    db.execute(text(
+        "INSERT OR IGNORE INTO mkt_sighting ("
+        " listing_id, observed_at, listing_state, raw_status,"
+        " price_cents, currency, price_usd, fx_rate, fx_source) "
+        "VALUES (:i, :t, 'sold', 'marked_sold', :p, :c, :u, :fx, :fxs)"),
+        {"i": listing_id, "t": when, "p": body.price_cents, "c": currency,
+         "u": usd, "fx": fx, "fxs": "table" if fx is not None else None})
+    # Sold is also gone: it should stop appearing as something to buy.
+    db.execute(text(
+        "UPDATE mkt_listing SET delisted_at = :t WHERE listing_id = :i"),
+        {"t": when, "i": listing_id})
+    db.commit()
+    return {"ok": True, "outcome": "sold", "sighting_added": True,
+            "price_usd": usd}
