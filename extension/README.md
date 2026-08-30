@@ -168,15 +168,28 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
 - **The unit is spelled out.** A product page reads `3399 Yen`, not `¥3399` and
   not `3399円`, with `Approximately : US$ 21.07` beneath it. Looking only for
   the symbols found no price at all.
-- **Its listing name is not in any of the obvious places.** The `h1`, the
-  `og:title` and the document title all say *Item Details* — Neokyo's generic
-  page name — which is what every early capture got filed under. It is not
-  reliably a heading either.
+- **Its listing name is not in any of the obvious places.** The `h1` is empty,
+  and the `og:title` and document title both say *Item Details* — Neokyo's
+  generic page name — which is what every early capture got filed under. It is
+  not a heading, and it carries no class containing "title" or "name".
 
-  So the net is cast wide and narrowed **structurally**: candidates inside
-  `header`, `nav` or `footer` are dropped, and the longest of what remains
-  wins. A section heading is a couple of words; a listing name is a sentence of
-  specifics. Both rules hold in any language, which matters — see below.
+  So the net is cast very wide and the narrowing is done by **ranking**:
+
+  1. Drop anything inside site chrome — `header`, `nav`, `footer`, modals,
+     banners, breadcrumbs — matched by class and id as well as by tag, because
+     Neokyo uses none of the semantic elements and a tag-only test excluded
+     nothing at all.
+  2. Drop anything short enough to be only a price. The price is the largest
+     text on the page and would otherwise win outright.
+  3. **Rank by rendered font size, then by length.** A page renders its subject
+     larger than the furniture around it, and among same-size headings a
+     section heading is a couple of words while a listing name is a sentence of
+     specifics.
+
+  Every one of those rules holds whatever the markup is called and whatever
+  language the text is in, which matters — see below. The walk is memoised per
+  path; it measures every leaf element, and the mutation observer would
+  otherwise re-run it on every frame.
 - **The page may be machine-translated in your browser**, which rewrites every
   text node. Any rule that keys on English strings stops working the moment the
   translation is off or differs, so the title logic must not depend on one. The

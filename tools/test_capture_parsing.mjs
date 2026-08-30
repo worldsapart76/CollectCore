@@ -39,12 +39,18 @@ function loadFor(hostname, pathname, headings = []) {
     // the part that has to keep working when the page is translated.
     querySelectorAll: () =>
       headings.map((h) => {
-        const [text, where] = Array.isArray(h) ? h : [h, null];
+        // [text, kind, fontSizePx]. `kind: 'chrome'` puts the element inside
+        // the site's header/nav/footer, which titleCandidates() excludes
+        // structurally -- the part that has to keep working when the page is
+        // machine-translated and no English string matches anything.
+        const [text, kind, px] = Array.isArray(h) ? h : [h, null, 16];
         return {
           textContent: text,
-          tagName: 'H2',
+          tagName: 'DIV',
           className: '',
-          closest: (sel) => (where === 'chrome' ? { sel } : null),
+          children: [],
+          __px: px ?? 16,
+          closest: (sel) => (kind === 'chrome' ? { sel } : null),
         };
       }),
     getElementById: () => null,
@@ -53,6 +59,7 @@ function loadFor(hostname, pathname, headings = []) {
     title: '',
   };
   globalThis.chrome = { runtime: { sendMessage: async () => null, onMessage: { addListener() {} } } };
+  globalThis.getComputedStyle = (el) => ({ fontSize: `${el.__px ?? 16}px` });
   new Function(patched)();
   return globalThis.__cc;
 }
@@ -139,6 +146,34 @@ const NK3 = loadFor('neokyo.com', '/en/product/x/abc123def456', ['Item Details']
 eq('nothing usable -> null, so the chain falls through',
    NK3.TITLE_SOURCES.scope(), null);
 eq('neokyo tries the heading scope first', nk.titleOrder, ['scope', 'og', 'doc', 'h1']);
+
+// Ranking is by type size before length. This is the page as photographed:
+// the price is the largest text on it, and the cookie banner's heading is
+// longer than the listing name -- both beat the title on the old rules.
+const NK5 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['This website uses cookies', 'chrome', 20],
+  ['Buy items from online Japanese shops!', 'chrome', 12],
+  ['Stray Kids Hyunjin KMS Rakuten Store Bonus', null, 20],
+  ['3399 Yen', null, 28],
+  ['Item Price on Rakuma', null, 20],
+  ['Purchase Request Form', null, 20],
+  ['Approximately : US$ 21.07', null, 14],
+  ['Create a buy request', null, 16],
+]);
+eq('the price cannot win the ranking',
+   NK5.TITLE_SOURCES.scope(), 'Stray Kids Hyunjin KMS Rakuten Store Bonus');
+
+// Same page with every string translated away, so titleReject matches none of
+// them and only the structure and the type sizes are left to go on.
+const NK6 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['当サイトはCookieを使用しています', 'chrome', 20],
+  ['Stray Kids ヒョンジン KMS 楽天ブックス 購入特典', null, 20],
+  ['3399円', null, 28],
+  ['ラクマでの商品価格', null, 20],
+  ['購入リクエストフォーム', null, 20],
+]);
+eq('holds with nothing in English',
+   NK6.TITLE_SOURCES.scope(), 'Stray Kids ヒョンジン KMS 楽天ブックス 購入特典');
 eq('mercari has no scope, so h1 first', mus.titleOrder ?? ['h1', 'og', 'doc'], ['h1', 'og', 'doc']);
 
 console.log('--- sold state ---');

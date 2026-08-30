@@ -67,16 +67,16 @@
       queryParam: 'keyword',
       // The listing name is NOT the h1, the og:title or the document title —
       // all three say "Item Details", Neokyo's generic page name, which is how
-      // every early capture ended up filed under it. Nor is it reliably a
-      // heading: restricting to h1-h3 found none in the page body and fell
-      // through to the footer's "About Neokyo". So the net is wide and
-      // titleCandidates() does the narrowing, structurally.
+      // every early capture ended up filed under it. Nor is it a heading, and
+      // nor does it carry a class containing "title" or "name".
+      //
+      // So this net is deliberately broad. Narrow selectors returned a
+      // cookie-consent banner and a mobile nav link; the ranking in
+      // titleCandidates() is what narrows now, and this only has to make sure
+      // the right element is in the room to be ranked.
       titleScope: [
-        '[class*="product-title"]',
-        '[class*="item-title"]',
-        '[class*="title"]',
-        '[class*="product-name"]',
-        'h1', 'h2', 'h3', 'h4', 'h5',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'p', 'span', 'div', 'b', 'strong', 'a', 'li', 'td',
       ],
       // A secondary filter only. It is English, and the page can be
       // machine-translated or set to another language, so nothing may DEPEND
@@ -486,18 +486,48 @@
   // sentence of specifics. That ordering holds in any language, and it is why
   // "About Neokyo" -- picked up from the footer once the English blocklist had
   // eliminated everything above it -- cannot win now on either count.
+  // Site chrome, identified by class and id as well as by tag.
+  //
+  // Neokyo uses none of the semantic elements, so `closest('header, nav,
+  // footer')` matched nothing at all and the exclusion did nothing -- a mobile
+  // nav link and a cookie-consent modal both made the shortlist.
+  const CHROME = [
+    'header', 'nav', 'footer', 'dialog',
+    '[class*="header"]', '[class*="navbar"]', '[class*="nav-"]',
+    '[class*="footer"]', '[class*="modal"]', '[class*="cookie"]',
+    '[class*="banner"]', '[class*="breadcrumb"]', '[role="dialog"]',
+    '[id*="header"]', '[id*="footer"]', '[id*="modal"]',
+  ].join(',');
+
+  // Memoised per path. This runs from decorateDetail(), which the mutation
+  // observer calls on every frame that changes the DOM, and it walks every
+  // leaf element measuring type sizes -- cheap once, not cheap sixty times a
+  // second. An empty result is never cached: the page may simply not have
+  // rendered yet, and caching that would make the title permanently blank.
+  let titleMemo = { path: null, list: null };
+
   function titleCandidates() {
     if (!SITE.titleScope) return [];
+    if (titleMemo.path === location.pathname && titleMemo.list?.length) {
+      return titleMemo.list;
+    }
     const out = [];
     for (const el of document.querySelectorAll(SITE.titleScope.join(','))) {
-      // Site chrome, in any language.
-      if (el.closest?.('header, nav, footer')) continue;
+      if (el.closest?.(CHROME)) continue;
+      // Innermost only. A wrapper carries the same text as the element inside
+      // it, and reporting both fills the shortlist with duplicates of one node.
+      if (el.children?.length) continue;
       const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
       // Too short to be a listing name; long enough to be a whole paragraph.
       if (text.length < 8 || text.length > 160) continue;
       if (SITE.titleReject?.test(text)) continue;
+      // The price is the biggest text on the page and would otherwise win the
+      // ranking outright. Anything short enough to be only a price is not a
+      // title -- a listing whose whole name is a price does not exist.
+      if (text.length <= 26 && SITE.priceFrom?.(text) !== null) continue;
       out.push({
         text,
+        size: fontSize(el),
         // Recorded for the panel's diagnostic: knowing WHICH element held the
         // name is the difference between fixing this and guessing at it again.
         where: `${el.tagName?.toLowerCase() || '?'}${
@@ -507,8 +537,25 @@
         }`,
       });
     }
-    // Longest first, DOM order breaking ties.
-    return out.sort((a, b) => b.text.length - a.text.length);
+    // Biggest type first, then longest.
+    //
+    // Font size is the ranking that survives everything else being unknown: a
+    // page renders its subject larger than the furniture around it, and that
+    // is true whatever the markup is called and whatever language the text has
+    // been translated into. Length breaks the tie among same-size headings,
+    // where a section heading is a couple of words and a listing name is a
+    // sentence of specifics.
+    out.sort((a, b) => b.size - a.size || b.text.length - a.text.length);
+    titleMemo = { path: location.pathname, list: out };
+    return out;
+  }
+
+  function fontSize(el) {
+    try {
+      return parseFloat(getComputedStyle(el).fontSize) || 0;
+    } catch {
+      return 0;
+    }
   }
 
   const TITLE_SOURCES = {
@@ -604,7 +651,7 @@
       // another round of guessing.
       cands: titleCandidates()
         .slice(0, 4)
-        .map((c) => `${c.where}: ${c.text.slice(0, 40)}`),
+        .map((c) => `${c.where} @${c.size}px: ${c.text.slice(0, 40)}`),
       h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
       og: (TITLE_SOURCES.og() || '').slice(0, 60),
       doc: (TITLE_SOURCES.doc() || '').slice(0, 60),
