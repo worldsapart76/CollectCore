@@ -50,9 +50,14 @@ function loadFor(hostname, pathname, headings = [], extra = {}) {
       // is portrait and a marketing hero laid out across a page is not, which
       // is the only thing telling them apart when both sit in one DOM.
       if (String(sel) === 'img') {
-        return (extra.images || []).map(([src, w, h]) => ({
+        // [src, width, height, attrs]. `attrs` carries the lazy-load forms --
+        // data-src, srcset -- because an image that has not scrolled in holds
+        // its real URL there and `src` is empty or a placeholder.
+        return (extra.images || []).map(([src, w, h, attrs = {}]) => ({
           currentSrc: src, src, naturalWidth: w, naturalHeight: h,
-          width: w, height: h, dataset: {}, getAttribute: () => null,
+          width: w, height: h,
+          dataset: attrs.dataset || {},
+          getAttribute: (k) => attrs[k] ?? null,
         }));
       }
       return headings.map((h) => {
@@ -619,6 +624,55 @@ eq('and a landscape-only page yields nothing rather than a banner',
      images: [['https://neokyo.com/img/banner.png', 1200, 300]],
    }).detailPhoto(), null);
 eq('that is the declared order', nk.photoOrder.join(), 'largest,portrait');
+
+
+console.log('--- a photo URL is not always in src ---');
+// A lazy-loaded image holds the real URL in a data attribute until it scrolls
+// in, and `src` is meanwhile empty or a placeholder -- so a host test against
+// `src` rejects the very image being looked for. tilePhoto() always knew this;
+// detailPhoto() did not.
+const REAL = 'https://static.mercdn.net/photos/real.jpg';
+const SPACER = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+
+eq('data-src is used when src is a placeholder',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[SPACER, 600, 800, { dataset: { src: REAL } }]],
+   }).detailPhoto(), REAL);
+eq('the data-src ATTRIBUTE form too',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['', 600, 800, { 'data-src': REAL }]],
+   }).detailPhoto(), REAL);
+// A responsive image lists ascending widths, so the tail is the biggest
+// rendition on offer.
+eq('srcset falls back to its largest entry',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['', 600, 800,
+               { srcset: 'https://static.mercdn.net/photos/s.jpg 240w, ' + REAL + ' 640w' }]],
+   }).detailPhoto(), REAL);
+eq('a real src still wins over a data attribute',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[REAL, 600, 800, { dataset: { src: 'https://x/other.jpg' } }]],
+   }).detailPhoto(), REAL);
+// Nothing anywhere is a real answer: no photo beats a spacer gif filed as one.
+eq('a spacer with no lazy URL yields nothing',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[SPACER, 1, 1, {}]],
+   }).detailPhoto(), null);
+
+console.log('--- Neokyo: an undecoded photo is still findable ---');
+// Both portrait passes need real dimensions, and an image that has not decoded
+// reports 0x0 -- so a page caught mid-load fell through every strategy and
+// captured with no image at all.
+eq('0x0 on an unlisted host is still taken',
+   loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
+     images: [['https://cdn.unknown.jp/x/9.jpg', 0, 0]],
+   }).detailPhoto(), 'https://cdn.unknown.jp/x/9.jpg');
+// But only as a last resort: a decoded, correctly-shaped image outranks it.
+eq('a decoded portrait still wins over an undecoded one',
+   loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
+     images: [['https://cdn.unknown.jp/x/undecoded.jpg', 0, 0],
+              ['https://img.fril.jp/x/real.jpg', 600, 800]],
+   }).detailPhoto(), 'https://img.fril.jp/x/real.jpg');
 
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

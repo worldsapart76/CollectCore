@@ -2203,6 +2203,29 @@ No backup changes needed.
     "captured but will not load" points at the CDN, and they must not look
     alike.
 
+23. **A photo URL is not always in `src` — FIXED 2026-08-30.** Neokyo's
+    Rakuma listings captured their image and its Mercari-JP ones did not, on
+    the same page type — so it was never the host pattern.
+
+    A **lazy-loaded** image holds the real URL in `data-src` / `srcset` until it
+    scrolls in, and `src` is meanwhile empty or a spacer gif. Every strategy
+    tests the host against `src`, so it was rejecting the very image it was
+    looking for. `tilePhoto()` had always known this; `detailPhoto()` read only
+    `currentSrc || src`. One `imgSrc()` helper now resolves every form and both
+    paths use it.
+
+    Also: an image that has **not decoded** reports `0x0`, so nothing about it
+    can be called portrait and every shape-based strategy passed over it. A
+    page caught mid-load fell through all of them and captured with no image.
+    There is a last-resort pass for that case, ranked below a decoded one.
+
+    **And the panel now reports what the photo search saw** — every image on the
+    page with its dimensions, plus which strategy won — whenever a row has no
+    photo. This was the third round on one image bug, each spent guessing from
+    a screenshot. "The image is broken" and "the image is the wrong one" are the
+    same question, *which element did it read*, and the title diagnostic already
+    proved that answering it in the panel ends the guessing in one round.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

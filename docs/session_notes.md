@@ -145,6 +145,19 @@ because it fronts several marketplaces and its `photoHost` list is hosts *seen*
 rather than a rule, which is why one listing captured with no image at all. A
 row with no photo shows a dashed placeholder now, not a broken-image icon.
 
+**The Neokyo image bug, round three (entry 23).** Rakuma listings captured
+their image and Mercari-JP ones did not, on the same page type — so never the
+host pattern. A **lazy-loaded** image holds its real URL in `data-src`/`srcset`
+until it scrolls in, and every strategy was testing the host against an empty
+`src`. `imgSrc()` now resolves all the forms; `tilePhoto()` always knew this and
+`detailPhoto()` did not. Undecoded images (`0x0`) also passed through every
+shape-based strategy, so there is a last-resort pass for them.
+
+The panel now **prints what the photo search saw** — every image with its
+dimensions and which strategy won — whenever a row has no photo. Three rounds
+went into guessing this from screenshots; the title diagnostic already showed
+that answering it in the panel ends it in one.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

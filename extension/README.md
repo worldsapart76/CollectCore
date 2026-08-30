@@ -413,8 +413,23 @@ Japanese marketplaces and each brings its own image host, so its `photoHost`
 list is the hosts *seen* rather than a rule; `portrait` falls back to every
 image on the page when none of them match.
 
+**A photo URL is not always in `src`.** A lazy-loaded image holds the real one
+in `data-src` / `srcset` until it scrolls in, and `src` is meanwhile empty or a
+spacer — so a host test against `src` rejects the very image being looked for.
+`imgSrc()` resolves all the forms and both the tile and detail paths use it.
+Neokyo's Mercari-JP listings were captured with no image at all for this reason
+while its Rakuma ones worked.
+
+An image that has not decoded reports `0x0`, so nothing about it can be called
+portrait and every shape-based strategy passes over it. There is a last-resort
+pass for exactly that case.
+
 A row with no photo shows a **dashed placeholder**, not the browser's
-broken-image icon. Those are different claims — "nothing was read" points at the
+broken-image icon. When one is missing the panel also prints **what the photo
+search saw** — every image on the page with its dimensions, and which strategy
+won — beside the title candidates. "The image is broken" and "the image is the
+wrong one" are the same question, *which element did it read*, and answering it
+from a screenshot is a round of guessing. Those are different claims — "nothing was read" points at the
 parser, "captured but will not load" points at the CDN — and they must not look
 alike.
 

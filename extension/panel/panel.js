@@ -173,7 +173,10 @@ function row(rec) {
   // the element the site marks as seller-written, on a site that publishes
   // such a marker. A row that got the good source stays quiet.
   const dom = rec.domScan;
-  if (dom && (dom.weak || !rec.name || rec.priceCents == null)) {
+  // A missing photo counts. Identification is the job that image does, so its
+  // absence is a failed read, not a cosmetic one -- and "which element did it
+  // look at" is the only question worth asking about it.
+  if (dom && (dom.weak || !rec.name || rec.priceCents == null || !rec.thumbnailUrl)) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =
@@ -181,7 +184,9 @@ function row(rec) {
       ` · price from ${dom.scoped ? 'the price element' : 'the whole page'}` +
       ` — "${dom.priceText || 'nothing'}"` +
       ` · h1 "${dom.h1 || '—'}" · og "${dom.og || '—'}" · doc "${dom.doc || '—'}"` +
-      (dom.cands?.length ? ` · candidates: ${dom.cands.join(' | ')}` : ' · candidates: none');
+      (dom.cands?.length ? ` · candidates: ${dom.cands.join(' | ')}` : ' · candidates: none') +
+      ` · photo from ${dom.photoFrom || 'nowhere'}` +
+      (dom.photos?.length ? ` — images: ${dom.photos.join(' | ')}` : ' — images: none');
     body.append(dbg);
   }
 

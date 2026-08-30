@@ -547,16 +547,8 @@
   // a missing one just looks broken.
   function tilePhoto(anchor) {
     const imgs = [...anchor.querySelectorAll('img')];
-    const hosted = imgs.find((i) => SITE.photoHost.test(i.currentSrc || i.src || ''));
-    const pick = hosted || imgs[0];
-    // Lazy-loaded tiles carry the real URL in data-src until they scroll in.
-    return (
-      pick?.currentSrc ||
-      pick?.src ||
-      pick?.dataset?.src ||
-      pick?.getAttribute('data-original') ||
-      null
-    );
+    const hosted = imgs.find((i) => SITE.photoHost.test(imgSrc(i)));
+    return imgSrc(hosted || imgs[0] || {}) || null;
   }
 
   function readItem(anchor) {
@@ -917,10 +909,43 @@
     // guess at the CDN host costs nothing here -- the shape does the work.
     portrait: () =>
       largestPhoto((img, w, h) => h > w && w > 0 && SITE.photoHost.test(img)) ??
-      largestPhoto((img, w, h) => h > w && w > 0),
+      largestPhoto((img, w, h) => h > w && w > 0) ??
+      // A not-yet-decoded image reports 0x0, so nothing can be called portrait
+      // and both passes above come back empty. Rather than give up, fall back
+      // to shape as the page LAYS IT OUT -- an attribute or a CSS box, which is
+      // present before any byte is fetched.
+      largestPhoto((img, w, h) => w === 0 && h === 0),
 
     largest: () => largestPhoto((img) => SITE.photoHost.test(img)),
   };
+
+  // Where an <img>'s URL actually is, which is not always `src`.
+  //
+  // A lazy-loaded image holds the real URL in a data attribute until it scrolls
+  // in, and `src` is meanwhile empty or a placeholder -- so a host test against
+  // `src` rejects the very image being looked for. tilePhoto() has always known
+  // this; detailPhoto() did not, and read only currentSrc/src.
+  //
+  // srcset last, and its LAST entry: a responsive image lists ascending widths,
+  // so the tail is the biggest rendition on offer.
+  function imgSrc(img) {
+    const direct = img.currentSrc || img.src || '';
+    // A placeholder is a data: URI or a 1x1 spacer, never the photo.
+    if (direct && !direct.startsWith('data:')) return direct;
+    const lazy =
+      img.dataset?.src ||
+      img.dataset?.original ||
+      img.getAttribute?.('data-src') ||
+      img.getAttribute?.('data-original') ||
+      img.getAttribute?.('data-lazy-src');
+    if (lazy) return lazy;
+    const set = img.getAttribute?.('srcset') || img.dataset?.srcset || '';
+    if (set) {
+      const last = set.split(',').pop().trim().split(/\s+/)[0];
+      if (last) return last;
+    }
+    return direct;
+  }
 
   // The listing's PRIMARY photo among images passing `keep`.
   //
@@ -943,7 +968,8 @@
   function largestPhoto(keep) {
     const found = [];
     for (const img of document.querySelectorAll('img')) {
-      const src = img.currentSrc || img.src || '';
+      const src = imgSrc(img);
+      if (!src) continue;
       const w = img.naturalWidth || img.width || 0;
       const h = img.naturalHeight || img.height || 0;
       if (!keep(src, w, h)) continue;
@@ -955,11 +981,20 @@
     return (found.find((f) => f.area >= floor) || found[0]).src;
   }
 
+  // Which PHOTO_SOURCES strategy produced the last photo. Recorded for the
+  // same reason lastTitleSource is: "wrong photo" and "photo from the wrong
+  // place" are one bug, and knowing which strategy won says which to fix.
+  let lastPhotoSource = null;
+
   function detailPhoto() {
     for (const key of SITE.photoOrder || ['largest']) {
       const src = PHOTO_SOURCES[key]?.();
-      if (src) return src;
+      if (src) {
+        lastPhotoSource = key;
+        return src;
+      }
     }
+    lastPhotoSource = null;
     return null;
   }
 
@@ -1017,6 +1052,19 @@
             `${c.where} @${c.size}px${c.preferred ? ' *' : ''}: ` +
             c.text.slice(0, 40)
         ),
+      // What the photo search actually saw. "The image is broken" and "the
+      // image is the wrong one" are the same question -- which element did it
+      // read -- and answering it from a screenshot is a round of guessing.
+      // Same reasoning as the title candidate list above.
+      photos: [...document.querySelectorAll('img')]
+        .map((i) => ({
+          src: imgSrc(i),
+          w: i.naturalWidth || i.width || 0,
+          h: i.naturalHeight || i.height || 0,
+        }))
+        .filter((i) => i.src)
+        .slice(0, 8)
+        .map((i) => `${i.w}x${i.h} ${i.src.replace(/^https?:\/\//, '').slice(0, 52)}`),
       h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
       og: (TITLE_SOURCES.og() || '').slice(0, 60),
       doc: (TITLE_SOURCES.doc() || '').slice(0, 60),
@@ -1029,6 +1077,11 @@
     // only known once the title has actually been read.
     const name = detailTitle();
     domScan.titleFrom = lastTitleSource;
+    // Both read AFTER the fact, for the same reason: which source won is only
+    // known once the read has happened, and the object literal below is built
+    // too late to be asked.
+    const thumbnail = detailPhoto();
+    domScan.photoFrom = lastPhotoSource;
 
     return {
       id,
@@ -1047,7 +1100,7 @@
         ? SITE.shippingFrom(scopedText(SITE.shippingScope) || '') ??
           SITE.shippingFrom(body)
         : null,
-      thumbnail: detailPhoto(),
+      thumbnail,
       itemCondition: null,
       category: null,
       categoryId: null,
