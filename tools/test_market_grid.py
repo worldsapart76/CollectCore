@@ -181,6 +181,49 @@ check("median moved to the middle of 15.00/18.00/22.00",
       g3[101]["sold_median_cents"], 1800)
 check("and it is no longer buyable", g3[101]["buy_single"], None)
 
+print("\n--- postage rides on the listing, not on an average ---")
+# A standing "Shipping I pay" estimate exists precisely because per-listing
+# postage is usually unavailable. Where the listing states it, it REPLACES that
+# estimate rather than adding to it -- charging both double-counts.
+s.execute(text("UPDATE mkt_fee_component SET fixed_minor = 400 WHERE"
+               " marketplace_code='mercari_us' AND side='buy' AND seed_key='buy_ship'"))
+s.commit()
+c.post("/market/captures", json={"captures": [
+    # $10.00 with $5.48 of stated postage, and $10.00 with none stated.
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "ship1",
+     "name": "Felix Yes24", "capturedAt": "2026-09-01T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 102, "label": "Felix", "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-01T00:00:00Z", "priceCents": 1000,
+                    "shippingCents": 548,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "ship2",
+     "name": "Hyunjin HMV", "capturedAt": "2026-09-01T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 103, "label": "Hyunjin", "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-01T00:00:00Z", "priceCents": 1000,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+g4 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
+check("stated postage replaces the estimate",
+      g4[102]["buy_single"]["landed_cents"], 1000 + 548)
+check("and is reported as known", g4[102]["buy_single"]["shipping_known"], True)
+check("no stated postage leaves the estimate standing",
+      g4[103]["buy_single"]["landed_cents"], 1000 + 400)
+check("and says the postage is not real",
+      g4[103]["buy_single"]["shipping_known"], False)
+
+# Free shipping is a real answer and switches the estimate off; unread does not.
+c.post("/market/captures", json={"captures": [
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "ship3",
+     "name": "Felix Yes24 free post", "capturedAt": "2026-09-02T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 102, "label": "Felix", "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-02T00:00:00Z", "priceCents": 900,
+                    "shippingCents": 0,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+g5 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
+check("free shipping means free, not the estimate",
+      g5[102]["buy_single"]["landed_cents"], 900)
+
 print("\n--- a sale with no price is refused ---")
 r = c.post(f"/market/listings/{lid}/outcome", json={"outcome": "sold"})
 check("refused", r.status_code, 400)

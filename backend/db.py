@@ -137,6 +137,13 @@ def _run_migrations(conn) -> None:
             ("price_usd", "ALTER TABLE mkt_sighting ADD COLUMN price_usd INTEGER"),
             ("fx_rate", "ALTER TABLE mkt_sighting ADD COLUMN fx_rate REAL"),
             ("fx_source", "ALTER TABLE mkt_sighting ADD COLUMN fx_source TEXT"),
+            # Per-listing shipping. NULL is "not read", never "free" -- 0 is
+            # free, and a $6 card with $5.48 postage costs nearly twice a $6
+            # card without it, which no per-marketplace estimate can tell apart.
+            ("shipping_cents",
+             "ALTER TABLE mkt_sighting ADD COLUMN shipping_cents INTEGER"),
+            ("shipping_usd",
+             "ALTER TABLE mkt_sighting ADD COLUMN shipping_usd INTEGER"),
         ):
             if col not in cols:
                 raw.execute(ddl)
@@ -215,6 +222,28 @@ def _run_migrations(conn) -> None:
             if col not in cols:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_listing_line.%s", col)
+
+    # Migration: Pocamarket quotes USD, not KRW.
+    #
+    # The seed row went in as KRW on the assumption that a Korean marketplace
+    # prices in won. It does not, for a buyer shipping abroad: price, shipping
+    # and duties are all quoted in dollars. Left as KRW the fee model would ask
+    # for a KRW rate that never arrives and silently drop every fee amount
+    # typed into it.
+    #
+    # Guarded on nothing having been captured there yet, so it can only ever
+    # correct an untouched seed -- a marketplace with real listings against it
+    # keeps whatever currency those were recorded under.
+    if "lkup_mkt_marketplaces" in tables and "mkt_listing" in tables:
+        seen = raw.execute(
+            "SELECT COUNT(*) FROM mkt_listing WHERE marketplace = 'pocamarket'"
+        ).fetchone()[0]
+        if not seen:
+            cur = raw.execute(
+                "UPDATE lkup_mkt_marketplaces SET currency = 'USD' "
+                " WHERE marketplace_code = 'pocamarket' AND currency = 'KRW'")
+            if cur.rowcount:
+                logger.info("Migration: pocamarket currency KRW -> USD")
 
     if "mkt_fee_component" in tables:
         cols = {r[1] for r in raw.execute(

@@ -5,7 +5,7 @@ Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). The **v2
 market workspace** — card grid, lot analyzer, wanted-sourcing — is DESIGNED
 2026-08-30 and supersedes the card-first comp view as the destination; the v1
 comp view survives as its drill-down. Ledger designed, not built.
-eBay parser built 2026-08-30; Pocamarket declared, no parser yet.
+All four sources have capture parsers as of 2026-08-30.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -307,12 +307,13 @@ only the assumption that comps flow one direction.
 |---|---|---|---|---|
 | **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
 | **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT + VERIFIED** — server-rendered DOM, no fiber |
-| **Pocamarket** | KRW | both | tbd | Declared, no parser |
+| **Pocamarket** | USD | both | active | **BUILT** — title selector unconfirmed |
 | **eBay** | USD | both | active + sold | **BUILT** — server-rendered DOM, no fiber |
 
-All four rows exist with currency and side set, so ingest, FX conversion and
-comps accept them today. **Pocamarket** is the one still without a parser, and
-also needs a KRW rate on file, exactly as JPY does.
+All four now have parsers. Pocamarket needs **no** KRW rate after all: it
+quotes a US buyer in dollars throughout — price, shipping and duties — so its
+marketplace row is USD. `nativeCurrency` keeps the won parser available for a
+switched display without letting a won figure be stamped as dollars.
 
 eBay is the only source whose **sold tiles carry a date**, so its sold comps
 arrive with a real observation date rather than the capture time. It is also
@@ -1972,6 +1973,54 @@ No backup changes needed.
 
     **Pocamarket is now the only declared source without a parser.**
 
+18. **Per-listing postage, and Pocamarket — BUILT 2026-08-30.**
+
+    **Postage was missing from landed cost**, which on eBay is a large gap: a
+    $6.00 card with $5.48 shipping costs nearly twice a $6.00 card without, and
+    no per-marketplace average can tell those apart. `mkt_sighting` gained
+    `shipping_cents` / `shipping_usd`, read off the listing where the site
+    states it.
+
+    Where it is known it **replaces** the fee model's shipping line rather than
+    adding to it — the standing estimate exists precisely because the
+    per-listing figure is usually unavailable, and charging both double-counts.
+    `0` is a real answer ("Free shipping") and switches the estimate off;
+    `NULL` means the page was not read for it. A *per_shipment* shipping line
+    is never replaced: consolidated freight is a different cost from a
+    listing's own postage, and it enters `total_fixed` as a share of a box
+    rather than at face value.
+
+    **Pocamarket** is the fourth parser, and awkward in three ways:
+
+    - It renders as a **mobile app frame even on desktop**, with the marketing
+      landing page still in the DOM beside it, set in display type — so the
+      largest text on the page is "The Marketplace for K-Pop Photocards" and it
+      wins the font-size ranking outright.
+    - **Three USD figures sit on one listing page** and only the middle one is
+      the price: a "Save 1.40 USD" discount above it and "Ship to United States
+      from 12.00 USD" below. First-match buys the card for its discount;
+      largest-match buys it for the postage.
+    - It is **declared USD but parses won.** It quotes a US buyer in dollars
+      throughout, so that is the currency its fee amounts are entered in — but
+      the won parser stays for a switched display. `nativeCurrency` keeps the
+      two apart; without it a won figure is stamped USD, a ~1,300x error. The
+      seeded row moved KRW → USD under a migration guarded on nothing having
+      been captured there.
+
+    Its postage is **per shipment** ("same fee up to 40 items"), so it is
+    deliberately *not* captured per listing — that is a `per_shipment` fee
+    component with `typical_items_per_shipment = 40`, the Neokyo box case.
+
+    Also new: **`titleUnverified`**, which forces the panel's page-read
+    diagnostic on for a site whose name element has not been confirmed against
+    a live page. A newly added site's title is a guess that happened to win a
+    ranking, and a guess presenting itself as an answer is what four rounds of
+    Neokyo went into. Pocamarket carries the flag until its readout names the
+    real element.
+
+    107 cases in `tools/test_capture_parsing.mjs`; 5 more in
+    `tools/test_market_grid.py` for the postage arithmetic.
+
 ### Next
 
 **Steps 1 and 2 of the v2 market workspace are built** (card grid +
@@ -2002,9 +2051,10 @@ needs, cut it.
 Comp charting beyond the quartile bands; automatic sync; any `/pcs/` exposure of
 price data.
 
-**Pocamarket** is the last declared source without a parser. eBay shipped
-2026-08-30 (entry 17); Pocamarket is queued behind it and needs a KRW rate on
-file as well as the parser. The **enrich tier** left this document entirely: it is
+**All four declared sources now have parsers** (entries 17 and 18).
+Pocamarket's title selector is the one loose end: it is flagged
+`titleUnverified`, so every capture prints its candidate shortlist in the panel
+until the real element is confirmed. The **enrich tier** left this document entirely: it is
 superseded by detail-page capture, not deferred.
 
 ## Open Questions

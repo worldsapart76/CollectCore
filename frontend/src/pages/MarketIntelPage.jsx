@@ -644,6 +644,20 @@ function LotAnalyzer({ lot, onChanged, onError }) {
         <span style={{ fontSize: 12, color: "#666" }}>
           {lot.marketplace} · {money(lot.price_cents, lot.currency)}
           {lot.landed_cents != null && <> → <strong>{usd(lot.landed_cents)}</strong> landed</>}
+          {/* Postage on a lot is the difference between a good buy and a bad
+              one, and it was silently missing from landed cost until the
+              listing's own figure was captured. Say which one is in there. */}
+          {lot.shipping_usd != null && (
+            <span title="postage stated on the listing itself">
+              {lot.shipping_usd === 0 ? " (free post)" : ` (incl. ${usd(lot.shipping_usd)} post)`}
+            </span>
+          )}
+          {lot.shipping_usd == null && lot.landed_cents != null && (
+            <span style={{ color: "#b45309" }}
+                  title="the listing's postage was not read, so the marketplace estimate is standing in">
+              {" (est. post)"}
+            </span>
+          )}
           {" · "}{lot.units} {lot.units === 1 ? "card" : "cards"}
         </span>
         {lot.listing_url && (
@@ -1737,6 +1751,23 @@ function CardDetail({ detail, onChanged }) {
                   <div style={{ fontSize: 11, color: "#666" }}>
                     {o.marketplace} · {money(o.price_cents, o.currency)}
                     {o.line_count > 1 && ` · ${o.line_count} cards`}
+                    {/* Postage is a large part of what a cheap card costs, so
+                        whether it is a real figure off the listing or the
+                        marketplace-wide estimate standing in is worth saying.
+                        A listing that states free postage says so too — it is
+                        a real answer, not a missing one. */}
+                    {o.shipping_usd != null && (
+                      <span title="postage stated on the listing itself">
+                        {" · "}
+                        {o.shipping_usd === 0 ? "free post" : `+${usd(o.shipping_usd)} post`}
+                      </span>
+                    )}
+                    {o.shipping_usd == null && (
+                      <span style={{ color: "#b45309" }}
+                            title="the listing's postage was not read, so the marketplace estimate is standing in">
+                        {" · est. post"}
+                      </span>
+                    )}
                     {!o.fees_configured && (
                       <span style={{ color: "#b45309" }}> · fees not set</span>
                     )}

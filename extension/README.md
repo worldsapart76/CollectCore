@@ -1,8 +1,8 @@
 # CollectCore Market Capture — Chrome Extension
 
 Captures photocard listing data from **Mercari US** (sell side and buy side),
-**Neokyo** (buy side, proxying Mercari JP and Rakuma) and **eBay** (both sides)
-while browsing.
+**Neokyo** (buy side, proxying Mercari JP and Rakuma), **eBay** (both sides) and
+**Pocamarket** (buy side) while browsing.
 Design doc: [`docs/photocard_market_intel_plan.md`](../docs/photocard_market_intel_plan.md).
 
 ## There is no build step
@@ -30,7 +30,7 @@ tab.** That is the whole workflow.
 
 1. Go to `chrome://extensions`
 2. Click the **↻ reload** icon on the CollectCore card
-3. **Refresh every open Mercari, Neokyo and eBay tab**
+3. **Refresh every open Mercari, Neokyo, eBay and Pocamarket tab**
 
 **Step 3 is required after *any* reload**, not just when content-script files
 changed. Reloading the extension orphans the content script already running in
@@ -407,17 +407,57 @@ price, where Mercari gives only a sold flag.
   suffix `Opens in a new window or tab`. None of it is what the seller wrote,
   and any of it welded on stops the card index matching, so `titleClean` strips
   them from whichever source won.
+- **Postage rides on the listing, not on an average.** eBay states shipping per
+  listing, and a $6.00 card with $5.48 postage costs nearly twice a $6.00 card
+  without — no per-marketplace estimate can tell those apart. Where the page
+  states it, the figure **replaces** the fee model's shipping line rather than
+  adding to it; charging both double-counts. `0` is a real answer ("Free
+  shipping") and switches the estimate off; `null` means the page was not read
+  for it and the estimate stands.
 - **Bigger thumbnails are free, differently.** eBay sizes in the *filename* —
   `s-l225.jpg` → `s-l500.jpg` — where Mercari sizes in the query string.
   Separate branches in `bigThumb`, since one mechanism applied to the other
   host produces a 404 rather than a bigger image.
 
+## What differs on Pocamarket
+
+A structured photocard catalogue rather than a general marketplace: a listing
+names the origin, the group and the member as separate fields instead of a
+seller-written sentence.
+
+- **It renders as a mobile app frame even on desktop**, with the marketing
+  landing page still in the DOM beside it. That is not cosmetic — "The
+  Marketplace for K-Pop Photocards" is set in display type, so it is the
+  largest text on the page and wins the font-size ranking outright. The landing
+  copy is in `titleReject` for that reason.
+- **Three USD figures sit on one listing page and only the middle one is the
+  price**: `Save 1.40 USD before price increases!` above it, `7.00 USD`, and
+  `Ship to United States from 12.00 USD` below. Taking the first match buys the
+  card for its discount; taking the largest buys it for the postage. Both
+  non-price lines are stripped before the price is read.
+- **Numbers come before the unit** — `7.00 USD`, `12,000원` — where every other
+  source puts a symbol in front.
+- **Declared USD, parses won.** It quotes a US buyer in dollars throughout, so
+  that is what its fee amounts are entered in and what it actually charges; but
+  `priceFrom` still reads won for a switched display, and `nativeCurrency`
+  keeps the two apart. Labelling a won figure USD is a ~1,300x error.
+- **Its postage is per SHIPMENT, so it is deliberately not captured.** "Ship to
+  United States from 12.00 USD — same fee up to 40 items" is a box cost, and
+  recording it per listing would charge $12 forty times. It belongs in the fee
+  model as a `per_shipment` component with `typical_items_per_shipment = 40` —
+  exactly the Neokyo box case.
+- **`titleUnverified: true`**, so every capture prints its shortlist in the
+  panel instead of presenting a guess as an answer. Remove it and set
+  `titlePrefer` to whatever the readout names, once the element holding the
+  card name is known. The identity is split across two lines — the version and
+  `Stray Kids | HYUNJIN` — so the captured name may need both.
+
 ## Sources and currency
 
 `marketplace` is recorded on every listing, and the DB knows four sources —
-`mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD).
-**Mercari US, Neokyo and eBay have capture parsers**; Pocamarket is declared so
-the schema, comps, and currency handling are ready for it.
+`mercari_us` (USD), `neokyo` (JPY), `pocamarket` (USD), `ebay` (USD).
+**All four have capture parsers.** Pocamarket's title selector is not yet
+confirmed against a live page — see below.
 
 **Adding a site** is three edits, and the extension stays silently inert if any
 is missed:

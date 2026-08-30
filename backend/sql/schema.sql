@@ -2038,7 +2038,12 @@ INSERT OR IGNORE INTO lkup_mkt_marketplaces
     (marketplace_code, marketplace_name, currency, side, sort_order) VALUES
     ('mercari_us', 'Mercari US',  'USD', 'both', 10),
     ('neokyo',     'Neokyo',      'JPY', 'buy',  20),
-    ('pocamarket', 'Pocamarket',  'KRW', 'both', 30),
+    -- USD, not KRW: the site quotes a US buyer in dollars throughout --
+    -- price, shipping and duties -- so that is the currency its fee
+    -- amounts are entered in and the one it actually charges. A capture
+    -- still records KRW correctly if the display is ever switched, since
+    -- the currency follows the page rather than the marketplace row.
+    ('pocamarket', 'Pocamarket',  'USD', 'both', 30),
     ('ebay',       'eBay',        'USD', 'both', 40);
 
 -- USD conversion rates, by currency and effective date.
@@ -2199,6 +2204,17 @@ CREATE TABLE IF NOT EXISTS mkt_sighting (
     -- display is a USD assumption and will be wrong for Neokyo.
     price_cents   INTEGER,
     currency      TEXT NOT NULL DEFAULT 'USD',
+    -- What the page said SHIPPING costs, in the same currency and the same
+    -- minor units as price_cents. NULL means "not read", never "free" --
+    -- 0 is free, and conflating the two understates a listing's real cost.
+    --
+    -- Per LISTING rather than per marketplace, because on eBay it is: a $6
+    -- card with $5.48 postage costs nearly twice a $6 card with free postage,
+    -- and a standing per-marketplace estimate cannot tell them apart. Where it
+    -- is known it REPLACES the fee model's shipping line rather than adding to
+    -- it; see landed_cost().
+    shipping_cents INTEGER,
+    shipping_usd   INTEGER,
     -- USD at the time of observation. Nullable: a JPY sighting captured with
     -- no rate on file is still a valid record of the native price.
     price_usd     INTEGER,

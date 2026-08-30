@@ -151,6 +151,27 @@
       queryParam: '_nkw',
       priceScope: ['.x-price-primary', '[data-testid="x-price-primary"]',
                    '.x-bin-price__content', '.x-price-approx__price'],
+      shippingScope: ['.ux-labels-values--shipping',
+                      '[data-testid="ux-labels-values--shipping"]',
+                      '.d-shipping-minview'],
+      // Postage is a real part of what a card costs and eBay states it per
+      // listing: a $6.00 card with $5.48 shipping is nearly twice a $6.00 card
+      // without, and no per-marketplace average can tell those apart.
+      //
+      // 0 for "Free shipping" -- a real answer, and distinct from null, which
+      // means the page was not read for it and the standing estimate stands.
+      shippingFrom: (text) => {
+        const s = String(text || '');
+        if (/free\s+(international\s+|standard\s+|expedited\s+)?(shipping|delivery|postage)/i
+              .test(s)) return 0;
+        if (/shipping:?\s*free\b/i.test(s)) return 0;
+        // "Shipping: US $5.48 USPS Ground Advantage" -- the amount follows the
+        // label, and the guard keeps it from reaching across the page to the
+        // next dollar figure it finds.
+        return money(s, /shipping[^$]{0,40}?\$\s?([\d,]+(?:\.\d{2})?)/i, 2) ??
+               // "+$5.48 shipping" -- the tile form, amount first.
+               money(s, /\+\s?\$\s?([\d,]+(?:\.\d{2})?)\s*(?:est\.?\s*)?shipping/i, 2);
+      },
       // eBay's h1 is the listing name, but it opens with a screen-reader-only
       // "Details about" label that textContent picks up. The bold span inside
       // holds the name alone, so it is preferred outright and the h1 is the
@@ -209,8 +230,74 @@
       photoHost: /i\.ebayimg\.com/,
     },
 
-    // Not built yet — see docs/photocard_market_intel_plan.md:
-    //   pocamarket  (KRW)
+    // A structured photocard catalogue rather than a general marketplace: a
+    // listing page names the origin, the group and the member as separate
+    // fields instead of a seller-written sentence.
+    //
+    // It renders as a MOBILE APP FRAME even on desktop, with the marketing
+    // landing page still in the DOM beside it — "The Marketplace for K-Pop
+    // Photocards" in display type. That is not cosmetic: it is the largest
+    // text on the page, so it wins the font-size ranking outright, which is
+    // why `titleReject` carries the landing copy and why titleUnverified is
+    // set below.
+    'pocamarket.com': {
+      code: 'pocamarket',
+      // The site quotes USD to a US buyer — price, shipping and duties all —
+      // so the fee model is in USD and needs no KRW rate. readPrice still
+      // records KRW correctly if the display is ever switched.
+      currency: 'USD',
+      // What priceFrom parses, as distinct from what the marketplace is
+      // declared as. Both are true at once here and conflating them would
+      // stamp a won figure as dollars.
+      nativeCurrency: 'KRW',
+      minorExponent: 2,
+      tiles: 'a[href*="/search/detail/"]',
+      idFrom: (href) => href.match(/\/search\/detail\/(\d+)/)?.[1] || null,
+      urlFor: (id) => `https://pocamarket.com/search/detail/${id}`,
+      detailPath: /\/search\/detail\//,
+      queryParam: 'q',
+      titleScope: [
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'p', 'span', 'div', 'b', 'strong', 'li', 'td',
+      ],
+      // The landing page behind the app frame, plus the frame's own labels.
+      // Secondary by design — see titleCandidates() for the part that works
+      // without depending on any particular language.
+      titleReject:
+        /^(the marketplace|collect verified|check usage guide|upcoming prices|shipping information|ship to|same fee|buy now|add to cart|album|poca ?trust|verified by|save [\d.,]+|duties apply)\b/i,
+      titleOrder: ['scope', 'og', 'doc', 'h1'],
+      // Not yet confirmed against a real page, so every capture reports its
+      // shortlist in the panel rather than presenting a guess as an answer.
+      // Remove this — and set titlePrefer to whatever the readout names — once
+      // the element holding the card name is known.
+      titleUnverified: true,
+      // Numbers come BEFORE the unit here: "7.00 USD", "12,000원".
+      priceFrom: (text) =>
+        money(text, /([\d,]+)\s*원/, 0) ??
+        money(text, /[₩]\s?([\d,]+)/, 0) ??
+        money(text, /([\d,]+)\s*KRW\b/i, 0),
+      usdFrom: (text) => {
+        // Three USD figures sit on one listing page and only the middle one is
+        // the price: "Save 1.40 USD before price increases!" above it and
+        // "Ship to United States from 12.00 USD" below. Taking the first match
+        // would buy the card for its discount.
+        const s = String(text || '')
+          .replace(/\bsave\s+[\d.,]+\s*USD\b/gi, ' ')
+          .replace(/\bfrom\s+[\d.,]+\s*USD\b/gi, ' ');
+        return money(s, /([\d,]+(?:\.\d{2})?)\s*USD\b/i, 2) ??
+               money(s, /\$\s?([\d,]+(?:\.\d{2})?)/, 2);
+      },
+      // NO shippingFrom on purpose. "Ship to United States from 12.00 USD —
+      // same fee up to 40 items" is a per-SHIPMENT cost, not this listing's
+      // postage, and recording it per listing would charge $12 forty times.
+      // It belongs in the fee model as a per_shipment component with
+      // typical_items_per_shipment = 40, which is exactly the Neokyo box case.
+      soldFrom: (text) =>
+        /\bsold\s*out\b|\bunavailable\b|판매완료|품절/i.test(text),
+      // Unverified: the CDN host has not been seen. A wrong guess costs a
+      // missing thumbnail, never a failed capture.
+      photoHost: /pocamarket|cloudfront\.net|amazonaws\.com/i,
+    },
   };
 
   const SITE = SITES[location.hostname] || SITES[location.hostname.replace(/^www\./, '')];
@@ -262,7 +349,17 @@
     if (native !== null && native !== undefined) {
       // Both present: the site is showing its own conversion beside the
       // native price, and that conversion is the rate actually charged.
-      return { price: native, currency: SITE.currency, priceUsd: usd };
+      //
+      // `nativeCurrency` is what priceFrom PARSES, which is not always what
+      // the marketplace is declared as. Pocamarket is declared USD because
+      // that is what it charges a US buyer and what its fee amounts are
+      // entered in, while priceFrom still reads won for when the display is
+      // switched -- and labelling a won figure USD is a 1,300x error.
+      return {
+        price: native,
+        currency: SITE.nativeCurrency || SITE.currency,
+        priceUsd: usd,
+      };
     }
     if (usd !== null && usd !== undefined) {
       return { price: usd, currency: 'USD', priceUsd: null };
@@ -391,6 +488,9 @@
       // When the sale happened, where the tile says so. Null everywhere else,
       // and the capture time stands in.
       soldAt: SITE.soldDateFrom?.(text) ?? null,
+      // What the tile said postage costs. null means the hook found nothing,
+      // which is never the same as free.
+      shipping: SITE.shippingFrom?.(text) ?? null,
       thumbnail: tilePhoto(anchor),
       itemCondition: null,
       category: null,
@@ -724,7 +824,7 @@
     // Every marketplace suffixes its own name onto the document title.
     doc: () =>
       (document.title || '')
-        .replace(/\s*[|\-–]\s*(Mercari|Neokyo|eBay)[^|\-–]*$/i, '')
+        .replace(/\s*[|\-–]\s*(Mercari|Neokyo|eBay|Pocamarket)[^|\-–]*$/i, '')
         .trim(),
   };
 
@@ -817,7 +917,14 @@
       //
       // Computed here rather than in the panel because only this file knows
       // what a given site offers.
-      weak: SITE.titlePrefer ? !titleCandidates()[0]?.preferred : false,
+      //
+      // `titleUnverified` forces it on for a site whose name element has not
+      // been confirmed against a real page yet. A newly added site's title is
+      // a guess that happened to win a ranking, and a guess presenting itself
+      // as an answer is the failure mode four rounds of Neokyo went into.
+      weak: SITE.titleUnverified
+        ? true
+        : SITE.titlePrefer ? !titleCandidates()[0]?.preferred : false,
       // The shortlist it chose from, each with the element it came off. This
       // is what turns "the title is wrong" into a selector rather than into
       // another round of guessing.
@@ -851,6 +958,13 @@
       ...readPrice(scopedPrice, body),
       status: sold ? 'trading' : 'on_sale',
       soldAt: sold ? SITE.soldDateFrom?.(body) ?? null : null,
+      // The shipping row first, the whole page after it: a listing page is
+      // full of dollar figures and the label-scoped read is the only one that
+      // reliably belongs to postage.
+      shipping: SITE.shippingFrom
+        ? SITE.shippingFrom(scopedText(SITE.shippingScope) || '') ??
+          SITE.shippingFrom(body)
+        : null,
       thumbnail: detailPhoto(),
       itemCondition: null,
       category: null,
@@ -898,7 +1012,7 @@
 
     // Anything the fiber left empty, take from the page.
     const borrowed = [];
-    for (const k of ['name', 'thumbnail', 'price', 'status']) {
+    for (const k of ['name', 'thumbnail', 'price', 'status', 'shipping']) {
       const missing =
         merged[k] === null || merged[k] === undefined || merged[k] === '';
       if (missing && scraped && scraped[k] !== null && scraped[k] !== '') {

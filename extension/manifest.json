@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CollectCore Market Capture",
   "version": "0.1.0",
-  "description": "Capture photocard listing data from Mercari, Neokyo and eBay while browsing. Dormant until switched on.",
+  "description": "Capture photocard listing data from Mercari, Neokyo, eBay and Pocamarket while browsing. Dormant until switched on.",
   "permissions": [
     "storage",
     "sidePanel"
@@ -12,6 +12,8 @@
     "https://neokyo.com/*",
     "https://www.neokyo.com/*",
     "https://www.ebay.com/*",
+    "https://pocamarket.com/*",
+    "https://*.pocamarket.com/*",
     "https://u-mercari-images.mercdn.net/*",
     "https://i.ebayimg.com/*",
     "https://static.mercdn.net/*",
@@ -34,7 +36,9 @@
         "https://www.mercari.com/*",
         "https://neokyo.com/*",
         "https://www.neokyo.com/*",
-        "https://www.ebay.com/*"
+        "https://www.ebay.com/*",
+        "https://pocamarket.com/*",
+        "https://*.pocamarket.com/*"
       ],
       "js": [
         "content/capture.js"

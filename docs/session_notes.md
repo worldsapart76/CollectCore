@@ -6,6 +6,69 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-30 (US CDT) — eBay + Pocamarket parsers, and per-listing postage
+
+All four declared sources now have capture parsers. Two of the three things
+built here came out of eBay being unlike anything already handled.
+
+**eBay** (build-log entry 17). Both sides, server-rendered.
+
+- **"Sold" alone is dangerous here.** A *live* eBay tile advertises how many
+  have gone — `3 sold`, `1,204 sold` — so Mercari's bare-word test would file
+  every popular active listing as a sale at its asking price. The state test
+  requires a **date**. "Ended" is excluded for the same reason: a listing
+  pulled by its seller, or an auction closing with no bids, sold for nothing.
+- **The sale states its own date, and that becomes `observed_at`.** No other
+  source tells us when. A sold search returns months of sales in one sweep, and
+  stamping them all with capture time would make a March sale read as a day
+  old — exactly what the grid colours staleness on. It also makes re-capture
+  idempotent, since sightings key on `(listing, observed_at)`.
+- **Foreign prices are refused, not converted.** `C $18.00` read as eighteen US
+  dollars is a silent ~30% error that looks entirely ordinary on screen.
+
+**Per-listing postage** (entry 18), reported as a gap on a captured eBay lot.
+`mkt_sighting` gained `shipping_cents` / `shipping_usd`. Where the listing
+states postage it **replaces** the fee model's shipping line rather than adding
+to it — the standing estimate exists because the per-listing figure is usually
+unavailable, and charging both double-counts. `0` is a real answer ("free
+shipping") and switches the estimate off; `NULL` means unread and the estimate
+stands. A *per_shipment* line is never replaced: consolidated freight is a
+different cost from a listing's own postage, and it enters `total_fixed` as a
+share of a box rather than at face value. The comp view and the lot header both
+say which figure is in there.
+
+**Pocamarket** (entry 18), awkward in three ways:
+
+- It renders as a **mobile app frame even on desktop**, with the marketing
+  landing page still in the DOM beside it in display type — so the largest text
+  on the page is "The Marketplace for K-Pop Photocards" and it wins the
+  font-size ranking outright.
+- **Three USD figures on one listing page**, only the middle one the price: a
+  "Save 1.40 USD" discount above and "Ship to United States from 12.00 USD"
+  below. First-match buys the card for its discount; largest-match buys it for
+  the postage.
+- **Declared USD, parses won.** It quotes a US buyer in dollars throughout, so
+  that is what its fee amounts are entered in — but the won parser stays for a
+  switched display. `nativeCurrency` keeps them apart; without it a won figure
+  is stamped USD, a ~1,300x error. The seeded row moved KRW → USD under a
+  migration guarded on nothing having been captured there.
+
+Its postage is **per shipment** ("same fee up to 40 items"), so it is
+deliberately not captured per listing — that belongs in the fee model as a
+`per_shipment` component with `typical_items_per_shipment = 40`.
+
+Also new: **`titleUnverified`**, which forces the panel's page-read diagnostic
+on for a site whose name element has not been confirmed against a live page. A
+new site's title is a guess that won a ranking, and a guess presenting itself as
+an answer is what four rounds of Neokyo went into. Pocamarket carries the flag.
+
+107 cases in `tools/test_capture_parsing.mjs`; 5 more in
+`tools/test_market_grid.py` for the postage arithmetic.
+
+**Next:** confirm Pocamarket's title element from a capture's `page read:`
+readout, then set `titlePrefer` and drop the flag. After that, v2 step 3 —
+per-copy cost basis and the ledger.
+
 ### 2026-08-30 (US CDT) — v2 step 2 BUILT: the lot analyzer
 
 `GET /market/lots` and `/market/lots/{id}`, POST/PATCH/DELETE on a lot's lines,
@@ -52,7 +115,7 @@ Schema: `mkt_listing_line.value_cents` and `.disposition`, additive migrations.
 `tools/test_lot_analyzer.py` — 56 cases on a fresh DB with real photocard rows
 across both eras; the grid's 30 still pass.
 
-**Next:** v2 step 3, per-copy cost basis and the ledger — the largest of the
+**Next (superseded — see the entry above):** v2 step 3, per-copy cost basis and the ledger — the largest of the
 three, and the only thing that sharpens `paid` for cards held in multiples.
 Steps 1 and 2 are first cuts to review against real captured lots first.
 

@@ -343,5 +343,91 @@ eq('a live listing has no sale date', eb.soldDateFrom('Buy It Now 3 sold'), null
 eq('a made-up month is refused', eb.soldDateFrom('Sold Foo 12, 2025'), null);
 eq('other sites do not claim one', nk.soldDateFrom, undefined);
 
+
+console.log('--- eBay: postage is per listing, and null is not free ---');
+// A $6.00 card with $5.48 postage costs nearly twice a $6.00 card without, and
+// no per-marketplace average can tell those apart.
+eq('the listing page row', eb.shippingFrom('Shipping: US $5.48 USPS Ground Advantage'),
+   548);
+eq('the tile form', eb.shippingFrom('$12.99 +$4.50 shipping'), 450);
+eq('estimated on a tile', eb.shippingFrom('$12.99 +$4.50 est. shipping'), 450);
+// 0 and null are different answers: 0 switches the standing estimate off, null
+// leaves it standing.
+eq('free shipping is zero', eb.shippingFrom('Free shipping'), 0);
+eq('free international', eb.shippingFrom('Free International Shipping'), 0);
+eq('the label form of free', eb.shippingFrom('Shipping: Free'), 0);
+eq('unread is null, not free', eb.shippingFrom('Buy It Now'), null);
+// The guard on the label-scoped pattern: without it the read reaches across
+// the page and returns the next dollar figure it can find.
+eq('does not reach across the page for a price',
+   eb.shippingFrom('Shipping and returns and payments and delivery and more $99.00'),
+   null);
+eq('the item price is not the postage', eb.shippingFrom('US $6.00 or Best Offer'), null);
+eq('other sites do not claim one', nk.shippingFrom, undefined);
+
+
+console.log('--- Pocamarket: three USD figures, one of them the price ---');
+const PM = loadFor('pocamarket.com', '/search/detail/498832');
+const pm = SITES['pocamarket.com'];
+// The listing page reads, top to bottom:
+//   Save 1.40 USD before price increases!
+//   7.00 USD
+//   Ship to United States from 12.00 USD
+// Taking the first match buys the card for its discount; taking the largest
+// buys it for the postage.
+const PM_PAGE =
+  'Album THIS & THAT THIS VER. Stray Kids | HYUNJIN ' +
+  'Save 1.40 USD before price increases! 7.00 USD Upcoming Prices ' +
+  'Shipping Information Ship to United States from 12.00 USD ' +
+  'Same fee up to 40 items duties apply at shipping checkout';
+eq('the price, not the discount and not the postage',
+   PM.readPrice(null, PM_PAGE), { price: 700, currency: 'USD', priceUsd: null });
+eq('the discount alone is not a price', pm.usdFrom('Save 1.40 USD'), null);
+eq('the shipping estimate alone is not a price',
+   pm.usdFrom('Ship to United States from 12.00 USD'), null);
+eq('numbers come before the unit', pm.usdFrom('7.00 USD'), 700);
+
+console.log('--- Pocamarket: won, if the display is ever switched ---');
+// The currency follows the PAGE, not the marketplace row -- the same rule that
+// made Neokyo work once its selector was set to USD.
+eq('won suffix', pm.priceFrom('12,000\uc6d0'), 12000);
+eq('won symbol', pm.priceFrom('\u20a912,000'), 12000);
+eq('spelled out', pm.priceFrom('12,000 KRW'), 12000);
+eq('KRW has no minor unit', pm.priceFrom('12,000 KRW'), 12000);
+eq('dollars are not won', pm.priceFrom('7.00 USD'), null);
+eq('won wins when both are shown',
+   PM.readPrice('12,000\uc6d0 (7.00 USD)'),
+   { price: 12000, currency: 'KRW', priceUsd: 700 });
+
+console.log('--- Pocamarket: ids and URLs ---');
+eq('detail id', pm.idFrom('/search/detail/498832'), '498832');
+eq('absolute href', pm.idFrom('https://pocamarket.com/search/detail/498832'),
+   '498832');
+eq('canonical URL', pm.urlFor('498832'),
+   'https://pocamarket.com/search/detail/498832');
+eq('a search link is not a listing', pm.idFrom('/search?q=hyunjin'), null);
+
+console.log('--- Pocamarket: the landing page behind the app frame ---');
+// It renders as a mobile frame on desktop with the marketing page still in the
+// DOM beside it, in display type -- so it wins the font-size ranking outright.
+const PM2 = loadFor('pocamarket.com', '/search/detail/498832', [
+  ['The Marketplace for K-Pop Photocards', null, 48],
+  ['Collect Verified Photocards of Your Bias on Pocamarket.', null, 20],
+  ['THIS & THAT THIS VER.', null, 18],
+]);
+eq('the landing headline cannot win',
+   PM2.TITLE_SOURCES.scope(), 'THIS & THAT THIS VER.');
+eq('and its subhead cannot either',
+   PM2.TITLE_SOURCES.scope() === 'Collect Verified Photocards of Your Bias on Pocamarket.',
+   false);
+// Until the real name element is confirmed against a live page, every capture
+// reports its shortlist rather than presenting a guess as an answer.
+eq('the title is marked unverified', pm.titleUnverified, true);
+
+console.log('--- Pocamarket: postage is per SHIPMENT, so it is not read ---');
+// "Ship to United States from 12.00 USD -- same fee up to 40 items" is a box
+// cost. Recording it per listing would charge $12 forty times.
+eq('no per-listing shipping hook', pm.shippingFrom, undefined);
+
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

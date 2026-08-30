@@ -19,7 +19,8 @@ import {
 // in manifest.json -- a host listed there but missing here loads the script and
 // then never gets told the session is active, so the page comes up with no
 // buttons and nothing says why.
-const CAPTURE_HOSTS = /^https:\/\/(www\.)?(mercari\.com|neokyo\.com|ebay\.com)\//;
+const CAPTURE_HOSTS =
+  /^https:\/\/(www\.)?(mercari\.com|neokyo\.com|ebay\.com|pocamarket\.com)\//;
 
 const ACTIVE_TABS = 'activeTabs';
 const ARMED_CARD = 'armedCard';
@@ -303,6 +304,10 @@ async function capture({
     // the price IS the USD figure and repeating it here would be a conversion
     // of nothing.
     priceUsd: item.priceUsd ?? null,
+    // What the listing itself said postage costs, same currency and minor
+    // units as priceCents. null is "not read", 0 is "free shipping" -- the
+    // server treats them differently and conflating them understates cost.
+    shippingCents: item.shipping ?? null,
     listingState: listingState(item.status),
     rawStatus: item.status,
   };

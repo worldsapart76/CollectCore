@@ -109,6 +109,9 @@ class Sighting(BaseModel):
     # USD figure alongside the yen, and that is the amount actually charged, so
     # it beats any rate we would look up.
     priceUsd: Optional[int] = None
+    # What the page said shipping costs, same currency and minor units as
+    # priceCents. None means "not read"; 0 means the listing says free.
+    shippingCents: Optional[int] = None
 
 
 # Marketplaces are not consistent about scalar types, and pydantic v2 does not
@@ -323,9 +326,10 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                 text(
                     "INSERT OR IGNORE INTO mkt_sighting ("
                     " listing_id, observed_at, listing_state, raw_status,"
-                    " price_cents, currency, price_usd, fx_rate, fx_source) "
+                    " price_cents, currency, price_usd, fx_rate, fx_source,"
+                    " shipping_cents, shipping_usd) "
                     "VALUES (:id, :at, :state, :raw, :price, :cur, :usd,"
-                    " :fx, :fxs)"
+                    " :fx, :fxs, :ship, :shipusd)"
                 ),
                 {
                     "id": listing_id,
@@ -337,6 +341,11 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     "usd": usd,
                     "fx": fx,
                     "fxs": fx_source,
+                    "ship": s.shippingCents,
+                    # Converted with the SAME rate as the price it belongs to,
+                    # including the marketplace's own implied rate -- shipping
+                    # and price are quoted together and must not drift apart.
+                    "shipusd": to_usd_minor(s.shippingCents, currency, fx),
                 },
             )
             sightings_new += res.rowcount or 0
@@ -784,9 +793,8 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         text(
             "SELECT l.listing_id, l.marketplace, l.listing_url, l.title_raw,"
             " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
-            " s.observed_at,"
-            " (SELECT COUNT(*) FROM mkt_listing_line x"
-            "   WHERE x.listing_id = l.listing_id) AS line_count "
+            " s.observed_at, s.shipping_cents, s.shipping_usd,"
+            f" {UNITS_SQL} AS line_count "
             "FROM mkt_listing l "
             "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
             "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
@@ -812,7 +820,7 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
             buy_fees[code] = fee_model(db, code, "buy")
         bfm = buy_fees[code]
         n = max(1, r["line_count"] or 1)
-        landed = landed_cost(r["price_usd"], bfm)
+        landed = landed_cost(r["price_usd"], bfm, r["shipping_usd"])
         buy_options.append({
             **dict(r),
             "landed_cents": landed,
@@ -1221,7 +1229,8 @@ def fee_model(db, marketplace: str, side: str = "sell",
     per_box_items = (mrow[2] if mrow else None) or None
 
     parts = db.execute(text(
-        "SELECT component_id, label, pct, fixed_minor, scope FROM mkt_fee_component "
+        "SELECT component_id, label, pct, fixed_minor, scope, seed_key "
+        "FROM mkt_fee_component "
         "WHERE marketplace_code = :m AND side = :s AND is_active = 1 "
         "ORDER BY sort_order, label"
     ), {"m": marketplace, "s": side}).mappings().all()
@@ -1300,18 +1309,53 @@ def net_proceeds(gross_cents: Optional[int], fm: Dict[str, Any],
     return int(round(gross_cents * (1.0 - pct) - fixed))
 
 
-def landed_cost(price_cents: Optional[int], fm: Dict[str, Any]) -> Optional[int]:
+def _shipping_fixed_usd(fm: Dict[str, Any]) -> int:
+    """The fee model's own shipping estimate, in USD minor units.
+
+    Only correct to subtract directly when the marketplace already reports in
+    USD -- the same restriction net_proceeds works under, for the same reason.
+    """
+    if fm["currency"] != "USD":
+        return 0
+    return sum(
+        c["fixed_minor"] or 0
+        for c in fm.get("components", [])
+        # per_item only. A per_shipment shipping line is the freight cost of a
+        # consolidated box (Neokyo's ¥6,700), which a listing's own postage
+        # quote does not replace and never covers -- and it enters total_fixed
+        # as a share of the box, not at face value, so subtracting it whole
+        # would take off more than was ever added.
+        if c.get("scope") != "per_shipment"
+        and (c.get("seed_key") in ("buy_ship", "sell_ship")
+             or "shipping" in (c["label"] or "").lower())
+    )
+
+
+def landed_cost(price_cents: Optional[int], fm: Dict[str, Any],
+                shipping_cents: Optional[int] = None) -> Optional[int]:
     """What a purchase at `price_cents` actually costs, all in.
 
     The buy-side mirror of net_proceeds, and what makes "is Mercari US a better
     deal than Neokyo for this card" answerable: both sides reduce to a USD
     number that includes their own fees, shipping and duty.
+
+    `shipping_cents` is what the LISTING said postage costs, in USD. Where it is
+    known it REPLACES the fee model's shipping line rather than adding to it --
+    the standing figure exists precisely because the per-listing one is usually
+    unavailable, and charging both double-counts. 0 is a real answer ("free
+    shipping") and switches the estimate off exactly as a $5.48 would; None
+    means the page was not read for it and the estimate stands.
+
+    Not a percentage: postage does not scale with price. A $6 card with $5.48
+    postage costs nearly twice a $6 card without, and no per-marketplace
+    average can tell those apart.
     """
     if price_cents is None:
         return None
-    return int(round(
-        price_cents * (1.0 + fm["total_pct"]) + (fm.get("total_fixed_usd") or 0)
-    ))
+    fixed = fm.get("total_fixed_usd") or 0
+    if shipping_cents is not None:
+        fixed = fixed - _shipping_fixed_usd(fm) + shipping_cents
+    return int(round(price_cents * (1.0 + fm["total_pct"]) + fixed))
 
 
 def list_price_for(target_net_cents: int, fm: Dict[str, Any]) -> Optional[int]:
@@ -1610,6 +1654,7 @@ def _buy_options(db, ids: str):
     rows = db.execute(text(
         "SELECT ln.item_id, l.listing_id, l.marketplace, l.listing_url,"
         " s.price_cents, s.currency, s.price_usd, s.observed_at,"
+        " s.shipping_cents, s.shipping_usd,"
         f" {UNITS_SQL} AS line_count "
         "FROM mkt_listing l "
         "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
@@ -1631,7 +1676,7 @@ def _buy_options(db, ids: str):
         code = r["marketplace"]
         if code not in fees:
             fees[code] = fee_model(db, code, "buy")
-        landed = landed_cost(r["price_usd"], fees[code])
+        landed = landed_cost(r["price_usd"], fees[code], r["shipping_usd"])
         if landed is None:
             continue
         n = max(1, r["line_count"] or 1)
@@ -1644,6 +1689,11 @@ def _buy_options(db, ids: str):
             "line_count": n,
             "landed_cents": landed,
             "per_card_cents": int(round(landed / n)),
+            # USD, and named for it. The native figure is shipping_cents and
+            # printing THAT with a dollar sign is the currency bug this
+            # module has already shipped three times.
+            "shipping_usd": r["shipping_usd"],
+            "shipping_known": r["shipping_usd"] is not None,
             "observed_at": r["observed_at"],
         }
         target = best_single if n == 1 else best_lot
@@ -1967,7 +2017,9 @@ def _lot_listings(db, listing_id: Optional[int] = None):
         " (SELECT s.price_usd FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
         "   ORDER BY s.observed_at DESC LIMIT 1) AS price_usd,"
         " (SELECT s.observed_at FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
-        "   ORDER BY s.observed_at DESC LIMIT 1) AS observed_at "
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS observed_at,"
+        " (SELECT s.shipping_usd FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS shipping_usd "
         "FROM mkt_listing l "
         f"WHERE ({UNITS_SQL} > 1 OR l.is_lot = 1){one} "
         "ORDER BY l.last_seen_at DESC"
@@ -1984,7 +2036,8 @@ def _analyze_lot(db, listing, ladder, wanted, buy_fees,
     code = listing["marketplace"]
     if code not in buy_fees:
         buy_fees[code] = fee_model(db, code, "buy")
-    landed = landed_cost(listing["price_usd"], buy_fees[code])
+    landed = landed_cost(listing["price_usd"], buy_fees[code],
+                         listing["shipping_usd"])
 
     rows = db.execute(text(
         "SELECT line_id, line_type, item_id, label, qty, value_cents, disposition "
@@ -2124,6 +2177,11 @@ def _analyze_lot(db, listing, ladder, wanted, buy_fees,
         "price_usd": listing["price_usd"],
         "observed_at": listing["observed_at"],
         "landed_cents": landed,
+        # A lot's postage is a real part of what it costs, and on eBay it is
+        # stated per listing. USD, like every other figure on this response;
+        # None means the page was not read for it and the marketplace
+        # estimate is standing in.
+        "shipping_usd": listing["shipping_usd"],
         "units": units,
         "n_lines": len(lines),
         "unidentified_units": sum(ln["qty"] for ln in lines
