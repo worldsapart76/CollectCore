@@ -6,6 +6,43 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-30 (US CDT) — v2 step 1 BUILT: the card grid is the front door
+
+`GET /market/grid` plus `POST /market/listings/{id}/outcome`, and the Market
+page now leads with a sortable grid instead of a card list. The per-card comp
+view survives as its drill-down, which is the inversion v2 is about: you no
+longer have to already know which card you came to look up.
+
+- **Nine columns**, default sort arb-margin descending. Buy is deliberately
+  **two** columns — cheapest single and cheapest per-card inside a lot — with
+  the lot's full commitment in the tooltip, since acting on a $12.50 per-card
+  figure inside an 8-card lot costs $118.
+- **Nulls sort last in both directions.** A card with no margin is an unknown,
+  not the worst margin; letting unknowns win either end of the sort buries
+  exactly the rows the grid exists to surface.
+- **Comps render per source with an age**, amber past a fortnight — an
+  "active" listing that old may simply be gone and the row would rank on a
+  price nobody can pay. Sold medians built on fewer than three comps get the
+  same treatment.
+- **Labels are rebuilt from the library**, not read off `mkt_listing_line`,
+  which holds whatever the label was when captured. A card renamed since would
+  otherwise appear under its old name in a view whose whole job is browsing.
+- **Sold and gone are separate outcomes.** Sold takes a price and becomes a
+  real comp; gone only removes a buying option. A sale with no price is refused
+  by the server rather than guessed — a proxy listing that vanishes says
+  nothing about what it fetched, and a guessed price becomes a comp and drags
+  the median. Both set `delisted_at`, now filtered in all three places that
+  read buy options.
+- Scope is cards with market data **plus every Wanted card**, including bare
+  ones — those being the reminder of where to browse next. Not the whole
+  catalog: 11,347 rows in a table with no virtualization is not a view.
+
+`tools/test_market_grid.py` — 30 cases on a fresh DB built with real photocard
+rows (groups, members, origins, copies), so a wrong join fails the test rather
+than reaching the screen.
+
+**Next:** v2 step 2, the lot analyzer.
+
 ### 2026-08-30 (US CDT) — Market workspace v2 DESIGNED (no code)
 
 Deliberate pause to redesign before building further. The v1 comp view answers

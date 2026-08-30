@@ -1413,7 +1413,7 @@ leaking into a metric that is supposed to be about cards.
 
 ---
 
-## v2 — the market workspace (DESIGNED 2026-08-30, NOT BUILT)
+## v2 — the market workspace (DESIGNED 2026-08-30; step 1 BUILT 2026-08-30)
 
 The v1 comp view answers *"what is this one card worth?"* and answers it well.
 It is not the destination, and the plan should stop implying it is.
@@ -1614,9 +1614,13 @@ Marking **sold** needs no new column: it is a sighting with
 
 ### Build order
 
-1. **Card grid + sold/gone marking.** Every value in the grid is computable
-   from data already held. The marking goes in alongside it because the grid's
-   numbers decay without it.
+1. **Card grid + sold/gone marking — BUILT 2026-08-30.** `GET /market/grid`
+   and `POST /market/listings/{id}/outcome`; the grid is now the landing view
+   and the comp view its drill-down. Sorted by arb margin descending, nulls
+   last in both directions — a card with no margin is an unknown, not the worst
+   margin, and letting unknowns win either end buries the rows the grid exists
+   to surface. Stale sources (>14d) and thin sold counts (<3) render amber.
+   `tools/test_market_grid.py`, 30 cases on a fresh DB with real photocard rows.
 2. **Lot analyzer.** Value-weighted allocation, non-card lines, keep/flip, the
    residual line.
 3. **Per-copy basis (the ledger).** Last. It only sharpens `paid` for cards
