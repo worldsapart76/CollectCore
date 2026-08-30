@@ -67,10 +67,9 @@
       queryParam: 'keyword',
       // The listing name is NOT the h1, the og:title or the document title —
       // all three say "Item Details", Neokyo's generic page name, which is how
-      // every early capture ended up filed under it. Nor is it a heading, and
-      // nor does it carry a class containing "title" or "name".
+      // every early capture ended up filed under it.
       //
-      // So this net is deliberately broad. Narrow selectors returned a
+      // This net is deliberately broad. Narrow selectors returned a
       // cookie-consent banner and a mobile nav link; the ranking in
       // titleCandidates() is what narrows now, and this only has to make sure
       // the right element is in the room to be ranked.
@@ -78,6 +77,24 @@
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'p', 'span', 'div', 'b', 'strong', 'a', 'li', 'td',
       ],
+      // The listing name, from the page source:
+      //
+      //   <h6 class="font-gothamRounded mb-0 translate">straykids ヒョンジン
+      //   kms 樂star 店舗特典</h6>
+      //
+      // An h6 — which is why h1-h5 found nothing and the ranking was picking
+      // between a cookie banner and a nav link.
+      //
+      // `translate` is Neokyo's own marker for text it machine-translates,
+      // which is to say text the SELLER wrote rather than text the site did.
+      // That is exactly the distinction being reached for, stated by the site
+      // itself, so it beats any heuristic about size or position. A heading
+      // carrying it is preferred outright; the size ranking stays underneath
+      // as the fallback for when the class is not there.
+      titlePrefer: [
+        'h1.translate', 'h2.translate', 'h3.translate',
+        'h4.translate', 'h5.translate', 'h6.translate',
+      ].join(','),
       // A secondary filter only. It is English, and the page can be
       // machine-translated or set to another language, so nothing may DEPEND
       // on it — see titleCandidates() for the part that actually works.
@@ -518,15 +535,29 @@
       // it, and reporting both fills the shortlist with duplicates of one node.
       if (el.children?.length) continue;
       const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      // Too short to be a listing name; long enough to be a whole paragraph.
-      if (text.length < 8 || text.length > 160) continue;
-      if (SITE.titleReject?.test(text)) continue;
-      // The price is the biggest text on the page and would otherwise win the
-      // ranking outright. Anything short enough to be only a price is not a
-      // title -- a listing whose whole name is a price does not exist.
-      if (text.length <= 26 && SITE.priceFrom?.(text) !== null) continue;
+      if (!text || text.length > 160) continue;
+
+      // The site's own marker for seller-written text. Where it exists it is
+      // not a hint to be weighed against others -- it is the answer, so the
+      // heuristics below are skipped rather than allowed to veto it. A short
+      // title is still a title.
+      const preferred =
+        SITE.titlePrefer && el.matches?.(SITE.titlePrefer) ? 1 : 0;
+
+      if (!preferred) {
+        // Too short to be a listing name.
+        if (text.length < 8) continue;
+        if (SITE.titleReject?.test(text)) continue;
+        // The price is the biggest text on the page and would otherwise win
+        // the ranking outright. Anything short enough to be only a price is
+        // not a title -- a listing whose whole name is a price does not exist.
+        if (text.length <= 26 && SITE.priceFrom?.(text) !== null) continue;
+      }
       out.push({
         text,
+        // Sorted above everything else: a fact the page states about itself
+        // beats an inference drawn from how it looks.
+        preferred,
         size: fontSize(el),
         // Recorded for the panel's diagnostic: knowing WHICH element held the
         // name is the difference between fixing this and guessing at it again.
@@ -545,7 +576,12 @@
     // been translated into. Length breaks the tie among same-size headings,
     // where a section heading is a couple of words and a listing name is a
     // sentence of specifics.
-    out.sort((a, b) => b.size - a.size || b.text.length - a.text.length);
+    out.sort(
+      (a, b) =>
+        b.preferred - a.preferred ||
+        b.size - a.size ||
+        b.text.length - a.text.length
+    );
     titleMemo = { path: location.pathname, list: out };
     return out;
   }
@@ -651,7 +687,11 @@
       // another round of guessing.
       cands: titleCandidates()
         .slice(0, 4)
-        .map((c) => `${c.where} @${c.size}px: ${c.text.slice(0, 40)}`),
+        .map(
+          (c) =>
+            `${c.where} @${c.size}px${c.preferred ? ' *' : ''}: ` +
+            c.text.slice(0, 40)
+        ),
       h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
       og: (TITLE_SOURCES.og() || '').slice(0, 60),
       doc: (TITLE_SOURCES.doc() || '').slice(0, 60),

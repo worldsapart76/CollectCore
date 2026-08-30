@@ -168,12 +168,23 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
 - **The unit is spelled out.** A product page reads `3399 Yen`, not `¥3399` and
   not `3399円`, with `Approximately : US$ 21.07` beneath it. Looking only for
   the symbols found no price at all.
-- **Its listing name is not in any of the obvious places.** The `h1` is empty,
-  and the `og:title` and document title both say *Item Details* — Neokyo's
-  generic page name — which is what every early capture got filed under. It is
-  not a heading, and it carries no class containing "title" or "name".
+- **Its listing name is an `h6`,** and the page's own source names it for you:
 
-  So the net is cast very wide and the narrowing is done by **ranking**:
+  ```html
+  <h6 class="font-gothamRounded mb-0 translate">straykids ヒョンジン kms 樂star 店舗特典</h6>
+  ```
+
+  `translate` is Neokyo's marker for text it machine-translates — seller
+  content, not site furniture — which is exactly the distinction being reached
+  for, stated by the site itself. A heading carrying it wins outright and the
+  heuristics below are skipped rather than allowed to veto it.
+
+  Everything else on the page misleads: the `h1` is empty, and `og:title` and
+  the document title both say *Item Details*, which is what every early capture
+  got filed under.
+
+  The ranking underneath is the fallback for when the marker is not there. The
+  net is cast very wide and narrowed by:
 
   1. Drop anything inside site chrome — `header`, `nav`, `footer`, modals,
      banners, breadcrumbs — matched by class and id as well as by tag, because

@@ -39,18 +39,22 @@ function loadFor(hostname, pathname, headings = []) {
     // the part that has to keep working when the page is translated.
     querySelectorAll: () =>
       headings.map((h) => {
-        // [text, kind, fontSizePx]. `kind: 'chrome'` puts the element inside
-        // the site's header/nav/footer, which titleCandidates() excludes
-        // structurally -- the part that has to keep working when the page is
-        // machine-translated and no English string matches anything.
+        // [text, kind, fontSizePx, selectorItMatches].
+        //
+        // `kind: 'chrome'` puts the element inside the site's
+        // header/nav/footer, which titleCandidates() excludes structurally --
+        // the part that has to keep working when the page is machine-
+        // translated and no English string matches anything. `kind:
+        // 'translate'` gives it Neokyo's own seller-content marker.
         const [text, kind, px] = Array.isArray(h) ? h : [h, null, 16];
         return {
           textContent: text,
-          tagName: 'DIV',
-          className: '',
+          tagName: kind === 'translate' ? 'H6' : 'DIV',
+          className: kind === 'translate' ? 'font-gothamRounded mb-0 translate' : '',
           children: [],
           __px: px ?? 16,
           closest: (sel) => (kind === 'chrome' ? { sel } : null),
+          matches: (sel) => kind === 'translate' && sel.includes('.translate'),
         };
       }),
     getElementById: () => null,
@@ -174,6 +178,31 @@ const NK6 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397
 ]);
 eq('holds with nothing in English',
    NK6.TITLE_SOURCES.scope(), 'Stray Kids ヒョンジン KMS 楽天ブックス 購入特典');
+
+// The page as it really is. From the source:
+//   <h6 class="font-gothamRounded mb-0 translate">straykids ヒョンジン kms
+//   樂star 店舗特典</h6>
+// `translate` is Neokyo's marker for text it machine-translates -- seller
+// content, not site furniture -- so it settles the question outright.
+const NK7 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['This website uses cookies', 'chrome', 20],
+  ['straykids ヒョンジン kms 樂star 店舗特典', 'translate', 16],
+  ['3399 Yen', null, 28],
+  ['Item Price on Rakuma', null, 20],
+  ['Purchase Request Form', null, 20],
+]);
+eq('the marked heading wins even at the smallest type',
+   NK7.TITLE_SOURCES.scope(), 'straykids ヒョンジン kms 樂star 店舗特典');
+
+// A short title would be filtered out by the length floor if the marker did
+// not exempt it. The floor exists to keep section headings out of an UNMARKED
+// shortlist; it must never veto the site's own answer.
+const NK8 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['トレカ', 'translate', 16],
+  ['Purchase Request Form', null, 20],
+]);
+eq('a short marked title is still the title',
+   NK8.TITLE_SOURCES.scope(), 'トレカ');
 eq('mercari has no scope, so h1 first', mus.titleOrder ?? ['h1', 'og', 'doc'], ['h1', 'og', 'doc']);
 
 console.log('--- sold state ---');
