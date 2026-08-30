@@ -87,7 +87,12 @@ function row(rec) {
 
   const img = document.createElement('img');
   img.className = 'thumb';
-  img.src = rec.thumbnailUrl || '';
+  // `src = ''` resolves to the panel's own URL and renders as a BROKEN image,
+  // which is a different claim: broken says the photo was captured and will not
+  // load, missing says none was read. They point at different bugs, so they
+  // must not look alike. Also covers a URL that 404s later, which is the same
+  // situation arriving a different way.
+  setThumb(img, rec.thumbnailUrl);
   img.alt = '';
   img.loading = 'lazy';
 
@@ -392,6 +397,26 @@ async function renderCandidates() {
   $('assoc-grid').replaceChildren(...res.cards.map(cardTile));
 }
 
+// A thumbnail, or a visibly deliberate blank.
+//
+// Identification is the job this image does, so its absence matters and has to
+// be legible: "no photo" is a parser that read nothing, "broken" is a CDN that
+// stopped serving. The dotted placeholder says which without a console.
+function setThumb(img, url) {
+  img.classList.toggle('thumb-empty', !url);
+  img.title = url ? '' : 'No photo was read from the page';
+  if (!url) {
+    img.removeAttribute('src');
+    return;
+  }
+  img.src = url;
+  img.onerror = () => {
+    img.classList.add('thumb-empty');
+    img.title = 'The photo was captured but no longer loads';
+    img.removeAttribute('src');
+  };
+}
+
 function renderLines() {
   const lines = current.lines || [];
   const wrap = $('assoc-lines');
@@ -399,18 +424,27 @@ function renderLines() {
     wrap.replaceChildren();
     return;
   }
-  const els = lines.map((line) => {
+  const els = lines.map((line, i) => {
     const el = document.createElement('span');
-    el.className = 'line';
-    el.textContent = line.label;
+    el.className = line.lineType === 'card' ? 'line' : 'line line-other';
+    el.textContent =
+      line.label || (line.lineType === 'unidentified' ? 'unidentified' : 'item');
+    if (line.qty > 1) el.append(tag(`×${line.qty}`));
+    // Shown because it is the number that decides how much of the lot's cost
+    // this line carries, and a value typed in the wrong units is invisible
+    // otherwise.
+    if (line.valueCents != null) el.append(tag(money(line.valueCents, 'USD')));
+
     const x = document.createElement('button');
     x.type = 'button';
     x.className = 'line-x';
     x.textContent = '×';
-    x.title = 'Remove this card';
+    x.title = 'Remove this line';
     x.addEventListener('click', async () => {
-      await send({ type: 'UNASSOCIATE', key: current.key, cardId: line.cardId });
-      current.lines = lines.filter((l) => l.cardId !== line.cardId);
+      // By POSITION, not by cardId: two non-card lines are two different
+      // things, and a card id cannot address either of them.
+      await send({ type: 'REMOVE_LINE', key: current.key, index: i });
+      current.lines = lines.filter((_, j) => j !== i);
       renderLines();
     });
     el.append(x);
@@ -418,6 +452,60 @@ function renderLines() {
   });
   wrap.replaceChildren(...els);
 }
+
+// Value is asked for HERE rather than left to the analyzer because it is a
+// judgement made while looking at the listing -- the photos, the condition, the
+// set it belongs to. The ladder can price a card from its own comps; nothing
+// can tell it what an album is worth.
+function askValue(what) {
+  const entered = prompt(
+    `What would the ${what} sell for, in dollars, AFTER selling fees?\n\n` +
+    `This is its share of the lot's value, which is what decides how much of ` +
+    `the lot's cost it carries.\n\nLeave empty to set it later in the app.`
+  );
+  if (entered === null) return { cancelled: true };
+  if (!entered.trim()) return { valueCents: null };
+  const dollars = Number(entered);
+  if (!Number.isFinite(dollars) || dollars < 0) {
+    return { error: 'That needs to be a number, and not negative.' };
+  }
+  return { valueCents: Math.round(dollars * 100) };
+}
+
+async function addLine(line) {
+  if (!current) return;
+  await send({ type: 'ADD_LINE', key: current.key, line });
+  current.lines = current.lines || [];
+  current.lines.push({ cardId: null, ...line });
+  if (current.lines.length > 1) {
+    current.isLot = true;
+    $('assoc-lot').checked = true;
+  }
+  renderLines();
+}
+
+$('assoc-noncard').addEventListener('click', async () => {
+  const label = prompt('What is it? (album, photobook, keychain…)');
+  if (!label?.trim()) return;
+  const v = askValue(label.trim());
+  if (v.cancelled) return;
+  if (v.error) return setStatus(v.error);
+  await addLine({
+    lineType: 'non_card', label: label.trim(), qty: 1, valueCents: v.valueCents,
+  });
+});
+
+$('assoc-unknown').addEventListener('click', async () => {
+  const entered = prompt('How many cards in this lot can you not identify?', '1');
+  if (entered === null) return;
+  const qty = Number(entered);
+  if (!Number.isInteger(qty) || qty < 1) {
+    return setStatus('That needs to be a whole number, at least 1.');
+  }
+  // No value asked for: the analyzer prices an unidentified card at its era's
+  // median, which is a better guess than one made from a thumbnail.
+  await addLine({ lineType: 'unidentified', label: null, qty, valueCents: null });
+});
 
 async function associate(card) {
   if (!current) return;
@@ -448,7 +536,7 @@ function openAssociate(rec) {
   $('assoc-open').hidden = false;
   $('assoc-lot').closest('.assoc-actions').hidden = false;
 
-  $('assoc-img').src = rec.thumbnailUrl || '';
+  setThumb($('assoc-img'), rec.thumbnailUrl);
   $('assoc-name').textContent = rec.name || '(untitled)';
   $('assoc-open').href = rec.listingUrl;
   $('assoc-lot').checked = !!rec.isLot;

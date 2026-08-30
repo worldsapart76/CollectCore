@@ -242,6 +242,63 @@ check("delete works", c.delete(f"/market/lots/{lot_id}/lines/{uid}").status_code
 check("gone twice is a 404",
       c.delete(f"/market/lots/{lot_id}/lines/{uid}").status_code, 404)
 
+print("\n--- two creation paths, two lifetimes ---")
+# Ingest replaces a listing's lines wholesale, because the extension holds the
+# user's current answer for what is in it. Unscoped, that also erased a non-card
+# line added in the analyzer -- silently, through a workflow that looks like
+# ordinary re-identification.
+app_line = c.post(f"/market/lots/{lot_id}/lines", json={
+    "line_type": "non_card", "label": "photobook", "qty": 1,
+    "value_cents": 1500}).json()["line_id"]
+c.post("/market/captures", json={"captures": [
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "lot1",
+     "name": "SKZ 3-card set", "capturedAt": "2026-09-06T00:00:00Z",
+     "isLot": True,
+     "lines": [{"lineType": "card", "cardId": 201, "qty": 1},
+               {"lineType": "card", "cardId": 202, "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-06T00:00:00Z", "priceCents": 10000,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+after = c.get(f"/market/lots/{lot_id}").json()["lot"]
+ids = [ln["line_id"] for ln in after["lines"]]
+check("the analyzer's line survives a re-sync", app_line in ids, True)
+check("and keeps its value",
+      [ln for ln in after["lines"] if ln["line_id"] == app_line][0]["value_cents"],
+      1500)
+# The extension is still authoritative for its OWN lines: 204 was dropped from
+# the capture, so it has to be gone here.
+check("a card dropped in the extension is dropped here",
+      204 in [ln["item_id"] for ln in after["lines"]], False)
+check("and the two it kept are there",
+      sorted(ln["item_id"] for ln in after["lines"] if ln["item_id"]), [201, 202])
+
+print("\n--- a value set while capturing arrives with the line ---")
+# An album's worth is a judgement made looking at the listing; nothing in the
+# value ladder can derive it. So the extension can send it, rather than leaving
+# every lot needing a second pass in the app.
+c.post("/market/captures", json={"captures": [
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "lot2",
+     "name": "SKZ set + album", "capturedAt": "2026-09-07T00:00:00Z",
+     "isLot": True,
+     "lines": [{"lineType": "card", "cardId": 201, "qty": 1},
+               {"lineType": "non_card", "label": "album", "qty": 1,
+                "valueCents": 1200},
+               {"lineType": "unidentified", "qty": 3}],
+     "sightings": [{"observedAt": "2026-09-07T00:00:00Z", "priceCents": 6000,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+lot2 = [x for x in c.get("/market/lots").json()["lots"]
+        if x["title"] == "SKZ set + album"][0]
+detail2 = c.get(f"/market/lots/{lot2['listing_id']}").json()["lot"]
+album2 = [ln for ln in detail2["lines"] if ln["line_type"] == "non_card"][0]
+check("the captured value is used as-is", album2["value_cents"], 1200)
+check("and is labelled as set by hand", album2["value_source"], "manual")
+check("so nothing is left unvalued", detail2["unvalued_units"], 0)
+check("unidentified cards count toward the units", detail2["units"], 1 + 1 + 3)
+check("and are called out", detail2["unidentified_units"], 3)
+check("allocation still sums to the whole",
+      sum(ln["alloc_cents"] for ln in detail2["lines"]), detail2["landed_cents"])
+
 print("\n--- guards ---")
 check("bad disposition refused",
       c.patch(f"/market/lots/{lot_id}/lines/{lid}",

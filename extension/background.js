@@ -483,6 +483,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: !!rec });
         break;
       }
+      // A line that is not a card: the album in the bundle, or the four
+      // photocards you cannot name yet.
+      //
+      // Kept separate from ASSOCIATE because that one keys on cardId, and
+      // these have none -- two non-card lines on a listing are two different
+      // things, not a duplicate. They are addressed by position instead.
+      case 'ADD_LINE': {
+        const rec = await getObservation(msg.key);
+        if (rec) {
+          rec.lines = rec.lines || [];
+          rec.lines.push({
+            lineType: msg.line.lineType,
+            cardId: null,
+            label: msg.line.label || null,
+            qty: msg.line.qty || 1,
+            // Per-unit, USD cents, net of selling fees. Null leaves it for the
+            // lot analyzer -- which can price a card and cannot price an album.
+            valueCents: msg.line.valueCents ?? null,
+          });
+          // A listing with more than one thing in it is a lot, and saying so
+          // here saves the checkbox being the only place it is recorded.
+          if (rec.lines.length > 1) rec.isLot = true;
+          rec.syncedAt = null;
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
+      case 'REMOVE_LINE': {
+        const rec = await getObservation(msg.key);
+        if (rec?.lines?.[msg.index] !== undefined) {
+          rec.lines.splice(msg.index, 1);
+          rec.syncedAt = null;
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
       case 'UNASSOCIATE': {
         const rec = await getObservation(msg.key);
         if (rec) {

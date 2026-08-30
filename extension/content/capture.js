@@ -127,6 +127,12 @@
       soldFrom: (text) =>
         /\bsold\s*out\b|\bout of stock\b|売り切れ|販売終了/i.test(text),
       photoHost: /img\.fril\.jp|mercdn\.net/,
+      // Neokyo fronts several Japanese marketplaces and each brings its own
+      // image host, so the pattern above is a list of the ones seen rather than
+      // a rule. `portrait` is the safety net: it falls back to every image on
+      // the page when nothing on a known host qualifies, and a photocard is
+      // portrait where Neokyo's promo banners and logo are not.
+      photoOrder: ['largest', 'portrait'],
     },
 
     // Server-rendered, so no fiber and content/fiber.js is not injected here.
@@ -916,25 +922,37 @@
     largest: () => largestPhoto((img) => SITE.photoHost.test(img)),
   };
 
-  // Biggest image passing `keep`. A not-yet-decoded image reports zero
-  // dimensions, so the first match is taken as a baseline and only replaced by
-  // something measurably bigger -- requiring area > 0 to win is what left the
-  // capture button unrendered on pages whose photos had not loaded.
+  // The listing's PRIMARY photo among images passing `keep`.
+  //
+  // Not simply the biggest. A listing page renders its main photo first and a
+  // strip of alternates after it, and those alternates are frequently the same
+  // resolution -- so "largest" was decided by whichever happened to decode to a
+  // pixel more, and regularly landed on the BACK of the card. The back of a
+  // photocard is a poor thing to identify it by.
+  //
+  // So size only filters, and DOM ORDER decides: take the earliest image within
+  // half the area of the biggest. That keeps a 40px site logo out while letting
+  // the main photo win over an equally large alternate behind it.
+  //
+  // A not-yet-decoded image reports zero dimensions. With every candidate at
+  // zero the band is empty of information and the first match wins, which is
+  // the same answer and the reason the capture button still appears on a page
+  // whose photos have not loaded.
+  const PRIMARY_AREA_BAND = 0.5;
+
   function largestPhoto(keep) {
-    let best = null;
-    let bestArea = -1;
+    const found = [];
     for (const img of document.querySelectorAll('img')) {
       const src = img.currentSrc || img.src || '';
       const w = img.naturalWidth || img.width || 0;
       const h = img.naturalHeight || img.height || 0;
       if (!keep(src, w, h)) continue;
-      const area = w * h;
-      if (area > bestArea) {
-        bestArea = area;
-        best = src;
-      }
+      found.push({ src, area: w * h });
     }
-    return best;
+    if (!found.length) return null;
+    const max = Math.max(...found.map((f) => f.area));
+    const floor = max * PRIMARY_AREA_BAND;
+    return (found.find((f) => f.area >= floor) || found[0]).src;
   }
 
   function detailPhoto() {

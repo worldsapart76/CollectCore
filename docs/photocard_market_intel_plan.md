@@ -2165,6 +2165,44 @@ No backup changes needed.
     what seeding owns and what it must leave alone is only observable across a
     reboot.
 
+22. **Lot composition at capture time, and the primary photo — BUILT
+    2026-08-30.** Three things, from one capture session.
+
+    **A lot can be broken out while you are looking at it.** *+ non-card* and
+    *+ unidentified* sit beside the lot checkbox in the panel. The non-card
+    line asks for a **value** there and then, because that is a judgement made
+    looking at the listing — the photos, the condition, the set it belongs to.
+    The ladder can price a card from its own comps; nothing can tell it what an
+    album is worth, so leaving it for a second pass in the app meant every lot
+    needed one. Unidentified lines ask only for a count: the analyzer prices
+    them at their era's median, which beats a guess made from a thumbnail.
+
+    **Lines now have two creation paths and needed two lifetimes.** Ingest
+    replaces a listing's lines wholesale — the extension holds the current
+    answer for what is in it, and a card removed there must actually disappear.
+    Unscoped, that also erased a non-card line added in the analyzer, silently,
+    through a workflow that looks like ordinary re-identification.
+    `mkt_listing_line.source` (`capture` | `app`) scopes the replace.
+
+    **The photo was the largest, not the primary.** A listing renders its main
+    photo first and a strip of alternates after it, often at the same
+    resolution, so the winner was whichever decoded to a pixel more — and it
+    regularly landed on the **back of the card**. Size now only filters: take
+    the earliest image in DOM order within half the area of the biggest. A 40px
+    logo still cannot win on position.
+
+    Neokyo also gained `photoOrder: ['largest', 'portrait']`. It fronts several
+    Japanese marketplaces and each brings its own image host, so its
+    `photoHost` list is the hosts *seen* rather than a rule; a listing served
+    from an unlisted one yielded no photo at all. `portrait` falls back to
+    every image on the page, and a photocard is portrait where the promo
+    banners are not.
+
+    And a row with no photo now shows a **dashed placeholder** rather than the
+    browser's broken-image icon — "nothing was read" points at the parser,
+    "captured but will not load" points at the CDN, and they must not look
+    alike.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

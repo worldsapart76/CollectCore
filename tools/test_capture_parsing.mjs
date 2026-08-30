@@ -564,5 +564,61 @@ eq('an undecoded photo is still a photo',
      images: [['https://static.mercdn.net/photos/a.jpg', 0, 0]],
    }).detailPhoto(), 'https://static.mercdn.net/photos/a.jpg');
 
+
+console.log('--- the PRIMARY photo, not the biggest one ---');
+// A listing renders its main photo first and a strip of alternates after it,
+// often at the same resolution -- so "largest" was decided by whichever decoded
+// to a pixel more, and regularly landed on the BACK of the card.
+const FRONT = 'https://static.mercdn.net/photos/front.jpg';
+const BACK = 'https://static.mercdn.net/photos/back.jpg';
+const LOGO = 'https://static.mercdn.net/photos/logo.png';
+
+eq('equal-sized alternates: DOM order wins',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[FRONT, 600, 800], [BACK, 600, 800]],
+   }).detailPhoto(), FRONT);
+// The alternate decoding one pixel bigger is exactly the case that used to
+// flip the answer to the back of the card.
+eq('a marginally bigger alternate does not steal it',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[FRONT, 600, 800], [BACK, 601, 801]],
+   }).detailPhoto(), FRONT);
+// Size still filters: a site logo ahead of the photo must not win on position.
+eq('a small logo cannot win on position alone',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[LOGO, 40, 40], [FRONT, 600, 800]],
+   }).detailPhoto(), FRONT);
+eq('and a genuinely bigger later photo does win',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[LOGO, 120, 120], [FRONT, 600, 800]],
+   }).detailPhoto(), FRONT);
+// Undecoded images all report 0x0, so the band holds no information and the
+// first match stands -- which is what keeps the capture button on a page whose
+// photos have not loaded.
+eq('undecoded: the first match still stands',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [[FRONT, 0, 0], [BACK, 0, 0]],
+   }).detailPhoto(), FRONT);
+
+console.log('--- Neokyo falls back to shape when the CDN misses ---');
+// Neokyo fronts several Japanese marketplaces, each with its own image host, so
+// its photoHost list is the hosts seen rather than a rule. A listing served
+// from an unlisted host used to yield no photo at all.
+eq('a known host is taken as before',
+   loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
+     images: [['https://neokyo.com/img/banner.png', 1200, 300],
+              [FRONT, 600, 800]],
+   }).detailPhoto(), FRONT);
+eq('an unknown host still yields the card, by shape',
+   loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
+     images: [['https://neokyo.com/img/banner.png', 1200, 300],
+              ['https://cdn.unknown.jp/x/9.jpg', 600, 800]],
+   }).detailPhoto(), 'https://cdn.unknown.jp/x/9.jpg');
+eq('and a landscape-only page yields nothing rather than a banner',
+   loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
+     images: [['https://neokyo.com/img/banner.png', 1200, 300]],
+   }).detailPhoto(), null);
+eq('that is the declared order', nk.photoOrder.join(), 'largest,portrait');
+
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

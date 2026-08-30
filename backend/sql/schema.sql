@@ -2200,6 +2200,14 @@ CREATE TABLE IF NOT EXISTS mkt_listing_line (
     -- the library": a card marked Wanted is a keep. The standing decision is
     -- already recorded there, so most lots should need no toggling at all.
     disposition        TEXT,
+    -- Who created this line: 'capture' (the extension) or 'app' (the lot
+    -- analyzer). Ingest replaces a listing's lines wholesale, because the
+    -- extension holds the user's current answer for what is in it and a card
+    -- removed there must actually disappear -- but that would also erase a
+    -- non-card line added in the analyzer, silently, on the next ordinary
+    -- sync. So the wholesale replace is scoped to 'capture' rows and the
+    -- app's survive. Two creation paths need two lifetimes.
+    source             TEXT NOT NULL DEFAULT 'capture',
 
     FOREIGN KEY (listing_id) REFERENCES mkt_listing(listing_id)
 );

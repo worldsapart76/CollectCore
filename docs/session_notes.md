@@ -129,6 +129,22 @@ live in the browser where identification happens; what is lost is portability
 between machines), ship-name aliases, and a distinct "Wanted, no source" view
 (the grid's `wanted` filter covers it). Each row carries a *revisit when*.
 
+**Capture-session fixes (entry 22).** *+ non-card* and *+ unidentified* now sit
+beside the lot checkbox in the panel, so a lot can be broken out while you are
+looking at it; the non-card line asks for its **value** there, because that is a
+judgement made from the listing and no ladder can derive it. That gave lines two
+creation paths, so `mkt_listing_line.source` (`capture` | `app`) now scopes
+ingest's wholesale replace — otherwise an album added in the analyzer was erased
+by the next ordinary sync, silently.
+
+Also: **the photo was the largest, not the primary.** A listing renders its main
+photo first and alternates after it, often the same size, so the winner was
+whichever decoded a pixel bigger — regularly the back of the card. Size now only
+filters; DOM order decides. Neokyo gained `photoOrder: ['largest', 'portrait']`
+because it fronts several marketplaces and its `photoHost` list is hosts *seen*
+rather than a rule, which is why one listing captured with no image at all. A
+row with no photo shows a dashed placeholder now, not a broken-image icon.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

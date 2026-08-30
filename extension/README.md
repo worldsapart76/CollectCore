@@ -165,6 +165,30 @@ can only run inside a live user gesture and fails silently when it doesn't.
 
 The toolbar badge reads **ON** while the current tab is capturing.
 
+### Breaking out a lot while you capture it
+
+Beside the *This is a lot* checkbox: **+ non-card** and **+ unidentified**.
+
+- **+ non-card** takes a label and a value — the album, the photobook, the
+  keychain. The value is asked for **here**, at capture, because it is a
+  judgement made looking at the listing: the photos, the condition, the set it
+  belongs to. The lot analyzer's value ladder can price a card from its own
+  comps; nothing can tell it what an album is worth.
+- **+ unidentified** takes a count. No value is asked for — the analyzer prices
+  an unidentified card at its era's median, which beats a guess made from a
+  thumbnail. What matters is that the cost gets split across *everything* in
+  the box rather than only the cards that were named.
+
+Either one marks the listing a lot. Lines are removed by position, not by card
+id: two non-card lines are two different things.
+
+**Lines can be created in two places, and they have two lifetimes.** Ingest
+replaces a listing's lines wholesale, because the extension holds the current
+answer for what is in it and a card removed here must actually disappear. That
+replace is scoped to lines the *extension* created — a non-card line added in
+the app's lot analyzer survives an ordinary re-sync, which it would otherwise be
+erased by, silently, through a workflow that looks like re-identification.
+
 ### Refreshing a capture
 
 On a listing page you have already captured, a **↻** button appears above the
@@ -372,6 +396,27 @@ There used to be a **(partial read)** badge on the detail button that lit up
 whenever any single field came off the page rather than out of Mercari's
 internal object — including the photo, which is the same photo either way. It
 warned about nothing and was removed.
+
+### The primary photo, not the biggest one
+
+`detailPhoto` takes the **earliest** image in DOM order within half the area of
+the biggest — not simply the largest. A listing renders its main photo first and
+a strip of alternates after it, frequently at the same resolution, so "largest"
+was decided by whichever decoded to a pixel more and regularly landed on the
+**back of the card**. Size still filters, so a 40px site logo cannot win on
+position; DOM order decides among the real photos.
+
+Per-site `photoOrder` picks the strategy: `og` (the page's own declaration),
+`portrait` (largest image taller than wide — a photocard is 55×85mm), and
+`largest`. Neokyo runs `['largest', 'portrait']` because it fronts several
+Japanese marketplaces and each brings its own image host, so its `photoHost`
+list is the hosts *seen* rather than a rule; `portrait` falls back to every
+image on the page when none of them match.
+
+A row with no photo shows a **dashed placeholder**, not the browser's
+broken-image icon. Those are different claims — "nothing was read" points at the
+parser, "captured but will not load" points at the CDN — and they must not look
+alike.
 
 ### If Mercari changes and captures stop working
 

@@ -98,6 +98,12 @@ class CaptureLine(BaseModel):
     label: Optional[str] = None
     qty: int = 1
     notes: Optional[str] = None
+    # Per-unit resale value in USD cents, net of selling fees. Set while
+    # capturing, for the part of a lot that is not a card: the album or the
+    # photobook whose worth is a judgement made looking at the listing, not one
+    # any ladder can derive. A card line leaves it null and the lot analyzer's
+    # value ladder prices it.
+    valueCents: Optional[int] = None
 
 
 class Sighting(BaseModel):
@@ -292,8 +298,13 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
         # lines are visible; it is not something a re-capture should be able to
         # do by omission.
         if cap.lines:
+            # Scoped to capture rows. A non-card line added in the lot analyzer
+            # belongs to the app, and an unscoped delete would erase it on the
+            # next ordinary sync -- silently, through a workflow that looks like
+            # ordinary re-identification.
             db.execute(
-                text("DELETE FROM mkt_listing_line WHERE listing_id = :id"),
+                text("DELETE FROM mkt_listing_line WHERE listing_id = :id"
+                     "   AND source = 'capture'"),
                 {"id": listing_id},
             )
             for line in cap.lines:
@@ -301,9 +312,9 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                     text(
                         "INSERT INTO mkt_listing_line ("
                         " listing_id, line_type, item_id, collection_type_id,"
-                        " label, qty, notes) "
+                        " label, qty, notes, value_cents, source) "
                         "SELECT :id, :type, :item, i.collection_type_id,"
-                        " :label, :qty, :notes "
+                        " :label, :qty, :notes, :value, 'capture' "
                         "FROM (SELECT 1) "
                         "LEFT JOIN tbl_items i ON i.item_id = :item"
                     ),
@@ -314,6 +325,7 @@ def ingest_captures(batch: CaptureBatch, db=Depends(get_db)):
                         "label": line.label,
                         "qty": line.qty,
                         "notes": line.notes,
+                        "value": line.valueCents,
                     },
                 )
                 lines_new += 1
@@ -2388,8 +2400,8 @@ def add_lot_line(listing_id: int, body: LotLineIn, db=Depends(get_db)):
     type_id = _photocard_type_id(db) if body.item_id else None
     res = db.execute(text(
         "INSERT INTO mkt_listing_line (listing_id, line_type, item_id,"
-        " collection_type_id, label, qty, value_cents, disposition) "
-        "VALUES (:l, :t, :i, :c, :lab, :q, :v, :d)"),
+        " collection_type_id, label, qty, value_cents, disposition, source) "
+        "VALUES (:l, :t, :i, :c, :lab, :q, :v, :d, 'app')"),
         {"l": listing_id, "t": body.line_type, "i": body.item_id, "c": type_id,
          "lab": (body.label or "").strip() or None, "q": body.qty,
          "v": body.value_cents, "d": body.disposition})

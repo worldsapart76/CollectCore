@@ -218,6 +218,13 @@ def _run_migrations(conn) -> None:
             # Wanted is a keep -- so most lots need no toggling.
             ("disposition",
              "ALTER TABLE mkt_listing_line ADD COLUMN disposition TEXT"),
+            # 'capture' | 'app'. Ingest's wholesale line replace is scoped to
+            # capture rows, so a non-card line added in the lot analyzer is not
+            # erased by the next ordinary sync. Existing rows default to
+            # 'capture', which is what they all were.
+            ("source",
+             "ALTER TABLE mkt_listing_line ADD COLUMN source TEXT NOT NULL"
+             " DEFAULT 'capture'"),
         ):
             if col not in cols:
                 raw.execute(ddl)
