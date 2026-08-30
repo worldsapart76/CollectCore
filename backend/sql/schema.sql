@@ -2084,9 +2084,18 @@ CREATE TABLE IF NOT EXISTS mkt_fee_component (
     sort_order       INTEGER NOT NULL DEFAULT 0,
     is_active        INTEGER NOT NULL DEFAULT 1,
 
+    -- Stable identity for a SEEDED line, independent of its display label.
+    -- Seeding keyed on the label meant every rename created a duplicate row
+    -- instead of renaming the existing one, and three rounds of relabelling
+    -- stacked three generations of the same cost line on top of each other.
+    -- NULL for user-created lines, which have no seed to track.
+    seed_key         TEXT,
+
     UNIQUE (marketplace_code, side, label),
     FOREIGN KEY (marketplace_code) REFERENCES lkup_mkt_marketplaces(marketplace_code)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mkt_fee_component_seed
+    ON mkt_fee_component(marketplace_code, side, seed_key) WHERE seed_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_mkt_fee_component_lookup
     ON mkt_fee_component(marketplace_code, side, is_active);
 

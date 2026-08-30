@@ -192,6 +192,17 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_listing.%s", col)
 
+    if "mkt_fee_component" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(mkt_fee_component)").fetchall()}
+        if "seed_key" not in cols:
+            raw.execute("ALTER TABLE mkt_fee_component ADD COLUMN seed_key TEXT")
+            raw.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_mkt_fee_component_seed "
+                "ON mkt_fee_component(marketplace_code, side, seed_key) "
+                "WHERE seed_key IS NOT NULL")
+            logger.info("Migration: added mkt_fee_component.seed_key")
+
     # Migration: cost-line scope, and how many cards a typical box holds.
     if "mkt_fee_component" in tables:
         cols = {r[1] for r in raw.execute(
@@ -433,107 +444,157 @@ def _seed_cost_tiers(raw) -> None:
         )
 
 
-
 def _seed_fee_components(raw) -> None:
-    """Create the cost components each marketplace actually has, at zero.
+    """Create each marketplace's cost lines, keyed by a STABLE seed_key.
 
-    The LABELS are seeded, the AMOUNTS are not. Naming the real cost lines --
-    Mercari's buyer protection fee, Neokyo's proxy and consolidation charges,
-    import duty, PayPal -- tells you what needs filling in without inventing a
-    number. Rates change, differ per account, and a wrong figure shown
-    confidently is worse than an obviously blank one.
+    Seeding keyed on the display label meant every rename created a duplicate
+    row rather than renaming the existing one, and three rounds of relabelling
+    stacked three generations of the same cost line on top of each other. The
+    seed_key never changes, so a label can be improved freely.
 
-    INSERT OR IGNORE on (marketplace, side, label): an edited amount is never
-    overwritten, and a component deleted on purpose stays deleted only until a
-    restart re-adds it at zero, which is harmless.
+    LABELS are seeded, AMOUNTS are not. Naming the real cost lines says what
+    needs filling in without inventing a rate that changes and differs per
+    account.
     """
-    # (marketplace, side, label, scope, sort)
+    # (marketplace, side, seed_key, label, scope, sort)
     COMPONENTS = (
-        # Mercari US -- both sides. The buyer protection fee is visible on
-        # every listing page; the selling side is what a sale nets.
-        ("mercari_us", "sell", "Selling fee", "per_item", 1),
-        ("mercari_us", "sell", "Payment processing", "per_item", 2),
-        ("mercari_us", "sell", "Shipping I absorb", "per_item", 3),
-        ("mercari_us", "buy", "Buyer protection fee", "per_item", 1),
-        ("mercari_us", "buy", "Shipping I pay", "per_item", 2),
-        ("mercari_us", "buy", "Sales tax", "per_item", 3),
+        ("mercari_us", "sell", "sell_fee",     "Selling fee",        "per_item", 1),
+        ("mercari_us", "sell", "sell_payment", "Payment processing", "per_item", 2),
+        ("mercari_us", "sell", "sell_ship",    "Shipping I absorb",  "per_item", 3),
+        ("mercari_us", "buy",  "buy_protect",  "Buyer protection fee", "per_item", 1),
+        ("mercari_us", "buy",  "buy_ship",     "Shipping I pay",     "per_item", 2),
+        ("mercari_us", "buy",  "buy_tax",      "Sales tax",          "per_item", 3),
 
-        # Proxy buying, split by what is actually PREDICTABLE.
+        # Proxy buying. One line per DISTINCT cost, not per occasion it is
+        # charged: PayPal is a single 3.6% wherever a payment happens, and
+        # import duty is one line however many bills it appears on.
         #
-        # The service fee and the percentages are known before you buy. Box
-        # shipping is not: it prices on weight and volume, so the same 40
-        # items cost wildly different amounts depending on whether albums and
-        # DVDs went in with the cards. Measured across two real shipments,
-        # per-card shipping ran $0.47 on a card-heavy box and $1.21-1.56 on a
-        # mixed one -- a 3x spread that no per-box figure divided by a typical
-        # count can predict.
-        #
-        # So it is a per-card ESTIMATE the user tunes from their own orders,
-        # not a modelled box. Actual shipping goes on the real purchase in the
-        # ledger; this exists only so a comp can answer "roughly what will this
-        # land at" before anything is bought.
-        ("neokyo", "buy", "Service fee (per listing)", "per_item", 1),
-        ("neokyo", "buy", "PayPal fee", "per_item", 2),
-        ("neokyo", "buy", "Import tax / duty", "per_item", 3),
-        ("neokyo", "buy", "Shipping + handling + wire (est. per card)", "per_item", 4),
+        # Shipping is a per-CARD estimate, not a modelled box. Measured across
+        # two real shipments it held at $0.40-0.50/card while the box totals
+        # varied wildly -- per card is the stable unit. Actuals go on the real
+        # purchase in the ledger; this is only so a comp can answer "roughly
+        # what will this land at" before buying.
+        ("neokyo", "buy", "svc",   "Service fee (per listing)",          "per_item", 1),
+        ("neokyo", "buy", "pay",   "PayPal fee",                          "per_item", 2),
+        ("neokyo", "buy", "duty",  "Import tax / duty",                   "per_item", 3),
+        ("neokyo", "buy", "ship",  "Shipping + handling (est. per card)", "per_item", 4),
 
-        ("pocamarket", "buy", "Service fee (per listing)", "per_item", 1),
-        ("pocamarket", "buy", "Payment fee", "per_item", 2),
-        ("pocamarket", "buy", "Import tax / duty", "per_item", 3),
-        ("pocamarket", "buy", "Shipping + handling (est. per card)", "per_item", 4),
+        ("pocamarket", "buy", "svc",  "Service fee (per listing)",          "per_item", 1),
+        ("pocamarket", "buy", "pay",  "Payment fee",                         "per_item", 2),
+        ("pocamarket", "buy", "duty", "Import tax / duty",                   "per_item", 3),
+        ("pocamarket", "buy", "ship", "Shipping + handling (est. per card)", "per_item", 4),
 
-        ("ebay", "sell", "Final value fee", "per_item", 1),
-        ("ebay", "sell", "Payment processing", "per_item", 2),
-        ("ebay", "sell", "Shipping I absorb", "per_item", 3),
-        ("ebay", "buy", "Shipping I pay", "per_item", 1),
-        ("ebay", "buy", "Sales tax", "per_item", 2),
+        ("ebay", "sell", "sell_fee",     "Final value fee",    "per_item", 1),
+        ("ebay", "sell", "sell_payment", "Payment processing", "per_item", 2),
+        ("ebay", "sell", "sell_ship",    "Shipping I absorb",  "per_item", 3),
+        ("ebay", "buy",  "buy_ship",     "Shipping I pay",     "per_item", 1),
+        ("ebay", "buy",  "buy_tax",      "Sales tax",          "per_item", 2),
     )
-    for code, side, label, scope, order in COMPONENTS:
+
+    # Every label this seed has EVER used, mapped onto the key it became, or
+    # None for lines that should not exist at all. The current labels are in
+    # here too: rows created before seed_key existed carry no key, so without
+    # adopting them a rename collides with the very row it is replacing.
+    #
+    # Three rounds of relabelling left three generations of the same cost line
+    # stacked up, which is what this unwinds.
+    LEGACY = {
+        "neokyo": {
+            "Service fee": "svc",
+            "Service fee (per listing)": "svc",
+            "PayPal fee": "pay",
+            "Payment fee (PayPal)": "pay",
+            "Import tax / duty": "duty",
+            "Customs / import duty": "duty",
+            "International shipping": "ship",
+            "International shipping (per box)": "ship",
+            "Shipping + handling (est. per card)": "ship",
+            "Shipping + handling + wire (est. per card)": "ship",
+            "Handling fee (per box)": None,
+            "PayPal wire fees (per box)": None,
+            # Charged perhaps twice in 100+ listings, so a flat per-card rate
+            # would be wrong far more often than right.
+            "Domestic shipping (JP)": None,
+        },
+        "pocamarket": {
+            "Service fee": "svc",
+            "Service fee (per listing)": "svc",
+            "Payment fee": "pay",
+            "Import tax / duty": "duty",
+            "Customs / import duty": "duty",
+            "International shipping": "ship",
+            "International shipping (per box)": "ship",
+            "Shipping + handling (est. per card)": "ship",
+            "Handling fee (per box)": None,
+            "Domestic shipping (KR)": None,
+        },
+        "mercari_us": {
+            "Selling fee": "sell_fee",
+            "Payment processing": "sell_payment",
+            "Shipping I absorb": "sell_ship",
+            "Buyer protection fee": "buy_protect",
+            "Shipping I pay": "buy_ship",
+            "Sales tax": "buy_tax",
+        },
+        "ebay": {
+            "Final value fee": "sell_fee",
+            "Payment processing": "sell_payment",
+            "Shipping I absorb": "sell_ship",
+            "Shipping I pay": "buy_ship",
+            "Sales tax": "buy_tax",
+        },
+    }
+
+    def merge_into(code, side, key, cid, pct, fixed):
+        """Give `cid` the seed key, or fold it into the row that already has it."""
+        existing = raw.execute(
+            "SELECT component_id, pct, fixed_minor FROM mkt_fee_component "
+            " WHERE marketplace_code=? AND side=? AND seed_key=?",
+            (code, side, key)).fetchone()
+        if existing is None:
+            raw.execute("UPDATE mkt_fee_component SET seed_key=? WHERE component_id=?",
+                        (key, cid))
+            return
+        eid, epct, efixed = existing
+        # Keep whichever row actually carries a value, then drop the duplicate.
         raw.execute(
-            "INSERT OR IGNORE INTO mkt_fee_component "
-            "(marketplace_code, side, label, scope, sort_order) VALUES (?, ?, ?, ?, ?)",
-            (code, side, label, scope, order),
-        )
+            "UPDATE mkt_fee_component SET pct=?, fixed_minor=? WHERE component_id=?",
+            (epct or pct or 0, efixed or fixed or 0, eid))
+        raw.execute("DELETE FROM mkt_fee_component WHERE component_id=?", (cid,))
 
-    # The previous seed modelled shipping as a per-box line divided by a
-    # typical box size. Real shipments showed that does not predict anything:
-    # per-card shipping varied 3x with box contents. Drop those rows -- but
-    # ONLY where nothing was entered, so a filled-in figure is never destroyed.
-    raw.execute(
-        "DELETE FROM mkt_fee_component "
-        " WHERE scope = 'per_shipment' AND pct = 0 AND fixed_minor = 0 "
-        "   AND label IN ('International shipping (per box)',"
-        "                 'Handling fee (per box)', 'PayPal wire fees (per box)')"
-    )
+    for code, labels in LEGACY.items():
+        for label, key in labels.items():
+            rows = raw.execute(
+                "SELECT component_id, side, pct, fixed_minor FROM mkt_fee_component "
+                " WHERE marketplace_code=? AND label=? AND seed_key IS NULL",
+                (code, label)).fetchall()
+            for cid, side, pct, fixed in rows:
+                if key is None:
+                    # Retire, but only when empty: a deliberately filled-in
+                    # line is never destroyed by a seed.
+                    if not pct and not fixed:
+                        raw.execute("DELETE FROM mkt_fee_component WHERE component_id=?",
+                                    (cid,))
+                else:
+                    merge_into(code, side, key, cid, pct, fixed)
 
-    # Carry over whatever was already entered under the old flat columns, so
-    # the redesign does not quietly discard it. Runs once: the UPDATE only
-    # matches a component still sitting at zero.
-    cols = {r[1] for r in raw.execute(
-        "PRAGMA table_info(lkup_mkt_marketplaces)").fetchall()}
-    if {"fee_pct", "fee_fixed_minor", "ship_absorbed_minor"} <= cols:
-        for code, pct, fixed, ship in raw.execute(
-            "SELECT marketplace_code, fee_pct, fee_fixed_minor, ship_absorbed_minor "
-            "FROM lkup_mkt_marketplaces"
-        ).fetchall():
-            if pct:
-                raw.execute(
-                    "UPDATE mkt_fee_component SET pct = ? "
-                    " WHERE marketplace_code = ? AND side = 'sell'"
-                    "   AND label = 'Selling fee' AND pct = 0",
-                    (pct, code))
-            if fixed:
-                raw.execute(
-                    "UPDATE mkt_fee_component SET fixed_minor = ? "
-                    " WHERE marketplace_code = ? AND side = 'sell'"
-                    "   AND label = 'Payment processing' AND fixed_minor = 0",
-                    (fixed, code))
-            if ship:
-                raw.execute(
-                    "UPDATE mkt_fee_component SET fixed_minor = ? "
-                    " WHERE marketplace_code = ? AND side = 'sell'"
-                    "   AND label = 'Shipping I absorb' AND fixed_minor = 0",
-                    (ship, code))
+    for code, side, key, label, scope, order in COMPONENTS:
+        existing = raw.execute(
+            "SELECT component_id FROM mkt_fee_component "
+            " WHERE marketplace_code=? AND side=? AND seed_key=?",
+            (code, side, key)).fetchone()
+        if existing:
+            # Rename in place. This is the whole point of seed_key.
+            raw.execute(
+                "UPDATE mkt_fee_component SET label=?, scope=?, sort_order=? "
+                " WHERE component_id=?",
+                (label, scope, order, existing[0]))
+        else:
+            raw.execute(
+                "INSERT OR IGNORE INTO mkt_fee_component "
+                "(marketplace_code, side, seed_key, label, scope, sort_order) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (code, side, key, label, scope, order))
 
 
 def init_db() -> None:
