@@ -31,7 +31,29 @@ export async function apiFetch(path, options = {}) {
     return { ok: false, reason: 'signin' };
   }
 
-  if (!res.ok) return { ok: false, reason: `http ${res.status}` };
+  if (!res.ok) {
+    // The body is where a 422 says WHICH field it rejected. Dropping it turned
+    // a one-line validation fix into a guessing game, so it gets read out.
+    let detail = '';
+    try {
+      const body = await res.json();
+      const d = body?.detail;
+      if (Array.isArray(d)) {
+        detail = d
+          .slice(0, 3)
+          .map((e) => `${(e.loc || []).slice(-2).join('.')}: ${e.msg}`)
+          .join('; ');
+      } else if (typeof d === 'string') {
+        detail = d;
+      }
+    } catch {
+      /* non-JSON error body — the status alone will have to do */
+    }
+    return {
+      ok: false,
+      reason: detail ? `http ${res.status} — ${detail}` : `http ${res.status}`,
+    };
+  }
 
   const type = res.headers.get('content-type') || '';
   if (!type.includes('application/json')) {

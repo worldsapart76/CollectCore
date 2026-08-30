@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from dependencies import get_db
@@ -111,6 +111,21 @@ class Sighting(BaseModel):
     priceUsd: Optional[int] = None
 
 
+# Marketplaces are not consistent about scalar types, and pydantic v2 does not
+# coerce: Mercari's seller id arrives as the integer 771088348, which rejected
+# an entire sync batch with a bare 422. These fields are labels, not numbers, so
+# a numeric one is stringified rather than refused — losing a whole capture
+# batch over the type of an id nobody computes with is the worse outcome.
+def _as_text(v):
+    if v is None or isinstance(v, str):
+        return v
+    if isinstance(v, bool):
+        return str(v).lower()
+    if isinstance(v, (int, float)):
+        return str(v)
+    return str(v)
+
+
 class Capture(BaseModel):
     marketplace: str
     currency: Optional[str] = None  # defaults from the marketplace
@@ -139,6 +154,16 @@ class Capture(BaseModel):
     capturedAt: str
     lines: List[CaptureLine] = Field(default_factory=list)
     sightings: List[Sighting] = Field(default_factory=list)
+
+    @field_validator(
+        "name", "itemCondition", "category", "brand", "thumbnailUrl",
+        "searchQuery", "listingUrl", "shippingPayerCode", "description",
+        "sellerId", "currency",
+        mode="before",
+    )
+    @classmethod
+    def _stringify(cls, v):
+        return _as_text(v)
 
 
 class CaptureBatch(BaseModel):

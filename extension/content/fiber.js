@@ -107,12 +107,33 @@
     return null;
   }
 
+  // Several props on a detail page carry the right id while holding only a
+  // fragment of the listing -- a price widget, a favourite button. Matching the
+  // FIRST one produced a capture with a price and a status but no name and no
+  // image, which is what shipped and had to be fixed.
+  //
+  // So candidates are scored by how much of the listing they actually carry and
+  // the richest wins.
+  const ITEM_KEYS = [
+    'name', 'price', 'status', 'thumbnail', 'photos', 'itemCondition',
+    'description', 'shippingPayerCode', 'brand', 'category', 'seller',
+  ];
+
+  function itemScore(v) {
+    let n = 0;
+    for (const k of ITEM_KEYS) {
+      if (v[k] !== undefined && v[k] !== null && v[k] !== '') n++;
+    }
+    return n;
+  }
+
   function looksLikeItem(v, wantId) {
     return (
       v &&
       typeof v === 'object' &&
+      !Array.isArray(v) &&
       v.id === wantId &&
-      ('name' in v || 'price' in v || 'status' in v)
+      ITEM_KEYS.some((k) => k in v)
     );
   }
 
@@ -128,6 +149,17 @@
     const seen = new Set();
     const stack = [root];
     let visited = 0;
+    let best = null;
+    let bestScore = 0;
+
+    const consider = (v) => {
+      if (!looksLikeItem(v, wantId)) return;
+      const score = itemScore(v);
+      if (score > bestScore) {
+        best = v;
+        bestScore = score;
+      }
+    };
 
     while (stack.length && visited < MAX_NODES) {
       const node = stack.pop();
@@ -139,15 +171,24 @@
       if (props && typeof props === 'object') {
         // The prop name differs between pages, so check the values rather than
         // guessing at `item`.
-        for (const v of Object.values(props)) {
-          if (looksLikeItem(v, wantId)) return v;
-        }
-        if (looksLikeItem(props, wantId)) return props;
+        for (const v of Object.values(props)) consider(v);
+        consider(props);
       }
       if (node.child) stack.push(node.child);
       if (node.sibling) stack.push(node.sibling);
     }
-    return null;
+    return best;
+  }
+
+  function photoList(item) {
+    const raw = item.photos || item.imageUrls || item.images;
+    if (!Array.isArray(raw) || !raw.length) return null;
+    const urls = raw
+      .map((p) =>
+        typeof p === 'string' ? p : p?.uri ?? p?.url ?? p?.thumbnail ?? null
+      )
+      .filter(Boolean);
+    return urls.length ? urls : null;
   }
 
   function stampDetail() {
@@ -177,14 +218,15 @@
       category: item.category ?? null,
       categoryId: item.categoryId ?? null,
       brand: item.brand ?? null,
-      thumbnail: item.thumbnail ?? null,
+      // A detail page may carry only the photo array, with no single
+      // `thumbnail` -- which is why the first detail capture had a broken
+      // image. Fall back to the first photo.
+      thumbnail: item.thumbnail ?? photoList(item)?.[0] ?? null,
       // The whole reason this surface exists -- all null in tiles.
       shippingPayerCode: item.shippingPayerCode ?? null,
       description: item.description ?? null,
       sellerId: item.seller?.id ?? item.sellerId ?? null,
-      photos: Array.isArray(item.photos)
-        ? item.photos.map((p) => (typeof p === 'string' ? p : p?.uri ?? null)).filter(Boolean)
-        : null,
+      photos: photoList(item),
       dates: datesFrom(item),
     });
   }
