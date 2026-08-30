@@ -532,10 +532,14 @@ def _seed_fee_components(raw) -> None:
         ("neokyo", "buy", "duty",  "Import tax / duty",                   "per_item", 3),
         ("neokyo", "buy", "ship",  "Shipping + handling (est. per card)", "per_item", 4),
 
-        ("pocamarket", "buy", "svc",  "Service fee (per listing)",          "per_item", 1),
-        ("pocamarket", "buy", "pay",  "Payment fee",                         "per_item", 2),
-        ("pocamarket", "buy", "duty", "Import tax / duty",                   "per_item", 3),
-        ("pocamarket", "buy", "ship", "Shipping + handling (est. per card)", "per_item", 4),
+        # Shipping is the ONLY fee here -- no per-listing service charge, no
+        # payment fee, and duty is settled at shipping checkout rather than
+        # billed per card. Its asking prices carry that instead, which is why
+        # they run higher than a proxy's. Three permanently blank rows are not
+        # neutral: a blank amount reads as "still to fill in", forever.
+        #
+        # per_shipment, not per_item: it is one $12 charge for the whole box.
+        ("pocamarket", "buy", "ship", "Shipping + handling", "per_shipment", 1),
 
         ("ebay", "sell", "sell_fee",     "Final value fee",    "per_item", 1),
         ("ebay", "sell", "sell_payment", "Payment processing", "per_item", 2),
@@ -638,16 +642,44 @@ def _seed_fee_components(raw) -> None:
             (code, side, key)).fetchone()
         if existing:
             # Rename in place. This is the whole point of seed_key.
+            #
+            # `scope` is deliberately NOT re-seeded. It is a user decision with
+            # a control in the UI -- per item / per box -- and re-applying the
+            # seed value on every startup silently reverted it. Pocamarket's
+            # shipping is one charge for the whole box, set that way by hand,
+            # and a deploy would quietly have turned it back into that amount
+            # per card: a 40x overstatement, arriving with no edit and nothing
+            # on screen to show it had happened. Seeds own the label and the
+            # order; the amounts and the scope belong to whoever set them.
             raw.execute(
-                "UPDATE mkt_fee_component SET label=?, scope=?, sort_order=? "
+                "UPDATE mkt_fee_component SET label=?, sort_order=? "
                 " WHERE component_id=?",
-                (label, scope, order, existing[0]))
+                (label, order, existing[0]))
         else:
             raw.execute(
                 "INSERT OR IGNORE INTO mkt_fee_component "
                 "(marketplace_code, side, seed_key, label, scope, sort_order) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (code, side, key, label, scope, order))
+
+    # Lines that were seeded and turned out not to exist on that marketplace.
+    #
+    # Removed only when EMPTY. A line someone deliberately filled in is never
+    # destroyed by a seed -- the same rule the LEGACY block above works under,
+    # and the reason this is a guarded DELETE rather than a list of ids.
+    RETIRED = (
+        ("pocamarket", "buy", "svc"),
+        ("pocamarket", "buy", "pay"),
+        ("pocamarket", "buy", "duty"),
+    )
+    for code, side, key in RETIRED:
+        cur = raw.execute(
+            "DELETE FROM mkt_fee_component "
+            " WHERE marketplace_code=? AND side=? AND seed_key=?"
+            "   AND COALESCE(pct, 0) = 0 AND COALESCE(fixed_minor, 0) = 0",
+            (code, side, key))
+        if cur.rowcount:
+            logger.info("Retired empty seeded fee line: %s %s %s", code, side, key)
 
 
 def init_db() -> None:

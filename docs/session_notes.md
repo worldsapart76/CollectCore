@@ -106,6 +106,21 @@ broadcast from marking synced), so a sync that worked looked like one never
 pressed. The note is held in state now and survives re-renders — failures
 included.
 
+**Fee seeding was overwriting user settings** (entry 21). `_seed_fee_components`
+runs every boot and re-applied the seeded `scope`, which has a UI control — so
+Pocamarket shipping set by hand to one $12 charge *per box* would have reverted
+to $12 *per card* on the next deploy, a 40x overstatement arriving with no edit.
+Seeds now write only the label and sort order on an existing row. Pocamarket
+also seeds **one** fee line rather than four: shipping is its only charge, and
+three permanently blank rows read as "still to fill in" forever. The other three
+are retired only when empty. `tools/test_fee_seeding.py`, 13 cases across
+simulated restarts.
+
+Also settled: **storage terms set the box size.** Pocamarket stores
+indefinitely and you choose when to ship, so boxes go out full and 40 against
+"$12 up to 40 items" is honest. Neokyo's 45-day clock ships whatever
+accumulated, so its capacity is a fiction there.
+
 **Next:** v2 step 3 — per-copy cost basis and the ledger. Capture is done for
 now: all four sources are built and verified against real pages.
 

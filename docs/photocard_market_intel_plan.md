@@ -2135,6 +2135,28 @@ No backup changes needed.
     orphaned sightings that every comp query still counts. The confirm says so:
     to refresh, re-capture; no delete needed.
 
+21. **Seeds own labels; people own amounts and scope — FIXED 2026-08-30.**
+    `_seed_fee_components` runs on every boot and was re-applying the seeded
+    `scope` to existing rows. `scope` has a control in the UI — *per item* /
+    *per box* — so a Pocamarket shipping charge set by hand to one $12 charge
+    per box would have reverted to **$12 per card** on the next deploy: a 40x
+    overstatement of landed cost, arriving with no edit and nothing on screen
+    to show it had happened. Seeding now writes only the label and the sort
+    order on an existing row.
+
+    **Pocamarket seeds one fee line, not four.** Shipping is the only charge
+    there — no per-listing service fee, no payment fee, and duty settles at
+    shipping checkout rather than per card; its asking prices carry that
+    instead, which is why they run above a proxy's. The other three are retired
+    **only when empty**, the rule the LEGACY block already worked under: a line
+    someone deliberately put a number in is evidence, and a seed does not get
+    to delete evidence. Three permanently blank rows are not neutral — a blank
+    amount reads as *still to fill in*, forever.
+
+    `tools/test_fee_seeding.py` — 13 cases across simulated restarts, since
+    what seeding owns and what it must leave alone is only observable across a
+    reboot.
+
 ### Next
 
 **Steps 1 and 2 of the v2 market workspace are built** (card grid +
