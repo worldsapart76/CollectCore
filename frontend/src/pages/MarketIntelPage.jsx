@@ -20,6 +20,59 @@ import {
 const usd = (cents) =>
   cents == null ? "—" : `$${(cents / 100).toFixed(2)}`;
 
+// Filters over the tracked-card list.
+//
+// Compact and always visible rather than a collapsible panel: the list is the
+// thing being filtered and it sits directly underneath, so hiding the controls
+// would cost a click on every use.
+function CardFilters({
+  q, setQ, onlySold, setOnlySold, onlyBuy, setOnlyBuy,
+  onlyLots, setOnlyLots, shown, total,
+}) {
+  const box = {
+    display: "flex", alignItems: "center", gap: 4,
+    fontSize: 11, color: "#444", cursor: "pointer", whiteSpace: "nowrap",
+  };
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Filter cards…"
+        style={{
+          width: "100%", boxSizing: "border-box", padding: "4px 6px",
+          fontSize: 13, border: "1px solid #ddd", borderRadius: 4,
+        }}
+      />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "4px 0 2px" }}>
+        <label style={box}>
+          <input type="checkbox" checked={onlySold}
+                 onChange={(e) => setOnlySold(e.target.checked)} />
+          has sold comps
+        </label>
+        <label style={box}>
+          <input type="checkbox" checked={onlyBuy}
+                 onChange={(e) => setOnlyBuy(e.target.checked)} />
+          buyable now
+        </label>
+        <label style={box}>
+          <input type="checkbox" checked={onlyLots}
+                 onChange={(e) => setOnlyLots(e.target.checked)} />
+          lot-only
+        </label>
+      </div>
+      <div style={{ fontSize: 11, color: "#666" }}>
+        {/* The true total, always. A count that silently means "the filtered
+            page" is how "60 match" ended up on screen for every search in the
+            extension. */}
+        {shown === total
+          ? `${total.toLocaleString()} cards tracked`
+          : `${shown.toLocaleString()} of ${total.toLocaleString()} cards`}
+      </div>
+    </div>
+  );
+}
+
 // Amounts in a marketplace's OWN currency. JPY and KRW have no minor unit, so
 // ¥350 is stored as 350 — dividing by 100 and printing a dollar sign is how a
 // Neokyo fee showed up as "$350.00". usd() above stays for the comp figures,
@@ -82,6 +135,25 @@ export default function MarketIntelPage() {
   const [detail, setDetail] = useState(null);
   const [fx, setFx] = useState(null);
   const [error, setError] = useState("");
+  // List filters. Every capture of a bundle adds a row per card on it, so one
+  // 8-card lot lands eight entries -- the list gets long from ordinary use
+  // rather than from any milestone worth waiting for.
+  const [q, setQ] = useState("");
+  const [onlySold, setOnlySold] = useState(false);
+  const [onlyBuy, setOnlyBuy] = useState(false);
+  const [onlyLots, setOnlyLots] = useState(false);
+
+  // Every typed word must match somewhere in the label, so adding words
+  // narrows -- the same rule as the extension's picker, because a search that
+  // behaves differently in two places is worse than either behaviour.
+  const shown = (cards || []).filter((c) => {
+    if (onlySold && !c.n_sold) return false;
+    if (onlyBuy && !c.n_buy) return false;
+    if (onlyLots && !c.lots_only) return false;
+    if (!q.trim()) return true;
+    const hay = (c.label || "").toLowerCase();
+    return q.toLowerCase().split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+  });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -168,8 +240,22 @@ export default function MarketIntelPage() {
       {cards?.length > 0 && (
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
           {/* Card list */}
-          <div style={{ flex: "0 0 340px", maxHeight: "72vh", overflowY: "auto", border: "1px solid #ddd", borderRadius: 6 }}>
-            {cards.map((c) => {
+          <div style={{ flex: "0 0 340px" }}>
+            <CardFilters
+              q={q} setQ={setQ}
+              onlySold={onlySold} setOnlySold={setOnlySold}
+              onlyBuy={onlyBuy} setOnlyBuy={setOnlyBuy}
+              onlyLots={onlyLots} setOnlyLots={setOnlyLots}
+              shown={shown.length}
+              total={cards.length}
+            />
+          <div style={{ maxHeight: "66vh", overflowY: "auto", border: "1px solid #ddd", borderRadius: 6 }}>
+            {shown.length === 0 && (
+              <div style={{ padding: "10px", fontSize: 12, color: "#666" }}>
+                Nothing matches those filters.
+              </div>
+            )}
+            {shown.map((c) => {
               const active = c.n_active ? { min: c.active_usd_min, max: c.active_usd_max } : null;
               const sold = c.n_sold ? { min: c.sold_usd_min, max: c.sold_usd_max } : null;
               return (
@@ -210,6 +296,7 @@ export default function MarketIntelPage() {
                 </button>
               );
             })}
+          </div>
           </div>
 
           {/* Detail */}

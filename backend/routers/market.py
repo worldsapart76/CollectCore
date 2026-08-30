@@ -576,6 +576,22 @@ def comps_summary(db=Depends(get_db)):
     ).mappings().all()
     lots_by_item = {r["item_id"]: r for r in lot_rows}
 
+    # How many ways there are to buy each card right now, so the list can be
+    # filtered down to "what could I actually acquire" without loading every
+    # card's detail to find out.
+    buy_counts = {
+        r[0]: r[1]
+        for r in db.execute(text(
+            "SELECT ln.item_id, COUNT(DISTINCT l.listing_id) "
+            "FROM mkt_listing l "
+            "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+            "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+            "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
+            "WHERE ln.item_id IS NOT NULL AND s.listing_state = 'active' "
+            "  AND m.side IN ('buy', 'both') "
+            "GROUP BY ln.item_id"))
+    }
+
     basis = {
         r[0]: (r[1] if r[1] is not None else r[2])
         for r in db.execute(text(
@@ -588,6 +604,7 @@ def comps_summary(db=Depends(get_db)):
         d = dict(r)
         d["basis_cents"] = basis.get(d["item_id"])
         d["n_lots"] = (lots_by_item.get(d["item_id"]) or {}).get("n_lots", 0)
+        d["n_buy"] = buy_counts.get(d["item_id"], 0)
         d["lots_only"] = False
         seen.add(d["item_id"])
         cards.append(d)
@@ -607,6 +624,7 @@ def comps_summary(db=Depends(get_db)):
             "last_seen": r["last_seen"],
             "basis_cents": basis.get(item_id),
             "n_lots": r["n_lots"],
+            "n_buy": buy_counts.get(item_id, 0),
             # Sorted last and rendered without a price: a card seen only in a
             # bundle has no single-card figure, and inventing one from the
             # bundle is the exact error the sole-line rule exists to prevent.
