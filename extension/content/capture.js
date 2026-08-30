@@ -65,6 +65,9 @@
       // No urlFor: the anchor's own href is the URL, so nothing has to be
       // reconstructed from a shape this file would have to know.
       queryParam: 'keyword',
+      // Neokyo's h1 is the section heading "Item Details", not the listing
+      // name, so taking h1 first filed every capture under that same title.
+      titleOrder: ['og', 'doc', 'h1'],
       // ¥1,234 and 1,234円 are both current on Neokyo depending on where the
       // number is rendered. Whole yen: no decimals, exponent 0.
       priceFrom: (text) =>
@@ -96,6 +99,30 @@
     const n = parseFloat(m[1].replace(/,/g, ''));
     if (!Number.isFinite(n)) return null;
     return Math.round(n * 10 ** exponent);
+  }
+
+  // What a price actually is, in the currency it was actually shown in.
+  //
+  // A marketplace's currency is not a fixed fact about the marketplace -- it is
+  // whatever that site is displaying to YOU. Neokyo has a currency selector,
+  // and with it set to USD a product page carries no yen at all, so insisting
+  // the record be JPY produced captures with a USD figure and an empty price.
+  //
+  // So the symbol on the page decides. Native first (JPY here), and only if
+  // there is none does the USD figure become the price in its own right rather
+  // than a conversion of something.
+  function readPrice(text) {
+    const native = SITE.priceFrom(text);
+    const usd = SITE.usdFrom ? SITE.usdFrom(text) : null;
+    if (native !== null && native !== undefined) {
+      // Both present: the site is showing its own conversion beside the
+      // native price, and that conversion is the rate actually charged.
+      return { price: native, currency: SITE.currency, priceUsd: usd };
+    }
+    if (usd !== null && usd !== undefined) {
+      return { price: usd, currency: 'USD', priceUsd: null };
+    }
+    return { price: null, currency: SITE.currency, priceUsd: null };
   }
 
   // Text of the first element matching any of `selectors`. Used to read a
@@ -214,8 +241,7 @@
         anchor.querySelector('img')?.getAttribute('alt') ||
         tileTitle(anchor) ||
         '',
-      price: SITE.priceFrom(text),
-      priceUsd: SITE.usdFrom ? SITE.usdFrom(text) : null,
+      ...readPrice(text),
       status: (SITE.tileSoldFrom || SITE.soldFrom)(text) ? 'trading' : 'on_sale',
       thumbnail: tilePhoto(anchor),
       itemCondition: null,
@@ -405,21 +431,32 @@
   // Same posture as itemFromDom() for tiles, including the _viaFallback flag.
   // A degraded capture has to be visible as degraded -- silently bad data is
   // the failure mode this whole module is built to avoid.
-  function detailTitle() {
-    // h1 first, but never rely on it alone -- Mercari does not guarantee one
-    // and it can render after the button is wanted. document.title always
-    // exists and carries the listing name, so the chain always terminates.
-    const h1 = document.querySelector('h1')?.textContent?.trim();
-    if (h1) return h1;
-    const og = document
-      .querySelector('meta[property="og:title"]')
-      ?.getAttribute('content')
-      ?.trim();
-    if (og) return og;
+  // The three places a listing's name can be found, each read the same way on
+  // every site. Which order to TRY them in is per site, because it depends on
+  // what the site puts in its h1: Mercari's is the listing name, Neokyo's is
+  // the section heading "Item Details" -- taking h1 first there captured every
+  // listing under the same useless title.
+  const TITLE_SOURCES = {
+    h1: () => document.querySelector('h1')?.textContent?.trim(),
+    og: () =>
+      document
+        .querySelector('meta[property="og:title"]')
+        ?.getAttribute('content')
+        ?.trim(),
+    // Always present, so whatever order a site uses, the chain terminates.
     // Every marketplace suffixes its own name onto the document title.
-    return (document.title || '')
-      .replace(/\s*[|\-–]\s*(Mercari|Neokyo)[^|\-–]*$/i, '')
-      .trim();
+    doc: () =>
+      (document.title || '')
+        .replace(/\s*[|\-–]\s*(Mercari|Neokyo)[^|\-–]*$/i, '')
+        .trim(),
+  };
+
+  function detailTitle() {
+    for (const key of SITE.titleOrder || ['h1', 'og', 'doc']) {
+      const t = TITLE_SOURCES[key]?.();
+      if (t) return t;
+    }
+    return '';
   }
 
   function detailPhoto() {
@@ -464,16 +501,27 @@
     const priceText = scopedText(SITE.priceScope) ?? body;
     const sold = SITE.soldFrom(body);
 
+    // What the page actually offered, recorded whether or not the read
+    // succeeded. On a site with no fiber there is no scan to fall back on, and
+    // "why is this one empty" is otherwise unanswerable without a screenshot
+    // and a round of guessing. Truncated: this is a hint, not a page dump.
+    const domScan = {
+      priceText: priceText.replace(/\s+/g, ' ').trim().slice(0, 80),
+      scoped: scopedText(SITE.priceScope) !== null,
+      h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
+      og: (TITLE_SOURCES.og() || '').slice(0, 60),
+      doc: (TITLE_SOURCES.doc() || '').slice(0, 60),
+    };
+
     // Being on a listing URL is enough to offer a capture. Bailing out when the
     // title or photo could not be read is what made the button vanish
     // entirely, which is far worse than a capture that needs a name later.
     return {
       id,
       name: detailTitle(),
-      price: SITE.priceFrom(priceText),
-      // The marketplace's own conversion, where it publishes one. Its rate is
-      // the one actually charged, so it beats anything looked up later.
-      priceUsd: SITE.usdFrom ? SITE.usdFrom(priceText) : null,
+      // price, currency and priceUsd together -- the currency is whichever one
+      // the page was actually showing, not an assumption about the site.
+      ...readPrice(priceText),
       status: sold ? 'trading' : 'on_sale',
       thumbnail: detailPhoto(),
       itemCondition: null,
@@ -489,6 +537,7 @@
       // server-rendered one it is simply how the page is read, and flagging it
       // would mark every Neokyo capture degraded for no reason.
       _viaFallback: !!SITE.hasFiber,
+      _domScan: domScan,
     };
   }
 

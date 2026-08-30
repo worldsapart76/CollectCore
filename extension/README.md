@@ -165,8 +165,17 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
 - **Buy side only, and active only.** A proxy lists what can still be bought, so
   no sold comps come from there. That is not a gap in the parser; it is what the
   buy side *is*. Sold comps come from Mercari US.
-- **Prices are yen, and yen has no subunit.** ¥1,200 is stored as `1200`, not
-  `120000`. Every display goes through the currency's own exponent.
+- **The currency is whatever the page is showing you.** Neokyo has a currency
+  selector, and with it set to USD a product page carries no yen at all. The
+  symbol on the page decides: yen found → the record is JPY (and Neokyo's own
+  USD conversion rides along beside it); only dollars found → the record is USD
+  and those dollars *are* the price. Taking the marketplace's nominal currency
+  on faith produced captures reading `— ($4.33)` with no price at all.
+- **Yen has no subunit.** ¥1,200 is stored as `1200`, not `120000`. Every
+  display goes through the currency's own exponent.
+- **Its `h1` is the section heading "Item Details"**, not the listing name, so
+  the title is read from `og:title` and the document title first. Which order
+  to try is per site, in `SITES`.
 - **No React fiber.** The page is server-rendered, so `content/fiber.js` is
   deliberately not injected there and the DOM read is the whole parser.
 - **The listing id is the tail of the URL** and the URL is recorded as found.
@@ -244,6 +253,17 @@ not. **Do not move that walk into `capture.js`** — it will silently fall back 
 DOM scraping, which is exactly what happened on 2026-08-28.
 
 ### When a capture comes back thin
+
+A row whose title or price is missing shows a **page read:** line in the panel
+giving the text the price was read from and every title candidate the page
+offered — `h1`, `og:title`, and the document title. That is the DOM equivalent
+of the fiber scan below, and it exists so a bad read is answered with what the
+page actually said rather than with another round of guessing.
+
+**Re-capturing a bad row repairs it.** A detail read is the best name available,
+so on that path it replaces whatever is there rather than only filling a blank —
+otherwise a row captured as "Item Details" would keep that title forever.
+
 
 A capture is flagged **DOM fallback** only when it is genuinely worse — no
 title, or no price. Where a field was *read from* is not itself a problem: on

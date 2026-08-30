@@ -145,6 +145,21 @@ function row(rec) {
     body.append(dbg);
   }
 
+  // The same, for a site read from the DOM because it has no fiber. Shown on
+  // the same condition -- a poor read -- and it answers the same question:
+  // what did the page actually offer? Without it, "why is this one empty" can
+  // only be settled by a screenshot and a round of guessing.
+  const dom = rec.domScan;
+  if (dom && (!rec.name || rec.priceCents == null)) {
+    const dbg = document.createElement('div');
+    dbg.className = 'scan-debug';
+    dbg.textContent =
+      `page read: price from ${dom.scoped ? 'the price element' : 'the whole page'}` +
+      ` — "${dom.priceText || 'nothing'}"` +
+      ` · h1 "${dom.h1 || '—'}" · og "${dom.og || '—'}" · title "${dom.doc || '—'}"`;
+    body.append(dbg);
+  }
+
   const lines = rec.lines || [];
   const assoc = document.createElement('button');
   assoc.type = 'button';

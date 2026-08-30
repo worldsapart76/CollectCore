@@ -280,9 +280,11 @@ async function capture({
     // through the currency's own exponent, so ¥350 must arrive as 350.
     priceCents: item.price,
     // The marketplace's own USD conversion, where it publishes one alongside
-    // the native price. Neokyo does. Recording it means that sighting needs no
-    // looked-up rate at all, and the rate it implies is the one actually
-    // charged rather than a daily average.
+    // the native price. Recording it means that sighting needs no looked-up
+    // rate at all, and the rate it implies is the one actually charged rather
+    // than a daily average. Null when the page was already showing USD -- then
+    // the price IS the USD figure and repeating it here would be a conversion
+    // of nothing.
     priceUsd: item.priceUsd ?? null,
     listingState: listingState(item.status),
     rawStatus: item.status,
@@ -305,6 +307,13 @@ async function capture({
       if (item.description) existing.description = item.description;
       if (item.sellerId != null) existing.sellerId = item.sellerId;
       if (item.photos?.length) existing.photos = item.photos;
+      // A detail read is the best name available, so on this path it wins
+      // outright rather than only filling a blank. Filling-only cannot repair
+      // a name that is present but WRONG -- every Neokyo capture came in as
+      // "Item Details", the page's section heading, and re-capturing left it
+      // exactly as it was. Re-capturing is the obvious way to fix a bad row;
+      // it should actually fix it.
+      if (item.name) existing.name = item.name;
     }
     if (item.itemCondition && !existing.itemCondition) {
       existing.itemCondition = item.itemCondition;
@@ -322,6 +331,12 @@ async function capture({
     // Once a clean read lands, stop calling the record degraded.
     if (existing.viaFallback && !item._viaFallback) existing.viaFallback = false;
     if (item._scanKeys) existing.scanKeys = item._scanKeys;
+    if (item._domScan) existing.domScan = item._domScan;
+    // A re-read is the newer truth about what the page shows, currency
+    // included. Sightings within one record share its currency, so a display
+    // currency switched mid-session would mix them -- possible, not worth
+    // modelling until it happens.
+    if (item.currency) existing.currency = item.currency;
     existing.borrowed = item._borrowed || null;
     if (item.dates) existing.dates = { ...(existing.dates || {}), ...item.dates };
     // Re-seen means changed: a price move or a sale is exactly what a second
@@ -341,7 +356,11 @@ async function capture({
     listingUrl: listingUrl || null,
     name: item.name || '',
     priceCents: item.price,
-    currency: currency || 'USD',
+    // What the PAGE was showing, falling back to the marketplace's declared
+    // currency. A site with a currency selector displays whatever the user set
+    // it to -- Neokyo with it on USD carries no yen at all -- so taking the
+    // marketplace's nominal currency on faith recorded a dollar figure as yen.
+    currency: item.currency || currency || 'USD',
     rawStatus: item.status,
     listingState: sighting.listingState,
     itemCondition: item.itemCondition || null,
@@ -366,6 +385,9 @@ async function capture({
     // What the detail fiber scan actually found, so a bad read can be
     // diagnosed from the panel instead of from a noisy page console.
     scanKeys: item._scanKeys || null,
+    // The same, for a site with no fiber: what text the price was read from
+    // and which title candidates the page offered.
+    domScan: item._domScan || null,
     // Which fields the page had to supply because the fiber lacked them.
     borrowed: item._borrowed || null,
     // Set by the panel after a successful sync. Until then a record is the
