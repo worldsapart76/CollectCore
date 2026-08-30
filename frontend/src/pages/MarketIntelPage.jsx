@@ -3,6 +3,7 @@ import { Button, Alert } from "../components/primitives";
 import {
   getMarketGrid, getMarketComps, setListingOutcome,
   listMarketLots, getMarketLot, addLotLine, updateLotLine, deleteLotLine,
+  deleteMarketListing,
   listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
@@ -585,7 +586,7 @@ function Residual({ lot }) {
   );
 }
 
-function LotAnalyzer({ lot, onChanged, onError }) {
+function LotAnalyzer({ lot, onChanged, onDeleted, onError }) {
   const [busy, setBusy] = useState(false);
 
   async function run(fn) {
@@ -664,6 +665,30 @@ function LotAnalyzer({ lot, onChanged, onError }) {
           <a href={lot.listing_url} target="_blank" rel="noreferrer"
              style={{ fontSize: 12 }}>open ↗</a>
         )}
+        {/* For a lot that should not exist — a duplicate, or a capture read
+            off the wrong page. Refreshing a lot's price or shipping needs no
+            delete: re-capture it in the extension and the newest sighting
+            wins. */}
+        <button
+          disabled={busy}
+          onClick={() => {
+            if (!confirm(
+              `Delete "${lot.title || `listing ${lot.listing_id}`}" and its price history?\n\n` +
+              `This cannot be undone. To pick up a new price or shipping, ` +
+              `re-capture the page in the extension instead — no delete needed.`
+            )) return;
+            run(async () => {
+              await deleteMarketListing(lot.listing_id);
+              onDeleted();
+            });
+          }}
+          style={{ border: "1px solid #ddd", borderRadius: 3, background: "#fff",
+                   padding: "1px 5px", cursor: "pointer", fontSize: 11,
+                   color: "#b91c1c" }}
+          title="Delete this capture and its price history"
+        >
+          delete lot
+        </button>
       </div>
 
       {lot.landed_cents == null && (
@@ -872,7 +897,18 @@ export default function MarketIntelPage() {
               )}
               {lotId && !lot && <div style={{ color: "#666", marginTop: 10 }}>Loading…</div>}
               {lot && (
-                <LotAnalyzer lot={lot} onChanged={refreshLot} onError={setError} />
+                <LotAnalyzer
+                  lot={lot}
+                  onChanged={refreshLot}
+                  // A deleted lot has no analysis left to refresh, so the
+                  // selection is dropped rather than re-fetched into a 404.
+                  onDeleted={async () => {
+                    setLotId(null);
+                    setLot(null);
+                    setLots((await listMarketLots()).lots || []);
+                    setCards((await getMarketGrid()).cards || []);
+                  }}
+                  onError={setError} />
               )}
             </>
           )}
@@ -1620,12 +1656,43 @@ function ListingOutcome({ listing, onDone, onError }) {
     border: "1px solid #ddd", borderRadius: 3, background: "#fff",
     padding: "1px 5px", cursor: "pointer", fontSize: 11, color: "#555",
   };
+  // Deliberately a third, quieter action. `gone` is the ordinary end of a
+  // listing and it KEEPS the price history, which is real evidence about what
+  // this card was offered at. This throws that away, so it is for captures
+  // that should not exist — wrong card, duplicate, bad page read.
+  //
+  // It is NOT how you refresh one: re-capturing the page in the extension
+  // updates the listing and appends a fresh sighting, keeping the history.
+  async function remove() {
+    const what = listing.title_raw || `listing ${listing.listing_id}`;
+    if (!confirm(
+      `Delete "${what}" and its price history?\n\n` +
+      `This cannot be undone. To just stop it being a buying option, use Gone ` +
+      `instead — that keeps the history. To pick up a new price or shipping, ` +
+      `re-capture the page in the extension; no delete is needed.`
+    )) return;
+    setBusy(true);
+    try {
+      await deleteMarketListing(listing.listing_id);
+      await onDone();
+    } catch (e) {
+      onError(e.message || "Failed to delete it");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{ display: "flex", gap: 4, whiteSpace: "nowrap" }}>
       <button disabled={busy} onClick={() => mark("sold")} style={btn}
               title="It sold — records the price as a comp">sold</button>
       <button disabled={busy} onClick={() => mark("gone")} style={btn}
               title="No longer listed, price unknown — removes it as a buying option, adds no comp">gone</button>
+      <button disabled={busy} onClick={remove}
+              style={{ ...btn, color: "#b91c1c" }}
+              title="Delete this capture and its price history — for a row that should not exist. Not needed to refresh a price: re-capture the page instead.">
+        delete
+      </button>
     </div>
   );
 }

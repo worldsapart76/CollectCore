@@ -1484,6 +1484,20 @@ export async function setListingOutcome(listingId, body) {
   return handleJsonResponse(res, 'Failed to record the outcome');
 }
 
+// Remove a listing and everything hanging off it. Rare on purpose: `gone`
+// stops a listing being a buying option and KEEPS its price history, which is
+// real evidence. This is for captures that should never have been recorded —
+// wrong card, duplicate, bad page read.
+//
+// Not needed to refresh one. Ingest keys listings on (marketplace, externalId),
+// so re-capturing the page updates it and appends a fresh sighting.
+export async function deleteMarketListing(listingId) {
+  const res = await fetch(`${API}/market/listings/${listingId}`, {
+    method: 'DELETE',
+  });
+  return handleJsonResponse(res, 'Failed to delete the listing');
+}
+
 // Multi-card listings, each with its cost split across its lines by value.
 export async function listMarketLots() {
   const res = await fetch(`${API}/market/lots`);

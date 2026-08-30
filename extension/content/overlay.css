@@ -91,6 +91,52 @@
   bottom: 104px;
 }
 
+/* Re-read this page and update the capture.
+
+   A separate button rather than a mode on the main one: clicking a captured
+   bar removes the capture, and folding "refresh" into that same click would
+   make one gesture mean two opposite things depending on state. It sits above
+   the bar and is only shown when there IS a capture to refresh. */
+#cc-detail-refresh {
+  position: fixed;
+  right: 20px;
+  bottom: 64px;
+  z-index: 2147483000;
+
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+
+  background: rgba(17, 17, 17, 0.88);
+  color: #fff;
+  font: 600 16px/1 system-ui, sans-serif;
+
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+/* Stacked above whatever offset the bar itself takes on this site — Neokyo's
+   help-chat launcher pushes both up together. */
+#cc-detail-refresh.cc-site-neokyo {
+  bottom: 148px;
+}
+
+#cc-detail-refresh:hover {
+  background: rgba(17, 17, 17, 1);
+  transform: scale(1.08);
+}
+
+#cc-detail-refresh.cc-done {
+  background: #1f9d55;
+}
+
+#cc-detail-refresh.cc-error {
+  background: #b91c1c;
+}
+
 #cc-detail-bar:hover {
   background: rgba(17, 17, 17, 1);
   transform: scale(1.04);

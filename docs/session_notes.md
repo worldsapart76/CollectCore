@@ -85,6 +85,15 @@ shortlist — a fix for Neokyo too, whose og:title and document title both say
 "Item Details". A capture with no name is flagged in the panel; a plausible
 name identical on every row is not.
 
+**Refreshing and deleting captures** (entry 20). A **↻** button beside the
+capture bar re-reads a listing page and updates the record, keeping its card
+associations — clicking the bar twice reaches the same place but destroys the
+record in between. Nothing else had to change: the extension store merges by
+key and the server keys listings on `(marketplace, external_id)`, so a refresh
+updates the listing and appends a sighting, keeping the older observation.
+`DELETE /market/listings/{id}` is the other half, for captures that should not
+exist at all; it removes children explicitly, since FK cascades never fire here.
+
 **Next:** v2 step 3 — per-copy cost basis and the ledger. Capture is done for
 now: all four sources are built and verified against real pages.
 

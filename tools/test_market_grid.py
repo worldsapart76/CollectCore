@@ -224,6 +224,70 @@ g5 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
 check("free shipping means free, not the estimate",
       g5[102]["buy_single"]["landed_cents"], 900)
 
+print("\n--- deleting a listing takes its children with it ---")
+# SQLite FK cascades never fire here -- PRAGMA foreign_keys is issued only on
+# init_db's own connection -- so a delete that trusted the FOREIGN KEY clauses
+# would leave orphaned sightings behind, still counted by every comp query.
+before = s.execute(text("SELECT COUNT(*) FROM mkt_sighting")).scalar()
+victim = c.get("/market/grid").json()["cards"]
+vid = [x for x in victim if x["item_id"] == 103][0]["buy_single"]["listing_id"]
+kids = s.execute(text("SELECT COUNT(*) FROM mkt_sighting WHERE listing_id = :i"),
+                 {"i": vid}).scalar()
+r = c.delete(f"/market/listings/{vid}")
+check("delete succeeds", r.status_code, 200)
+check("it reports what it removed", r.json()["sightings_deleted"], kids)
+check("no orphaned sightings",
+      s.execute(text("SELECT COUNT(*) FROM mkt_sighting WHERE listing_id = :i"),
+                {"i": vid}).scalar(), 0)
+check("no orphaned lines",
+      s.execute(text("SELECT COUNT(*) FROM mkt_listing_line WHERE listing_id = :i"),
+                {"i": vid}).scalar(), 0)
+check("and only that listing's sightings went",
+      s.execute(text("SELECT COUNT(*) FROM mkt_sighting")).scalar(), before - kids)
+check("the listing is gone from buy options",
+      c.get("/market/grid").json()["cards"] and
+      [x for x in c.get("/market/grid").json()["cards"]
+       if x["item_id"] == 103][0]["buy_single"], None)
+check("deleting it twice is a 404",
+      c.delete(f"/market/listings/{vid}").status_code, 404)
+check("and a listing that never existed too",
+      c.delete("/market/listings/999999").status_code, 404)
+
+print("\n--- re-capturing needs no delete ---")
+# Ingest keys listings on (marketplace, external_id), so browsing back to a
+# page and capturing again updates that row and appends a sighting. That is the
+# refresh path: it keeps the history, where delete throws it away.
+#
+# `ship1` was captured earlier at $10.00 with $5.48 postage. Re-capture it at a
+# dropped price -- which is what pressing the extension's refresh button does.
+def listing_row(ext):
+    return s.execute(text(
+        "SELECT listing_id, (SELECT COUNT(*) FROM mkt_sighting v"
+        "   WHERE v.listing_id = l.listing_id) AS n "
+        "FROM mkt_listing l WHERE l.external_id = :e"), {"e": ext}).fetchone()
+
+was_id, was_n = listing_row("ship1")
+listings_before = s.execute(text("SELECT COUNT(*) FROM mkt_listing")).scalar()
+c.post("/market/captures", json={"captures": [
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "ship1",
+     "name": "Felix Yes24", "capturedAt": "2026-09-03T00:00:00Z",
+     "lines": [{"lineType": "card", "cardId": 102, "label": "Felix", "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-03T00:00:00Z", "priceCents": 800,
+                    "shippingCents": 300,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+now_id, now_n = listing_row("ship1")
+check("the same listing row, not a second one", now_id, was_id)
+check("no new listing was created",
+      s.execute(text("SELECT COUNT(*) FROM mkt_listing")).scalar(), listings_before)
+check("a sighting was appended", now_n, was_n + 1)
+# The old observation is kept -- it really was seen at $10.00 -- and the buy
+# side reads only the newest, which is what makes a refresh a refresh.
+opts = {o["listing_id"]: o for o in c.get("/market/comps/102").json()["buy_options"]}
+check("the buy side prices it off the newest sighting",
+      opts[was_id]["landed_cents"], 800 + 300)
+check("and the earlier sighting is still on file", now_n >= 2, True)
+
 print("\n--- a sale with no price is refused ---")
 r = c.post(f"/market/listings/{lid}/outcome", json={"outcome": "sold"})
 check("refused", r.status_code, 400)

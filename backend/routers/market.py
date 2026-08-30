@@ -1902,6 +1902,48 @@ def listing_outcome(listing_id: int, body: DelistIn, db=Depends(get_db)):
             "price_usd": usd}
 
 
+@router.delete("/listings/{listing_id}")
+def delete_listing(listing_id: int, db=Depends(get_db)):
+    """Remove a listing and everything hanging off it.
+
+    Deliberately available, and deliberately rare. `gone` is the ordinary way a
+    listing stops being a buying option, and it KEEPS the price history, which
+    is real evidence about what this card was offered at. This is for a capture
+    that should never have been recorded at all -- linked to the wrong card, a
+    duplicate, a bad page read -- where the history is not evidence but noise.
+
+    Re-capturing needs no delete: ingest keys listings on
+    (marketplace, external_id), so browsing back to a page and capturing again
+    updates the listing and appends a fresh sighting. Deleting is for rows that
+    should not exist, not for rows that are out of date.
+
+    Child rows go explicitly. SQLite's FK cascades never fire here -- PRAGMA
+    foreign_keys is issued only on init_db's own connection -- so a FOREIGN KEY
+    clause in schema.sql is documentation, and a delete that trusted it would
+    leave orphaned sightings behind, still counted by every comp query.
+    """
+    row = db.execute(text(
+        "SELECT marketplace, external_id, title_raw FROM mkt_listing "
+        "WHERE listing_id = :i"), {"i": listing_id}).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such listing.")
+
+    sightings = db.execute(text(
+        "DELETE FROM mkt_sighting WHERE listing_id = :i"), {"i": listing_id}).rowcount
+    lines = db.execute(text(
+        "DELETE FROM mkt_listing_line WHERE listing_id = :i"), {"i": listing_id}).rowcount
+    db.execute(text("DELETE FROM mkt_listing WHERE listing_id = :i"), {"i": listing_id})
+    db.commit()
+    return {
+        "ok": True,
+        "marketplace": row[0],
+        "external_id": row[1],
+        "title": row[2],
+        "sightings_deleted": sightings,
+        "lines_deleted": lines,
+    }
+
+
 # ───────────────────────── The lot analyzer ──────────────────────────────────
 #
 # A card-first model cannot answer "is this 8-card lot worth $118?", because

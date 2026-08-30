@@ -165,6 +165,26 @@ can only run inside a live user gesture and fails silently when it doesn't.
 
 The toolbar badge reads **ON** while the current tab is capturing.
 
+### Refreshing a capture
+
+On a listing page you have already captured, a **↻** button appears above the
+capture bar. It re-reads the page and updates the record — a dropped price, a
+field an older parser was missing — **keeping the cards you linked to it**.
+
+That is not the same as clicking the bar twice. Clicking a captured bar removes
+the capture, so off-then-on does reach the same place but destroys the record in
+between and takes its card associations with it. Re-identifying a card to pick
+up a shipping figure is not a workflow, which is why the two are separate
+buttons rather than one button with two meanings.
+
+The store merges by key: capturing a listing it already holds appends a
+sighting, refreshes the fields, keeps the lines, and clears `syncedAt` so the
+next **Sync** pushes it. On the server the same thing happens one level up —
+listings are keyed on `(marketplace, external_id)` — so a refreshed capture
+updates the existing listing and adds a sighting rather than creating a second
+row. **The older observation is kept**; it really was seen at that price, and
+the buy side reads only the newest.
+
 ## What differs on Neokyo
 
 It is a **proxy**, and that shapes the data rather than just the parsing.

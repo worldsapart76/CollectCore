@@ -2068,6 +2068,34 @@ No backup changes needed.
     correct cleaner and a correct source still combine into a wrong name.
     127 cases in `tools/test_capture_parsing.mjs`.
 
+20. **Refresh a capture, or delete a listing — BUILT 2026-08-30.** Two
+    different needs that read as one: an eBay listing captured before the
+    postage fix has no postage, and a captured row can simply be wrong.
+
+    **Refresh** is a **↻** button beside the capture bar, shown only on a
+    listing already captured. It re-reads the page and updates the record,
+    keeping the cards linked to it. The alternative — clicking the bar twice,
+    off then on — reaches the same place but destroys the record in between and
+    takes its associations with it; re-identifying a card to pick up a shipping
+    figure is not a workflow. Two buttons rather than one button meaning two
+    opposite things depending on state.
+
+    Nothing else had to change for it. The extension store merges by key and
+    the server keys listings on `(marketplace, external_id)`, so a refreshed
+    capture updates the existing listing and appends a sighting. **The older
+    observation is kept** — it really was seen at that price — and the buy side
+    reads only the newest.
+
+    **`DELETE /market/listings/{id}`** is the other half, and deliberately rare.
+    `gone` is the ordinary end of a listing and it *keeps* the price history,
+    which is real evidence about what a card was offered at. Delete is for
+    captures that should not exist: wrong card, duplicate, bad page read. It
+    removes sightings and lines **explicitly** — SQLite's FK cascades never
+    fire here, since `PRAGMA foreign_keys` is issued only on `init_db`'s own
+    connection, so a delete trusting the `FOREIGN KEY` clauses would leave
+    orphaned sightings that every comp query still counts. The confirm says so:
+    to refresh, re-capture; no delete needed.
+
 ### Next
 
 **Steps 1 and 2 of the v2 market workspace are built** (card grid +

@@ -678,6 +678,7 @@
   // tile dot there is nothing to navigate away from.
 
   const BAR_ID = 'cc-detail-bar';
+  const REFRESH_ID = 'cc-detail-refresh';
 
   function detailItem() {
     const raw = document.body.dataset.ccDetailItem;
@@ -1101,11 +1102,13 @@
   function decorateDetail() {
     const item = detailIdFromUrl() ? readDetailItem() : null;
     let bar = document.getElementById(BAR_ID);
+    let refresh = document.getElementById(REFRESH_ID);
 
     // Mercari is an SPA: navigating from a listing back to search leaves the
     // bar behind unless it is torn down when the stamp goes.
     if (!item) {
       bar?.remove();
+      refresh?.remove();
       return;
     }
 
@@ -1119,7 +1122,29 @@
       bar.addEventListener('click', onDetailClick);
       document.body.appendChild(bar);
     }
+    if (!refresh) {
+      refresh = document.createElement('button');
+      refresh.id = REFRESH_ID;
+      refresh.type = 'button';
+      refresh.classList.add(`cc-site-${SITE.code}`);
+      refresh.textContent = '↻';
+      refresh.title =
+        'Re-read this page and update the capture — picks up a price change ' +
+        'or a field the parser was missing. Keeps the cards you linked to it.';
+      refresh.addEventListener('click', onRefreshClick);
+      document.body.appendChild(refresh);
+    }
     syncDetailBar(bar, item);
+    syncRefresh(refresh, item);
+  }
+
+  // Only on a listing already captured: there is nothing to refresh otherwise,
+  // and a button that does the same thing as the one beside it is worse than
+  // no button.
+  function syncRefresh(refresh, item) {
+    const on = captured.has(keyFor(item.id));
+    const shown = on ? 'block' : 'none';
+    if (refresh.style.display !== shown) refresh.style.display = shown;
   }
 
   function syncDetailBar(bar, item) {
@@ -1181,6 +1206,58 @@
     syncDetailBar(bar, item);
   }
 
+  // Re-read the page and update an existing capture.
+  //
+  // The alternative was clicking the bar twice -- off, then on -- which does
+  // reach the same place but DESTROYS the record in between, taking the cards
+  // linked to it with it. Re-identifying a card to pick up a shipping figure
+  // is not a workflow.
+  //
+  // The store merges by key: a second capture of a listing already held
+  // appends a sighting, refreshes the fields, keeps the lines, and clears
+  // syncedAt so the next sync pushes it. So a refresh IS a capture; it only
+  // needs to not be preceded by a delete.
+  async function onRefreshClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const refresh = document.getElementById(REFRESH_ID);
+    // Re-read at click time, never from when the button was created: an SPA
+    // can navigate between listings in place.
+    const item = readDetailItem();
+    if (!item || item.id !== detailIdFromUrl()) {
+      if (refresh) {
+        refresh.classList.add('cc-error');
+        refresh.textContent = '!';
+      }
+      return;
+    }
+
+    const res = await send({
+      type: 'CAPTURE',
+      payload: {
+        item,
+        marketplace: SITE.code,
+        currency: SITE.currency,
+        listingUrl: urlForListing(item.id, null),
+        pageUrl: location.href,
+        searchQuery: null,
+      },
+    });
+    if (!res || !refresh) return;
+    // Said out loud. A refresh that reads the same values as last time looks
+    // identical to one that did nothing at all, and "did the button work" is
+    // not a question the user should have to answer by opening the panel.
+    refresh.textContent = '✓';
+    refresh.classList.add('cc-done');
+    setTimeout(() => {
+      const el = document.getElementById(REFRESH_ID);
+      if (!el) return;
+      el.textContent = '↻';
+      el.classList.remove('cc-done');
+    }, 1500);
+  }
+
   function decorateAll() {
     document.querySelectorAll(SITE.tiles).forEach(decorate);
     decorateDetail();
@@ -1202,13 +1279,16 @@
       if (dot) syncDot(anchor, dot);
     });
     const bar = document.getElementById(BAR_ID);
+    const refresh = document.getElementById(REFRESH_ID);
     const di = detailIdFromUrl() ? readDetailItem() : null;
     if (bar && di) syncDetailBar(bar, di);
+    if (refresh && di) syncRefresh(refresh, di);
   }
 
   function removeOverlay() {
     document.querySelectorAll(`.${DOT_CLASS}`).forEach((d) => d.remove());
     document.getElementById(BAR_ID)?.remove();
+    document.getElementById(REFRESH_ID)?.remove();
   }
 
   // --- Activation ----------------------------------------------------------
