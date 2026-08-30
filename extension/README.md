@@ -304,17 +304,18 @@ DOM scraping, which is exactly what happened on 2026-08-28.
 
 ### When a capture comes back thin
 
-Every DOM-read row carries a **page read:** line in the panel: which source the
-title came from, the text the price was read from, `h1` / `og:title` /
-document title, and the shortlist the title was chosen from — each entry tagged
-with the element it came off.
+A DOM-read row whose title came from anywhere other than the site's own marker
+carries a **page read:** line in the panel: which source the title came from,
+the text the price was read from, `h1` / `og:title` / document title, and the
+shortlist it chose between — each entry tagged with the element it came off, its
+rendered font size, and a `*` if the site marked it as seller content.
 
-It shows on **every** such row, not only a broken one. The condition used to be
-"the title or price is missing", and that hid the failure that actually happened
-twice: a title that is present, plausible, and identical on every listing —
-*Item Details*, then *About Neokyo*. Nothing about the row looked wrong, so
-nothing asked to be looked at. One muted line is the price of turning "the title
-is wrong" into a named element instead of another round of guessing.
+The condition is deliberately *weak read*, not *missing*. Gating it on "the
+title or price is missing" hid the failure that actually happened three times
+over: a title that is present, plausible, and identical on every listing —
+*Item Details*, then *About Neokyo*, then a category-menu entry. Nothing about
+those rows looked wrong, so nothing asked to be looked at. A row that got the
+good source stays quiet.
 
 **Re-capturing a bad row repairs it.** A detail read is the best name available,
 so on that path it replaces whatever is there rather than only filling a blank —

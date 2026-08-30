@@ -149,16 +149,19 @@ function row(rec) {
   // the same condition -- a poor read -- and it answers the same question:
   // what did the page actually offer? Without it, "why is this one empty" can
   // only be settled by a screenshot and a round of guessing.
-  // Shown on EVERY page-read row, not only a broken one.
+  // Shown when the read was WEAK, not only when it was empty.
   //
-  // The condition used to be "the title or price is missing", and it hid the
-  // failure that actually happened twice: a title that is present, plausible,
-  // and identical on every listing -- "Item Details", then "About Neokyo".
-  // Nothing about the row looked wrong, so nothing asked to be looked at. This
-  // is one muted line, and it is the difference between naming the element
-  // holding the title and guessing at it for another round.
+  // The original condition was "the title or price is missing", and it hid the
+  // failure that actually happened three times over: a title that is present,
+  // plausible, and identical on every listing -- "Item Details", then "About
+  // Neokyo", then a category-menu entry. Nothing about those rows looked
+  // wrong, so nothing asked to be looked at.
+  //
+  // `weak` is the content script's own verdict: the title did NOT come from
+  // the element the site marks as seller-written, on a site that publishes
+  // such a marker. A row that got the good source stays quiet.
   const dom = rec.domScan;
-  if (dom) {
+  if (dom && (dom.weak || !rec.name || rec.priceCents == null)) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =

@@ -1,8 +1,8 @@
 # Photocard Market Intel — Design & Implementation Plan
 
 **Status:** capture + comps **BUILT** 2026-08-29 (slices 1-5, live in prod).
-Neokyo capture **BUILT** 2026-08-29 (buy side, JPY). Ledger designed, not
-built. Pocamarket / eBay declared, no parsers yet.
+Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). Ledger
+designed, not built. Pocamarket / eBay declared, no parsers yet.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -303,7 +303,7 @@ only the assumption that comps flow one direction.
 | Site | Currency | Side | States | Parser |
 |---|---|---|---|---|
 | **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
-| **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT** — server-rendered DOM, no fiber |
+| **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT + VERIFIED** — server-rendered DOM, no fiber |
 | **Pocamarket** | KRW | both | tbd | Declared, no parser |
 | **eBay** | USD | both | tbd | Declared, no parser |
 
@@ -1604,6 +1604,50 @@ No backup changes needed.
     by a fresh-DB round trip through `POST /market/captures` proving ¥350 stays
     350, `fx_source = 'marketplace'`, and `fee_model('neokyo','buy')` converting
     ¥350 to $2.31 with `fx_missing` false.
+
+13. **Neokyo capture VERIFIED** 2026-08-30 — a real listing captured with the
+    right title, the right yen, and the marketplace's own USD beside it. Four
+    rounds to get there, every one of them a wrong assumption about markup that
+    had never been looked at, and the sequence is worth recording because the
+    next site will be the same shape of problem:
+
+    - **The currency is not a property of the marketplace.** Neokyo has a
+      currency selector; set to USD its pages carry no yen at all. Declaring
+      the site JPY produced captures with an empty native price and a perfectly
+      good dollar figure sitting unused. The symbol on the page decides.
+    - **The unit is spelled out.** `3399 Yen` — no `¥`, no `円`. Searching for
+      the symbols found nothing. Spelled-out first is also what makes a
+      whole-page search safe, since the header's points badges are bare numbers
+      beside a yen glyph.
+    - **The title is in none of the usual places.** `h1` empty, `og:title` and
+      the document title both "Item Details". It is an `h6`, and it carries
+      `class="... translate"` — Neokyo's own marker for text it
+      machine-translates, i.e. text the *seller* wrote rather than text the
+      site did. That marker is the answer and it beats every heuristic, because
+      it is the site stating the distinction rather than us inferring it.
+    - **Chrome's page translation rewrites each translated text node as a
+      `<font>` wrapper.** The "innermost element only" filter was written as
+      "skip anything with children", so it discarded the listing title — marker
+      and all — while untranslated site furniture kept no wrapper and survived
+      to win the ranking. Exactly backwards.
+
+    Underneath the marker sits a fallback ranking for a page that has none:
+    exclude site chrome (matched by class and id, since Neokyo uses no semantic
+    elements), exclude anything short enough to be only a price, then rank by
+    **rendered font size** and length. Type size is a property of the design
+    rather than of the implementation, so it survives both translation and
+    class renaming.
+
+    **The lesson that generalises:** the diagnostic was gated on "the title or
+    price is missing" and that hid every one of these. A title that is present,
+    plausible, and identical on every listing looks fine. It now shows whenever
+    the title did not come from the site's own marker, and it prints the
+    shortlist with the element and type size of each candidate — which is what
+    turned round four from a guess into a one-line change.
+
+    `node tools/test_capture_parsing.mjs` — 43 cases, including the page as
+    photographed, the same page with every string translated away, and the page
+    under Chrome translation.
 
 ### Next
 

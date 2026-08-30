@@ -697,6 +697,14 @@
       priceText: (scopedPrice || body).replace(/\s+/g, ' ').trim().slice(0, 80),
       scoped: scopedPrice !== null,
       scope: (TITLE_SOURCES.scope() || '').slice(0, 60),
+      // Whether the title came from the best source this site actually has:
+      // the element the SITE marks as seller-written, where it publishes one.
+      // Anything less is a guess that happened to win a ranking, and this is
+      // the flag the panel shows the whole diagnostic on.
+      //
+      // Computed here rather than in the panel because only this file knows
+      // what a given site offers.
+      weak: SITE.titlePrefer ? !titleCandidates()[0]?.preferred : false,
       // The shortlist it chose from, each with the element it came off. This
       // is what turns "the title is wrong" into a selector rather than into
       // another round of guessing.

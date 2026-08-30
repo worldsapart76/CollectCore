@@ -6,6 +6,58 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-30 (US CDT) — Neokyo capture VERIFIED against the live site
+
+A real listing captured correctly: *Stray Kids Hyunjin KMS Rakuten Store
+Bonus*, ¥3399, US$21.07 alongside. Four rounds of fixes to get there, all of
+them the same category of mistake — assumptions about markup I had never seen.
+
+What was actually wrong, in order:
+
+1. **Currency is not a property of the marketplace.** Neokyo has a currency
+   selector; set to USD its pages carry no yen at all. Declaring the site JPY
+   left the native price empty with a good dollar figure sitting unused. The
+   symbol on the page decides now.
+2. **The unit is spelled out** — `3399 Yen`, no `¥` and no `円`.
+3. **The title is an `h6` carrying `class="... translate"`** — Neokyo's own
+   marker for text it machine-translates, i.e. what the *seller* wrote rather
+   than what the site did. `h1` is empty; `og:title` and the document title
+   both say "Item Details". Selector lists stopping at `h5` never had the right
+   element in the room, so three rounds of ranking work were choosing among
+   candidates that could not contain the answer.
+4. **Chrome's page translation wraps each translated text node in `<font>`.**
+   The "innermost element only" filter was written as "skip anything with
+   children", so it discarded the listing title — marker and all — while
+   untranslated site furniture kept no wrapper and won. Exactly backwards.
+
+**The process lesson, which cost more than any single bug:** the diagnostic was
+gated on *"the title or price is missing"*, and that hid all four. A title that
+is present, plausible, and identical on every listing looks fine, so nothing
+asked to be looked at — the panel showed "Item Details", then "About Neokyo",
+then a category-menu entry, each time reading like a normal row. Once it printed
+the shortlist with each candidate's element and font size, round four went from
+a guess to a one-line change. It now fires whenever the title did not come from
+the site's own marker, and stays quiet otherwise.
+
+Also fixed along the way: the panel formatted every price as `$x.xx` off a
+hardcoded /100, so ¥1,200 would have read as $12.00; every *detail* capture was
+being flagged `via_fallback` because the flag was only ever set true; and a
+detail re-capture now replaces the name rather than only filling a blank, so
+re-capturing a bad row actually repairs it.
+
+Neokyo's published USD conversion is recorded as an FX rate, so yen fees convert
+without a rate being entered by hand. Per currency per day it keeps the rate
+implied by the largest listing and never overwrites one already on file.
+
+`node tools/test_capture_parsing.mjs` — 43 cases, no browser: the page as
+photographed, the same page with every string translated away, and the page
+under Chrome translation.
+
+**Next:** the ledger (box → purchase → line → outcome → sale), thumbnail upload
+to R2, promoting `source_dates` to real `posted_at`/`sold_at` columns, ship-name
+aliases, and Japanese title matching (Latin-only tokenizer — a Neokyo title
+filters nothing and the picker says so rather than pretending to match).
+
 ### 2026-08-29 (US CDT) — Neokyo capture BUILT (second marketplace, buy side)
 
 The second capture source, and the first server-rendered one. Mercari is a
