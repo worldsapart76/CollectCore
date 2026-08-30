@@ -149,21 +149,24 @@ function row(rec) {
   // the same condition -- a poor read -- and it answers the same question:
   // what did the page actually offer? Without it, "why is this one empty" can
   // only be settled by a screenshot and a round of guessing.
+  // Shown on EVERY page-read row, not only a broken one.
+  //
+  // The condition used to be "the title or price is missing", and it hid the
+  // failure that actually happened twice: a title that is present, plausible,
+  // and identical on every listing -- "Item Details", then "About Neokyo".
+  // Nothing about the row looked wrong, so nothing asked to be looked at. This
+  // is one muted line, and it is the difference between naming the element
+  // holding the title and guessing at it for another round.
   const dom = rec.domScan;
-  // Also when the title came from a FALLBACK source. A title read off the
-  // document title is usually the page's generic name -- "Item Details" on
-  // every Neokyo listing -- which is wrong in a way that looks fine, so
-  // waiting for it to be missing never surfaces it.
-  const titleFellBack = dom?.titleFrom && dom.titleFrom !== 'scope';
-  if (dom && (!rec.name || rec.priceCents == null || titleFellBack)) {
+  if (dom) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =
       `page read: title from ${dom.titleFrom || 'nowhere'}` +
       ` · price from ${dom.scoped ? 'the price element' : 'the whole page'}` +
       ` — "${dom.priceText || 'nothing'}"` +
-      ` · heading "${dom.scope || '—'}" · h1 "${dom.h1 || '—'}"` +
-      ` · og "${dom.og || '—'}" · title "${dom.doc || '—'}"`;
+      ` · h1 "${dom.h1 || '—'}" · og "${dom.og || '—'}" · doc "${dom.doc || '—'}"` +
+      (dom.cands?.length ? ` · candidates: ${dom.cands.join(' | ')}` : ' · candidates: none');
     body.append(dbg);
   }
 

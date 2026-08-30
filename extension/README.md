@@ -168,10 +168,25 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
 - **The unit is spelled out.** A product page reads `3399 Yen`, not `¥3399` and
   not `3399円`, with `Approximately : US$ 21.07` beneath it. Looking only for
   the symbols found no price at all.
-- **Its listing name is a plain heading**, not the `h1`, the `og:title` or the
-  document title — all three of those say *Item Details*, Neokyo's generic page
-  name, which is what every early capture got filed under. Headings are taken in
-  DOM order with the page's own section headings rejected by name.
+- **Its listing name is not in any of the obvious places.** The `h1`, the
+  `og:title` and the document title all say *Item Details* — Neokyo's generic
+  page name — which is what every early capture got filed under. It is not
+  reliably a heading either.
+
+  So the net is cast wide and narrowed **structurally**: candidates inside
+  `header`, `nav` or `footer` are dropped, and the longest of what remains
+  wins. A section heading is a couple of words; a listing name is a sentence of
+  specifics. Both rules hold in any language, which matters — see below.
+- **The page may be machine-translated in your browser**, which rewrites every
+  text node. Any rule that keys on English strings stops working the moment the
+  translation is off or differs, so the title logic must not depend on one. The
+  blocklist of section-heading names is a secondary filter only.
+
+  One upside: a translated title is *English*, so the card picker can actually
+  tokenize it. An untranslated Japanese title cannot be matched yet.
+- **What was captured is the translated title, not the seller's.** Fine for
+  matching cards, worth knowing if you ever compare a stored title against the
+  live listing.
 - **The currency is whatever the page is showing you.** Neokyo has a currency
   selector, and with it set to USD a product page carries no yen at all. The
   symbol on the page decides: yen found → the record is JPY (and Neokyo's own
@@ -258,17 +273,17 @@ DOM scraping, which is exactly what happened on 2026-08-28.
 
 ### When a capture comes back thin
 
-A row whose title or price is missing — **or whose title had to fall back to a
-generic source** — shows a **page read:** line in the panel: which source the
-title came from, the text the price was read from, and every title candidate the
-page offered (heading, `h1`, `og:title`, document title).
+Every DOM-read row carries a **page read:** line in the panel: which source the
+title came from, the text the price was read from, `h1` / `og:title` /
+document title, and the shortlist the title was chosen from — each entry tagged
+with the element it came off.
 
-The fallback case matters more than the missing one. A title read off the
-document title is usually the site's generic page name, so it *looks* fine while
-being the same string on every listing; waiting for a title to be absent would
-never have surfaced "Item Details". That is the DOM equivalent of the fiber scan
-below, and it exists so a bad read is answered with what the page actually said
-rather than with another round of guessing.
+It shows on **every** such row, not only a broken one. The condition used to be
+"the title or price is missing", and that hid the failure that actually happened
+twice: a title that is present, plausible, and identical on every listing —
+*Item Details*, then *About Neokyo*. Nothing about the row looked wrong, so
+nothing asked to be looked at. One muted line is the price of turning "the title
+is wrong" into a named element instead of another round of guessing.
 
 **Re-capturing a bad row repairs it.** A detail read is the best name available,
 so on that path it replaces whatever is there rather than only filling a blank —

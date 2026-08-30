@@ -65,20 +65,24 @@
       // No urlFor: the anchor's own href is the URL, so nothing has to be
       // reconstructed from a shape this file would have to know.
       queryParam: 'keyword',
-      // The listing name is a heading in the left column. It is NOT the h1,
-      // the og:title or the document title — all three say "Item Details",
-      // Neokyo's generic page name, which is how every capture ended up filed
-      // under it. Headings are read in DOM order and the page's own section
-      // headings are rejected by name, since they are fixed furniture.
+      // The listing name is NOT the h1, the og:title or the document title —
+      // all three say "Item Details", Neokyo's generic page name, which is how
+      // every early capture ended up filed under it. Nor is it reliably a
+      // heading: restricting to h1-h3 found none in the page body and fell
+      // through to the footer's "About Neokyo". So the net is wide and
+      // titleCandidates() does the narrowing, structurally.
       titleScope: [
         '[class*="product-title"]',
         '[class*="item-title"]',
-        'h1',
-        'h2',
-        'h3',
+        '[class*="title"]',
+        '[class*="product-name"]',
+        'h1', 'h2', 'h3', 'h4', 'h5',
       ],
+      // A secondary filter only. It is English, and the page can be
+      // machine-translated or set to another language, so nothing may DEPEND
+      // on it — see titleCandidates() for the part that actually works.
       titleReject:
-        /^(item details|item price|purchase request|new user guide|categories)\b/i,
+        /^(item details|item price|purchase request|about neokyo|new user guide|categories)\b/i,
       titleOrder: ['scope', 'og', 'doc', 'h1'],
       // Neokyo spells the unit out — "3399 Yen" — with no ¥ and no 円, which
       // is why the first version found no price at all and fell through to the
@@ -468,22 +472,52 @@
   // what the site puts in its h1: Mercari's is the listing name, Neokyo's is
   // the section heading "Item Details" -- taking h1 first there captured every
   // listing under the same useless title.
+  // Every element that could be holding the listing's name, best first.
+  //
+  // Structure decides, not words. The page may be machine-translated in the
+  // browser, which rewrites every text node -- so a list of English strings to
+  // reject is a list that stops working the moment the translation is off, or
+  // differs, or the site's own language selector is set to something else.
+  // What survives translation is where an element SITS: a site's chrome lives
+  // in its header, nav and footer, and a listing's name does not.
+  //
+  // Ranking is by length among what remains. A section heading is a couple of
+  // words ("Item Details", "Purchase Request Form"); a listing title is a
+  // sentence of specifics. That ordering holds in any language, and it is why
+  // "About Neokyo" -- picked up from the footer once the English blocklist had
+  // eliminated everything above it -- cannot win now on either count.
+  function titleCandidates() {
+    if (!SITE.titleScope) return [];
+    const out = [];
+    for (const el of document.querySelectorAll(SITE.titleScope.join(','))) {
+      // Site chrome, in any language.
+      if (el.closest?.('header, nav, footer')) continue;
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      // Too short to be a listing name; long enough to be a whole paragraph.
+      if (text.length < 8 || text.length > 160) continue;
+      if (SITE.titleReject?.test(text)) continue;
+      out.push({
+        text,
+        // Recorded for the panel's diagnostic: knowing WHICH element held the
+        // name is the difference between fixing this and guessing at it again.
+        where: `${el.tagName?.toLowerCase() || '?'}${
+          el.className && typeof el.className === 'string'
+            ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.')
+            : ''
+        }`,
+      });
+    }
+    // Longest first, DOM order breaking ties.
+    return out.sort((a, b) => b.text.length - a.text.length);
+  }
+
   const TITLE_SOURCES = {
     // Headings in DOM order, minus the page's own fixed furniture. Querying
     // every selector at once rather than in turn is deliberate: DOM order is
     // the signal — a listing's name is rendered before the panels beside it —
     // and taking selectors in turn would override that with my guess about
     // which class name is most likely to exist.
-    scope: () => {
-      if (!SITE.titleScope) return null;
-      for (const el of document.querySelectorAll(SITE.titleScope.join(','))) {
-        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (t.length < 3 || t.length > 200) continue;
-        if (SITE.titleReject?.test(t)) continue;
-        return t;
-      }
-      return null;
-    },
+    scope: () => titleCandidates()[0]?.text ?? null,
     h1: () => document.querySelector('h1')?.textContent?.trim(),
     og: () =>
       document
@@ -565,6 +599,12 @@
       priceText: (scopedPrice || body).replace(/\s+/g, ' ').trim().slice(0, 80),
       scoped: scopedPrice !== null,
       scope: (TITLE_SOURCES.scope() || '').slice(0, 60),
+      // The shortlist it chose from, each with the element it came off. This
+      // is what turns "the title is wrong" into a selector rather than into
+      // another round of guessing.
+      cands: titleCandidates()
+        .slice(0, 4)
+        .map((c) => `${c.where}: ${c.text.slice(0, 40)}`),
       h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
       og: (TITLE_SOURCES.og() || '').slice(0, 60),
       doc: (TITLE_SOURCES.doc() || '').slice(0, 60),

@@ -34,7 +34,19 @@ function loadFor(hostname, pathname, headings = []) {
     documentElement: { classList: { add() {}, remove() {} } },
     body: { dataset: {}, appendChild() {}, innerText: '' },
     querySelector: () => null,
-    querySelectorAll: () => headings.map((t) => ({ textContent: t })),
+    // Fixture elements. `chrome` marks one as living in the site's header,
+    // nav or footer -- titleCandidates() excludes those structurally, which is
+    // the part that has to keep working when the page is translated.
+    querySelectorAll: () =>
+      headings.map((h) => {
+        const [text, where] = Array.isArray(h) ? h : [h, null];
+        return {
+          textContent: text,
+          tagName: 'H2',
+          className: '',
+          closest: (sel) => (where === 'chrome' ? { sel } : null),
+        };
+      }),
     getElementById: () => null,
     addEventListener() {}, removeEventListener() {},
     createElement: () => ({ classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, style: {}, addEventListener() {} }),
@@ -97,9 +109,32 @@ const NK2 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397
   'Stray Kids Hyunjin KMS Rakuten Store Bonus',  // the listing
   'Item Price on Rakuma',
   'Purchase Request Form',
+  ['About Neokyo', 'chrome'],                    // footer
 ]);
-eq('skips the page name, takes the listing',
+eq('takes the listing, not a section heading',
    NK2.TITLE_SOURCES.scope(), 'Stray Kids Hyunjin KMS Rakuten Store Bonus');
+
+// The blocklist is English and the page can be machine-translated, so the
+// ranking has to hold with every word replaced. Same page, translated back to
+// the Japanese underneath it -- nothing here matches titleReject.
+const NK_JA = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  '商品詳細',
+  'Stray Kids ヒョンジン KMS 楽天ブックス 購入特典 トレカ',
+  'ラクマでの商品価格',
+  '購入リクエストフォーム',
+  ['ネオキョウについて', 'chrome'],
+]);
+eq('works with the blocklist matching nothing',
+   NK_JA.TITLE_SOURCES.scope(), 'Stray Kids ヒョンジン KMS 楽天ブックス 購入特典 トレカ');
+
+// The footer heading that won once the blocklist had eliminated everything
+// above it. Structure excludes it now, in any language.
+const NK4 = loadFor('neokyo.com', '/en/product/x/abc123def456', [
+  ['About Neokyo and our shopping service', 'chrome'],
+]);
+eq('footer text cannot win, however long',
+   NK4.TITLE_SOURCES.scope(), null);
+
 const NK3 = loadFor('neokyo.com', '/en/product/x/abc123def456', ['Item Details']);
 eq('nothing usable -> null, so the chain falls through',
    NK3.TITLE_SOURCES.scope(), null);
