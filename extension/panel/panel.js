@@ -330,10 +330,17 @@ async function renderCandidates() {
 
   // Arming has no listing title to match against, so it is search-only.
   if (viewMode === 'arm' || query) {
-    const cards = await cardIndex.search(query);
+    const { cards, total } = await cardIndex.search(query);
     $('assoc-chips').replaceChildren();
+    // The count is the TRUE total, not the page. It used to be cards.length,
+    // which is capped at the page size -- so every query said "60 match" no
+    // matter how many there were, and there was no way to tell a query that
+    // had narrowed to 60 from one that had narrowed to 600. Saying which it is
+    // turns "keep typing" from guesswork into a decision.
     $('assoc-summary').textContent = query
-      ? `${cards.length} match "${query}"`
+      ? total > cards.length
+        ? `${total.toLocaleString()} match "${query}" — showing the closest ${cards.length}`
+        : `${total.toLocaleString()} match "${query}"`
       : 'Search for the card to arm.';
     $('assoc-grid').replaceChildren(...cards.map(cardTile));
     return;

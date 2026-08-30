@@ -5,7 +5,7 @@
 // panel holds it for as long as it is open, which is exactly the window in
 // which anyone is picking cards.
 
-import { buildIndex, matchTitle, tokenize } from './matcher.js';
+import { buildIndex, matchTitle, searchCards } from './matcher.js';
 import { apiFetch } from './api.js';
 
 const DB_NAME = 'collectcore-cards';
@@ -123,30 +123,13 @@ export async function suggest(title, { drop = [], limit = 60 } = {}) {
 
 /**
  * Free-text search, for when the title inferred nothing useful and the card has
- * to be found by hand. Ranked by how many query tokens each card matches, so
- * partial memory ("hyunjin karma") still lands.
+ * to be found by hand. Scoring lives in matcher.js, which is pure and testable
+ * against the real 11k index without stubbing IndexedDB.
  */
 export async function search(query, { limit = 60 } = {}) {
   const store = await load();
-  if (!store) return [];
-  const tokens = tokenize(query);
-  if (tokens.length === 0) return store.cards.slice(0, limit);
-
-  const scored = [];
-  for (const card of store.cards) {
-    const hay = [
-      ...(card.members || []),
-      card.origin || '',
-      card.version || '',
-    ]
-      .join(' ')
-      .toLowerCase();
-    let score = 0;
-    for (const t of tokens) if (hay.includes(t)) score++;
-    if (score === tokens.length) scored.push({ card, score });
-  }
-  scored.sort((a, b) => b.score - a.score || a.card.id - b.card.id);
-  return scored.slice(0, limit).map((s) => s.card);
+  if (!store) return { cards: [], total: 0 };
+  return searchCards(store.cards, query, { limit });
 }
 
 export function cardLabel(card) {

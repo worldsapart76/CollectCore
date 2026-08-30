@@ -127,6 +127,12 @@ prod: dev lags, so a dev-built index makes cards you own fail to match.
 
 ### Two capture modes
 
+> **Searching by hand:** every word you type must match somewhere, so adding
+> words narrows. The count is the **true** total — *"1,579 match "hyunjin" —
+> showing the closest 60"* means keep typing; *"66 match"* means you can stop.
+> Results are ordered by how tightly each one matched, so an exact hit is
+> first rather than merely somewhere in the set.
+
 **Collecting** (default) — a broad search where each result might be a different
 card. Click the interesting ones, then work the *Identify* queue afterward. The
 listing title pre-filters the picker: matched tokens show as chips you can click
@@ -355,6 +361,7 @@ tile at all.
 | `lib/cardIndex.js` | Local card library — storage, server refresh, search |
 | `lib/matcher.js` | Title → candidate cards. Pure; `node tools/test_matcher.mjs` exercises it |
 | — | `node tools/test_capture_parsing.mjs` runs every site's price, currency, title and id rules against real page strings, with no browser |
+| — | `node tools/test_search.mjs` ranks the free-text card search against the real 11k index |
 | `content/fiber.js` | **Page world** (`"world": "MAIN"`) — reads React's fiber, stamps `data-cc-item` on tiles |
 | `content/capture.js` | Isolated world — tile overlay, reads the stamp. Standalone: content scripts cannot import modules |
 | `content/overlay.css` | Capture dot styling |

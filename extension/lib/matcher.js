@@ -288,3 +288,99 @@ function memberBucket(member, index) {
   cache.set(member, set);
   return set;
 }
+
+// --- Free-text search ------------------------------------------------------
+
+// How well one token matches one field. Bigger is tighter.
+//
+// Every match used to score the same 1, and since a card only survived when
+// EVERY token matched, every survivor tied on score -- so the sort fell
+// through to card id and the 60 shown were simply the 60 oldest matches. With
+// 11,000 cards that meant a good query could return 300 hits and never show
+// yours, which reads as the search being broken rather than truncated.
+const EQUALS = 5;
+const WHOLE_WORD = 4;
+const WORD_PREFIX = 3;
+const JOINED = 2;      // "rockstar" matching the field "Rock Star"
+const ANYWHERE = 1;
+
+function tokenScore(token, field, joined, wordRe, prefixRe) {
+  if (!field) return 0;
+  if (field === token) return EQUALS;
+  if (wordRe.test(field)) return WHOLE_WORD;
+  if (prefixRe.test(field)) return WORD_PREFIX;
+  if (joined.includes(token)) return JOINED;
+  if (field.includes(token)) return ANYWHERE;
+  return 0;
+}
+
+// Tokens go into a RegExp below, so they must not carry regex metacharacters.
+// They cannot: tokenize() lowercases and splits on /[^a-z0-9]+/, so a token is
+// always plain [a-z0-9]. Asserted rather than escaped, because an escape here
+// would quietly paper over a change to tokenize() that made it untrue.
+const SAFE_TOKEN = /^[a-z0-9]+$/;
+
+/**
+ * Free-text search over the whole library, for when the title inferred nothing
+ * useful and the card has to be found by hand.
+ *
+ * Every token must match somewhere (typing more words narrows, as expected),
+ * but HOW each one matched decides the order: a card whose version is exactly
+ * "Rock Star" outranks one that merely contains those letters. Returns the
+ * true total alongside the page, because a count capped at the page size reads
+ * as "60 matches" forever and gives no signal that typing more would help.
+ */
+export function searchCards(cards, query, { limit = 60 } = {}) {
+  const tokens = tokenize(query);
+  if (tokens.length === 0) {
+    return { cards: cards.slice(0, limit), total: cards.length };
+  }
+
+  // One regex per token, not per token per card: 11,000 cards times a fresh
+  // RegExp each was the difference between instant and noticeable.
+  const probes = tokens.filter((t) => SAFE_TOKEN.test(t)).map((t) => ({
+    t,
+    wordRe: new RegExp(`(^|[^a-z0-9])${t}([^a-z0-9]|$)`),
+    prefixRe: new RegExp(`(^|[^a-z0-9])${t}`),
+  }));
+  if (!probes.length) {
+    return { cards: cards.slice(0, limit), total: cards.length };
+  }
+
+  const scored = [];
+  for (const card of cards) {
+    const fields = [
+      (card.members || []).join(' ').toLowerCase(),
+      (card.origin || '').toLowerCase(),
+      (card.version || '').toLowerCase(),
+    ];
+    const joined = fields.map((f) => f.replace(/[^a-z0-9]/g, ''));
+
+    let score = 0;
+    let matchedAll = true;
+    for (const p of probes) {
+      let best = 0;
+      for (let i = 0; i < fields.length; i++) {
+        const s = tokenScore(p.t, fields[i], joined[i], p.wordRe, p.prefixRe);
+        if (s > best) best = s;
+      }
+      if (!best) {
+        matchedAll = false;
+        break;
+      }
+      score += best;
+    }
+    if (!matchedAll) continue;
+    // Length breaks ties: among equally well-matched cards the one with less
+    // text around the match is the tighter hit.
+    scored.push({ card, score, len: fields.join(' ').length });
+  }
+
+  scored.sort(
+    (a, b) => b.score - a.score || a.len - b.len || a.card.id - b.card.id
+  );
+  return {
+    cards: scored.slice(0, limit).map((s) => s.card),
+    total: scored.length,
+  };
+}
