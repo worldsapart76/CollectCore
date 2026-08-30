@@ -542,16 +542,16 @@ def _ask_position(list_cents: Optional[int], active: List[int]) -> Dict[str, Any
         ) if asks else None,
         "list_cents": list_cents,
         "cheaper": None,
-        "dearer": None,
+        "pricier": None,
         "standing": None,
     }
     if list_cents is None or not asks:
         return out
     out["cheaper"] = sum(1 for a in asks if a < list_cents)
-    out["dearer"] = sum(1 for a in asks if a > list_cents)
+    out["pricier"] = sum(1 for a in asks if a > list_cents)
     if out["cheaper"] == 0:
         out["standing"] = "undercuts_all"
-    elif out["dearer"] == 0:
+    elif out["pricier"] == 0:
         out["standing"] = "above_all"
     else:
         out["standing"] = "mid_pack"

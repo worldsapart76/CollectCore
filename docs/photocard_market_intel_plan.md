@@ -879,7 +879,7 @@ It answers the two ways a price goes wrong:
 |---|---|
 | `undercuts_all` | under everything live — money left behind |
 | `above_all` | over everything live — will not move while cheaper copies exist |
-| `mid_pack` | *N* cheaper, *M* dearer |
+| `mid_pack` | *N* cheaper, *M* pricier |
 
 `n_active: 0` is a real answer, not a missing one: no competition is worth
 knowing, and it is common on the rare cards where sold comps are thin.

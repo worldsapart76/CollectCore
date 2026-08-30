@@ -538,7 +538,7 @@ function AskStanding({ vsActive }) {
     );
   }
 
-  const { cheaper, dearer, n_active: n, standing, active_min, active_max } = vsActive;
+  const { cheaper, pricier, n_active: n, standing, active_min, active_max } = vsActive;
   const tone =
     standing === "undercuts_all" ? "#b45309"
       : standing === "above_all" ? "#b91c1c"
@@ -547,8 +547,8 @@ function AskStanding({ vsActive }) {
     standing === "undercuts_all"
       ? `cheapest of ${n + 1} — others start at ${usd(active_min)}`
       : standing === "above_all"
-        ? `dearest of ${n + 1} — others top out at ${usd(active_max)}`
-        : `${cheaper} cheaper, ${dearer} dearer of ${n} listed`;
+        ? `priciest of ${n + 1} — others top out at ${usd(active_max)}`
+        : `${cheaper} cheaper, ${pricier} pricier of ${n} listed`;
 
   return (
     <span
