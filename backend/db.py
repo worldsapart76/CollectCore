@@ -416,6 +416,89 @@ def _seed_cost_tiers(raw) -> None:
         )
 
 
+
+def _seed_fee_components(raw) -> None:
+    """Create the cost components each marketplace actually has, at zero.
+
+    The LABELS are seeded, the AMOUNTS are not. Naming the real cost lines --
+    Mercari's buyer protection fee, Neokyo's proxy and consolidation charges,
+    import duty, PayPal -- tells you what needs filling in without inventing a
+    number. Rates change, differ per account, and a wrong figure shown
+    confidently is worse than an obviously blank one.
+
+    INSERT OR IGNORE on (marketplace, side, label): an edited amount is never
+    overwritten, and a component deleted on purpose stays deleted only until a
+    restart re-adds it at zero, which is harmless.
+    """
+    # (marketplace, side, label, sort)
+    COMPONENTS = (
+        # Mercari US -- both sides. The buyer protection fee is visible on
+        # every listing page; the selling side is what a sale nets.
+        ("mercari_us", "sell", "Selling fee", 1),
+        ("mercari_us", "sell", "Payment processing", 2),
+        ("mercari_us", "sell", "Shipping I absorb", 3),
+        ("mercari_us", "buy", "Buyer protection fee", 1),
+        ("mercari_us", "buy", "Shipping I pay", 2),
+        ("mercari_us", "buy", "Sales tax", 3),
+
+        # Neokyo -- buy only. A proxy purchase has more cost lines than a
+        # direct one, and they land at different times: some per item, some
+        # per consolidated box.
+        ("neokyo", "buy", "Service fee", 1),
+        ("neokyo", "buy", "Domestic shipping (JP)", 2),
+        ("neokyo", "buy", "Payment fee (PayPal)", 3),
+        ("neokyo", "buy", "International shipping", 4),
+        ("neokyo", "buy", "Customs / import duty", 5),
+
+        ("pocamarket", "buy", "Service fee", 1),
+        ("pocamarket", "buy", "Domestic shipping (KR)", 2),
+        ("pocamarket", "buy", "Payment fee", 3),
+        ("pocamarket", "buy", "International shipping", 4),
+        ("pocamarket", "buy", "Customs / import duty", 5),
+
+        ("ebay", "sell", "Final value fee", 1),
+        ("ebay", "sell", "Payment processing", 2),
+        ("ebay", "sell", "Shipping I absorb", 3),
+        ("ebay", "buy", "Shipping I pay", 1),
+        ("ebay", "buy", "Sales tax", 2),
+    )
+    for code, side, label, order in COMPONENTS:
+        raw.execute(
+            "INSERT OR IGNORE INTO mkt_fee_component "
+            "(marketplace_code, side, label, sort_order) VALUES (?, ?, ?, ?)",
+            (code, side, label, order),
+        )
+
+    # Carry over whatever was already entered under the old flat columns, so
+    # the redesign does not quietly discard it. Runs once: the UPDATE only
+    # matches a component still sitting at zero.
+    cols = {r[1] for r in raw.execute(
+        "PRAGMA table_info(lkup_mkt_marketplaces)").fetchall()}
+    if {"fee_pct", "fee_fixed_minor", "ship_absorbed_minor"} <= cols:
+        for code, pct, fixed, ship in raw.execute(
+            "SELECT marketplace_code, fee_pct, fee_fixed_minor, ship_absorbed_minor "
+            "FROM lkup_mkt_marketplaces"
+        ).fetchall():
+            if pct:
+                raw.execute(
+                    "UPDATE mkt_fee_component SET pct = ? "
+                    " WHERE marketplace_code = ? AND side = 'sell'"
+                    "   AND label = 'Selling fee' AND pct = 0",
+                    (pct, code))
+            if fixed:
+                raw.execute(
+                    "UPDATE mkt_fee_component SET fixed_minor = ? "
+                    " WHERE marketplace_code = ? AND side = 'sell'"
+                    "   AND label = 'Payment processing' AND fixed_minor = 0",
+                    (fixed, code))
+            if ship:
+                raw.execute(
+                    "UPDATE mkt_fee_component SET fixed_minor = ? "
+                    " WHERE marketplace_code = ? AND side = 'sell'"
+                    "   AND label = 'Shipping I absorb' AND fixed_minor = 0",
+                    (ship, code))
+
+
 def init_db() -> None:
     if not SCHEMA_PATH.exists():
         raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
@@ -431,5 +514,6 @@ def init_db() -> None:
         # CREATE TABLEs, so anything guarded on a table existing would silently
         # skip on the first boot that creates it.
         _seed_cost_tiers(raw_conn)
+        _seed_fee_components(raw_conn)
         _seed_origin_start_dates(raw_conn)
         _seed_status_visibility_xref(conn)

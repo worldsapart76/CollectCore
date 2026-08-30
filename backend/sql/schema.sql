@@ -2044,6 +2044,36 @@ INSERT OR IGNORE INTO lkup_mkt_marketplaces
 -- "what would this have cost me then" wants the rate at observation, while
 -- "what should I pay now" wants today's rate over native prices. Both are
 -- legitimate and they disagree whenever a currency moves.
+-- Named cost components, per marketplace and per SIDE.
+--
+-- Replaces a fixed fee_pct/fee_fixed/shipping trio on the marketplace row,
+-- which was wrong twice over: it was implicitly SELLER-side with nothing
+-- saying so, and its three slots could not hold the real buy-side costs --
+-- PayPal, import duty, proxy service fees, consolidated shipping.
+--
+-- A marketplace is not a side (Mercari US is both bought and sold on), so the
+-- side lives here rather than forcing two marketplace rows and breaking the
+-- identity that listings reference.
+--
+-- Each component contributes  price * pct + fixed_minor.  fixed_minor is in
+-- the MARKETPLACE's currency, in minor units -- ¥350 is 350, JPY having no
+-- subdivision.
+CREATE TABLE IF NOT EXISTS mkt_fee_component (
+    component_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    marketplace_code TEXT NOT NULL,
+    side             TEXT NOT NULL,          -- 'buy' | 'sell'
+    label            TEXT NOT NULL,
+    pct              REAL NOT NULL DEFAULT 0,
+    fixed_minor      INTEGER NOT NULL DEFAULT 0,
+    sort_order       INTEGER NOT NULL DEFAULT 0,
+    is_active        INTEGER NOT NULL DEFAULT 1,
+
+    UNIQUE (marketplace_code, side, label),
+    FOREIGN KEY (marketplace_code) REFERENCES lkup_mkt_marketplaces(marketplace_code)
+);
+CREATE INDEX IF NOT EXISTS idx_mkt_fee_component_lookup
+    ON mkt_fee_component(marketplace_code, side, is_active);
+
 CREATE TABLE IF NOT EXISTS mkt_fx_rate (
     currency      TEXT NOT NULL,
     as_of_date    TEXT NOT NULL,         -- ISO date the rate takes effect

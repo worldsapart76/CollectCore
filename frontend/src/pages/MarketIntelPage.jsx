@@ -3,7 +3,8 @@ import { Button, Alert } from "../components/primitives";
 import {
   listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
-  listMarketplaces, setMarketplaceFees,
+  listFeeComponents, createFeeComponent, updateFeeComponent,
+  deleteFeeComponent, setOfferDiscount,
 } from "../api";
 
 // Price comps from the browser-extension captures.
@@ -212,57 +213,41 @@ export default function MarketIntelPage() {
     </div>
   );
 }
-
-// Per-marketplace fee model.
+// Cost components, per marketplace and per side.
 //
-// Everything starts at zero, which reproduces gross figures exactly. Real fee
-// schedules are deliberately not pre-filled: they change, they differ by
-// seller, and a wrong number shown confidently is worse than an obviously
-// unset one. Until these are set, the comp view says GROSS rather than
-// implying a net figure that had nothing taken off it.
-function FeesPanel({ onError, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState(null);
+// Buying and selling are separate costs on the same marketplace: Mercari
+// charges a seller to sell and charges a buyer a protection fee to buy. The
+// earlier version had a single unlabelled set of fields that were implicitly
+// seller-side, which was both wrong for a marketplace you buy on and unable to
+// hold the real buy-side lines — PayPal, import duty, proxy service fees.
+//
+// Labels are seeded, amounts are not. Naming the real cost lines says what
+// needs filling in without inventing a rate that changes and differs per
+// account.
+function FeeComponentRow({ c, currency, exponent, onError, refresh }) {
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (!open || rows) return;
-    listMarketplaces()
-      .then((d) => setRows(d.marketplaces || []))
-      .catch((e) => onError(e.message || "Failed to load marketplaces"));
-  }, [open, rows, onError]);
-
-  async function edit(m, field, label, asPct) {
-    const exp = m.minor_exponent ?? 2;
-    const cur = m.currency || "USD";
+  async function editValue(field, label, asPct) {
     const current = asPct
-      ? ((m[field] || 0) * 100).toFixed(1)
-      : ((m[field] || 0) / 10 ** exp).toFixed(exp);
+      ? ((c.pct || 0) * 100).toFixed(1)
+      : ((c.fixed_minor || 0) / 10 ** exponent).toFixed(exponent);
     const entered = prompt(
-      `${m.marketplace_name} — ${label}\n` +
-      (asPct
-        ? "Enter a percentage, e.g. 10 for 10%."
-        // Named explicitly. Neokyo bills in yen, and a prompt saying "dollars"
-        // invites a number wrong by the exchange rate.
-        : `Enter an amount in ${cur}, e.g. ${exp === 0 ? "350" : "1.20"}.`),
+      `${c.label} — ${label}\n` +
+        (asPct
+          ? "Enter a percentage, e.g. 10 for 10%."
+          : `Enter an amount in ${currency}, e.g. ${exponent === 0 ? "350" : "1.20"}.`),
       current
     );
     if (entered == null) return;
     const n = Number(entered);
-    if (!Number.isFinite(n) || n < 0) {
-      onError("Enter a non-negative number");
-      return;
-    }
-    if (asPct && n >= 100) {
-      onError("A 100% fee leaves nothing to net — enter less than 100.");
-      return;
-    }
+    if (!Number.isFinite(n) || n < 0) return onError("Enter a non-negative number");
+    if (asPct && n >= 100) return onError("Enter less than 100%.");
     setBusy(true);
     try {
-      const value = asPct ? n / 100 : Math.round(n * 10 ** exp);
-      await setMarketplaceFees(m.marketplace_code, { [field]: value });
-      setRows((await listMarketplaces()).marketplaces || []);
-      await onChanged();
+      await updateFeeComponent(c.component_id, {
+        [field]: asPct ? n / 100 : Math.round(n * 10 ** exponent),
+      });
+      await refresh();
     } catch (e) {
       onError(e.message || "Failed to save");
     } finally {
@@ -270,12 +255,156 @@ function FeesPanel({ onError, onChanged }) {
     }
   }
 
-  const FIELDS = [
-    ["fee_pct", "Fee %", true],
-    ["fee_fixed_minor", "Fixed fee", false],
-    ["ship_absorbed_minor", "Shipping you absorb", false],
-    ["offer_discount_pct", "Typical offer below ask", true],
-  ];
+  async function remove() {
+    if (!confirm(`Remove "${c.label}"?`)) return;
+    setBusy(true);
+    try {
+      await deleteFeeComponent(c.component_id);
+      await refresh();
+    } catch (e) {
+      onError(e.message || "Failed to remove");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const btn = {
+    border: "1px solid #ddd", borderRadius: 3, background: "#fff",
+    padding: "1px 6px", cursor: "pointer", fontSize: 12, minWidth: 54,
+  };
+
+  return (
+    <tr style={{ borderTop: "1px solid #f0f0f0" }}>
+      <td style={{ padding: "3px 6px" }}>{c.label}</td>
+      <td style={{ padding: "3px 6px", textAlign: "right" }}>
+        <button
+          disabled={busy}
+          onClick={() => editValue("pct", "percentage", true)}
+          style={{ ...btn, color: c.pct ? "#111" : "#bbb" }}
+        >
+          {c.pct ? `${(c.pct * 100).toFixed(1)}%` : "—"}
+        </button>
+      </td>
+      <td style={{ padding: "3px 6px", textAlign: "right" }}>
+        <button
+          disabled={busy}
+          onClick={() => editValue("fixed_minor", "fixed amount", false)}
+          style={{ ...btn, color: c.fixed_minor ? "#111" : "#bbb" }}
+        >
+          {c.fixed_minor ? money(c.fixed_minor, currency, exponent) : "—"}
+        </button>
+      </td>
+      <td style={{ padding: "3px 6px", textAlign: "right", width: 24 }}>
+        <button
+          disabled={busy}
+          onClick={remove}
+          title="Remove this cost line"
+          style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer" }}
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function FeeSide({ market, side, onError, refresh }) {
+  const model = market[side];
+  const comps = model.components || [];
+  const cur = market.currency;
+  const exp = market.minor_exponent ?? 2;
+
+  async function add() {
+    const label = prompt(
+      `New ${side === "buy" ? "buying" : "selling"} cost on ${market.marketplace_name}.\n` +
+        "e.g. PayPal fee, import duty, insurance."
+    );
+    if (!label?.trim()) return;
+    try {
+      await createFeeComponent({
+        marketplace_code: market.marketplace_code,
+        side,
+        label: label.trim(),
+      });
+      await refresh();
+    } catch (e) {
+      onError(e.message || "Failed to add");
+    }
+  }
+
+  return (
+    <div style={{ flex: 1, minWidth: 260 }}>
+      <div style={{ fontSize: 12, fontWeight: "bold", marginBottom: 2 }}>
+        {side === "buy" ? "Buying here" : "Selling here"}
+        <span style={{ fontWeight: "normal", color: "#666" }}>
+          {" "}— {side === "buy" ? "what a purchase costs" : "what a sale nets"}
+        </span>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <tbody>
+          {comps.map((c) => (
+            <FeeComponentRow
+              key={c.component_id}
+              c={c}
+              currency={cur}
+              exponent={exp}
+              onError={onError}
+              refresh={refresh}
+            />
+          ))}
+          {!comps.length && (
+            <tr>
+              <td colSpan={4} style={{ padding: "3px 6px", color: "#999", fontSize: 12 }}>
+                nothing set
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <Button size="sm" onClick={add} style={{ marginTop: 4 }}>
+        + cost line
+      </Button>
+    </div>
+  );
+}
+
+function FeesPanel({ onError, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);
+
+  async function refresh() {
+    const d = await listFeeComponents();
+    setRows(d.marketplaces || []);
+    await onChanged();
+  }
+
+  useEffect(() => {
+    if (!open || rows) return;
+    listFeeComponents()
+      .then((d) => setRows(d.marketplaces || []))
+      .catch((e) => onError(e.message || "Failed to load fees"));
+  }, [open, rows, onError]);
+
+  async function editOffer(m) {
+    const entered = prompt(
+      `${m.marketplace_name} — how far below the ask buyers typically settle.\n` +
+        "Enter a percentage, e.g. 10 for 10%.\n\n" +
+        "This is NOT deducted from a sold comp — sold prices are already what " +
+        "buyers paid. It is how far above a target you must list to still clear it.",
+      ((m.offer_discount_pct || 0) * 100).toFixed(1)
+    );
+    if (entered == null) return;
+    const n = Number(entered);
+    if (!Number.isFinite(n) || n < 0 || n >= 100) return onError("Enter 0–99.");
+    try {
+      await setOfferDiscount(m.marketplace_code, n / 100);
+      await refresh();
+    } catch (e) {
+      onError(e.message || "Failed to save");
+    }
+  }
+
+  const anySet = rows?.some((m) => m.buy?.configured || m.sell?.configured);
 
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 6, marginBottom: 12 }}>
@@ -289,8 +418,8 @@ function FeesPanel({ onError, onChanged }) {
       >
         <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
         <strong>Fees &amp; shipping</strong>
-        <span style={{ color: "#666" }}>what a sale actually nets</span>
-        {rows && !rows.some((m) => m.fee_pct || m.fee_fixed_minor || m.ship_absorbed_minor) && (
+        <span style={{ color: "#666" }}>what a sale nets, what a purchase costs</span>
+        {rows && !anySet && (
           <span style={{ marginLeft: "auto", color: "#b45309", fontSize: 12 }}>
             not set — figures are gross
           </span>
@@ -300,55 +429,36 @@ function FeesPanel({ onError, onChanged }) {
       {open && (
         <div style={{ padding: "10px 12px", borderTop: "1px solid #eee" }}>
           {!rows && <div style={{ color: "#666", fontSize: 13 }}>Loading…</div>}
-          {rows && (
-            <>
-              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
-                Sold prices are already what buyers <em>paid</em> — Mercari&apos;s odd
-                amounts are accepted offers — so the offer figure is not deducted
-                from a comp. It is how far above a target you must{" "}
-                <strong>list</strong> to still clear it.
+          {rows?.map((m) => (
+            <div key={m.marketplace_code} style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                <strong style={{ fontSize: 13 }}>{m.marketplace_name}</strong>
+                <span style={{ color: "#999", fontSize: 11 }}>
+                  amounts in {m.currency}
+                </span>
+                <button
+                  onClick={() => editOffer(m)}
+                  title="How far below an ask buyers settle. Pads the list price; never deducted from a comp."
+                  style={{
+                    marginLeft: "auto", border: "1px solid #ddd", borderRadius: 3,
+                    background: "#fff", padding: "1px 6px", cursor: "pointer", fontSize: 12,
+                  }}
+                >
+                  offer gap {((m.offer_discount_pct || 0) * 100).toFixed(0)}%
+                </button>
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", color: "#666", fontSize: 11 }}>
-                    <th style={{ padding: "3px 6px" }}>Marketplace</th>
-                    {FIELDS.map(([, label]) => (
-                      <th key={label} style={{ padding: "3px 6px", textAlign: "right" }}>
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((m) => (
-                    <tr key={m.marketplace_code} style={{ borderTop: "1px solid #eee" }}>
-                      <td style={{ padding: "4px 6px" }}>
-                        {m.marketplace_name}
-                        <span style={{ color: "#999", fontSize: 11 }}> {m.currency}</span>
-                      </td>
-                      {FIELDS.map(([field, label, asPct]) => (
-                        <td key={field} style={{ padding: "4px 6px", textAlign: "right" }}>
-                          <button
-                            disabled={busy}
-                            onClick={() => edit(m, field, label, asPct)}
-                            style={{
-                              border: "1px solid #ddd", borderRadius: 3, background: "#fff",
-                              padding: "1px 6px", cursor: "pointer", fontSize: 12,
-                              color: m[field] ? "#111" : "#999",
-                            }}
-                          >
-                            {asPct
-                              ? `${((m[field] || 0) * 100).toFixed(1)}%`
-                              : money(m[field] || 0, m.currency, m.minor_exponent)}
-                          </button>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <FeeSide market={m} side="buy" onError={onError} refresh={refresh} />
+                <FeeSide market={m} side="sell" onError={onError} refresh={refresh} />
+              </div>
+              {m[m.side === "buy" ? "buy" : "sell"]?.fx_missing && (
+                <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>
+                  No {m.currency} exchange rate on file — these cannot be converted to
+                  USD yet, so they are left out rather than counted as zero.
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

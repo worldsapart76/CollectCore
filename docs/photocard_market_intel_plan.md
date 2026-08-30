@@ -925,6 +925,35 @@ target net
 That is the number typed into Mercari, and it is what "price this card" should
 mean.
 
+### Costs are named components, per marketplace AND per side
+
+The first cut put `fee_pct` / `fee_fixed` / `ship_absorbed` on the marketplace
+row. Wrong twice over: it was implicitly **seller-side** with nothing saying so,
+and three fixed slots cannot hold the real buy-side costs — PayPal, import duty,
+proxy service fees, consolidated shipping.
+
+`mkt_fee_component` is `(marketplace, side, label, pct, fixed_minor)`. Each line
+contributes `price × pct + fixed_minor`, and a side's model is the sum.
+
+**Sides are separate because the costs are separate.** Mercari US charges a
+seller for selling and charges a buyer a protection fee for buying; the same
+listing is both, depending which end you are on. Summing them would
+double-charge a card bought and then resold. `side` lives on the component
+rather than forcing two marketplace rows, which would break the identity
+listings reference.
+
+Seeded **labels, not amounts** — Mercari's buyer protection fee, Neokyo's
+service fee and customs, PayPal. Naming the real cost lines says what needs
+filling in without inventing a rate that changes and differs per account.
+
+`net_proceeds()` uses the sell side, `landed_cost()` the buy side. Those two
+together are what makes *"is Mercari US a better deal than Neokyo for this
+card"* answerable: both reduce to a USD figure carrying their own fees,
+shipping and duty.
+
+`offer_discount_pct` stays on the marketplace, because it is **not a cost** — it
+is how far below an ask buyers settle. Sold comps are already net of it.
+
 ### Fee amounts are NATIVE, in minor units
 
 `fee_fixed_minor` and `ship_absorbed_minor` are in the **marketplace's own

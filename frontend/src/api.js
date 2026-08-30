@@ -1502,16 +1502,48 @@ export async function backfillFxUsd() {
 // the sale pile (trade + pending_outgoing) — a card that was never owned has no
 // basis, and a card being kept is a collecting cost, not a trading one.
 
-// Per-marketplace fee model. All zero until set, which reproduces gross
-// figures exactly — real fee schedules are deliberately NOT pre-filled, since
-// a wrong number shown confidently is worse than an obviously unset one.
-export async function setMarketplaceFees(code, payload) {
-  const res = await fetch(`${API}/market/marketplaces/${code}/fees`, {
+// Per-marketplace cost components, split by SIDE.
+//
+// Buying and selling are separate costs on the same marketplace — Mercari
+// charges a seller to sell and a buyer a protection fee to buy — so they are
+// listed and edited separately. Amounts are in the marketplace's own currency,
+// in minor units: ¥350 is 350, JPY having no subdivision.
+
+export async function listFeeComponents() {
+  const res = await fetch(`${API}/market/fees`);
+  return handleJsonResponse(res, 'Failed to load fees');
+}
+
+export async function createFeeComponent(payload) {
+  const res = await fetch(`${API}/market/fees/components`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, 'Failed to add cost line');
+}
+
+export async function updateFeeComponent(id, payload) {
+  const res = await fetch(`${API}/market/fees/components/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return handleJsonResponse(res, 'Failed to save fees');
+  return handleJsonResponse(res, 'Failed to save cost line');
+}
+
+export async function deleteFeeComponent(id) {
+  const res = await fetch(`${API}/market/fees/components/${id}`, { method: 'DELETE' });
+  return handleJsonResponse(res, 'Failed to remove cost line');
+}
+
+export async function setOfferDiscount(code, pct) {
+  const res = await fetch(`${API}/market/marketplaces/${code}/offer-discount`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ offer_discount_pct: pct }),
+  });
+  return handleJsonResponse(res, 'Failed to save offer discount');
 }
 
 export async function listCostTiers() {

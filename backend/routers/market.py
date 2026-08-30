@@ -348,8 +348,7 @@ def list_marketplaces(db=Depends(get_db)):
     rows = db.execute(
         text(
             "SELECT marketplace_code, marketplace_name, currency, side,"
-            " is_active, fee_pct, fee_fixed_minor, ship_absorbed_minor,"
-            " offer_discount_pct FROM lkup_mkt_marketplaces "
+            " is_active, offer_discount_pct FROM lkup_mkt_marketplaces "
             "WHERE is_active = 1 ORDER BY sort_order"
         )
     ).mappings().all()
@@ -631,7 +630,10 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     sold_mkts = [r["marketplace"] for r in series if r["listing_state"] == "sold"]
     mkts = sold_mkts or [r["marketplace"] for r in series]
     mkt = max(set(mkts), key=mkts.count) if mkts else "mercari_us"
-    fm = fee_model(db, mkt)
+    # Explicitly the SELL side: this figure is what a sale nets. The buy side
+    # is a different set of costs entirely (buyer protection, duty, PayPal) and
+    # summing them would double-charge a card bought and then resold.
+    fm = fee_model(db, mkt, "sell")
 
     sold_stats = stats(sold)
     basis = effective_basis(db, item_id)
@@ -994,58 +996,61 @@ def set_item_basis(item_id: int, body: ItemBasisIn, db=Depends(get_db)):
 # It matters in the other direction: to CLEAR a number you must list above it,
 # because the offer arrives against the ask. That is `list_price_for()`.
 
+def fee_model(db, marketplace: str, side: str = "sell",
+              on_date: Optional[str] = None) -> Dict[str, Any]:
+    """The cost of transacting on `marketplace` from one SIDE.
 
-def fee_model(db, marketplace: str, on_date: Optional[str] = None) -> Dict[str, Any]:
-    """The marketplace's fee model, in its OWN currency and converted to USD.
+    Sides are separate because they are separate costs. Mercari US charges a
+    seller for selling and a buyer a protection fee for buying, and the same
+    listing is both depending on which end you are on. Summing them together
+    would double-charge a card you bought and then resold.
 
-    Both are returned deliberately. The native figures are what the user typed
-    and what the UI must show -- a Neokyo fee is ¥350, not $350 -- while the
-    comp series is in USD, so the arithmetic needs USD. Returning only one of
-    them is how a yen amount ends up subtracted from a dollar figure.
+    Returns native figures (what the user typed, what the UI shows) and USD
+    figures (what the arithmetic needs, since the comp series is USD).
+    Returning only one of them is how a yen amount ends up subtracted from a
+    dollar figure.
     """
-    row = db.execute(text(
-        "SELECT m.fee_pct, m.fee_fixed_minor, m.ship_absorbed_minor,"
-        " m.offer_discount_pct, m.currency "
-        "FROM lkup_mkt_marketplaces m WHERE m.marketplace_code = :m"
+    mrow = db.execute(text(
+        "SELECT currency, offer_discount_pct FROM lkup_mkt_marketplaces "
+        "WHERE marketplace_code = :m"
     ), {"m": marketplace}).fetchone()
-    if row is None:
-        return {"fee_pct": 0.0, "fee_fixed_minor": 0, "ship_absorbed_minor": 0,
-                "offer_discount_pct": 0.0, "currency": "USD", "minor_exponent": 2,
-                "fee_fixed_usd": 0, "ship_absorbed_usd": 0,
-                "configured": False, "fx_missing": False}
+    currency = (mrow[0] if mrow else "USD") or "USD"
+    offer = (mrow[1] if mrow else 0.0) or 0.0
 
-    fee_pct, fee_fixed, ship, offer, currency = row
-    fee_fixed = fee_fixed or 0
-    ship = ship or 0
-    currency = currency or "USD"
+    parts = db.execute(text(
+        "SELECT component_id, label, pct, fixed_minor FROM mkt_fee_component "
+        "WHERE marketplace_code = :m AND side = :s AND is_active = 1 "
+        "ORDER BY sort_order, label"
+    ), {"m": marketplace, "s": side}).mappings().all()
 
-    # Fees are a standing cost, not a historical observation, so today's
-    # rate is the right one -- unlike a sighting, which must use the rate as
-    # of when it was seen.
+    total_pct = sum(p["pct"] or 0.0 for p in parts)
+    total_fixed = sum(p["fixed_minor"] or 0 for p in parts)
+
+    # Fees are a standing cost, not a historical observation, so today's rate
+    # is the right one — unlike a sighting, which must use the rate as of when
+    # it was seen.
     as_of = on_date or datetime.utcnow().strftime("%Y-%m-%d")
-    rate = None if currency == "USD" else rate_for(db, currency, as_of)
-    fee_usd = (fee_fixed if currency == "USD"
-               else to_usd_minor(fee_fixed, currency, rate))
-    ship_usd = (ship if currency == "USD"
-                else to_usd_minor(ship, currency, rate))
+    rate = 1.0 if currency == "USD" else rate_for(db, currency, as_of)
+    fixed_usd = (total_fixed if currency == "USD"
+                 else to_usd_minor(total_fixed, currency, rate))
 
     return {
-        "fee_pct": fee_pct or 0.0,
-        "fee_fixed_minor": fee_fixed,
-        "ship_absorbed_minor": ship,
-        "offer_discount_pct": offer or 0.0,
+        "marketplace": marketplace,
+        "side": side,
         "currency": currency,
         "minor_exponent": minor_exp(currency),
-        # Nulls when a non-USD marketplace has no rate on file. Left as None
-        # rather than silently treated as zero, which would quietly understate
-        # every cost on that marketplace.
-        "fee_fixed_usd": fee_usd,
-        "ship_absorbed_usd": ship_usd,
-        # All zero means nobody has set this up. Reported rather than inferred,
-        # so the UI can say "these are gross" instead of quietly implying a
-        # net figure that had nothing taken off it.
-        "configured": bool(fee_pct or fee_fixed or ship or offer),
-        "fx_missing": currency != "USD" and rate is None and bool(fee_fixed or ship),
+        "components": [dict(p) for p in parts],
+        "total_pct": total_pct,
+        "total_fixed_minor": total_fixed,
+        # None, never 0, when a non-USD marketplace has no rate on file:
+        # treating a missing rate as zero would silently understate every cost
+        # on that marketplace.
+        "total_fixed_usd": fixed_usd,
+        # Sell-side only, and not a fee — it is how far buyers negotiate below
+        # an ask, which is why nothing is deducted from a sold comp for it.
+        "offer_discount_pct": offer,
+        "configured": bool(total_pct or total_fixed),
+        "fx_missing": currency != "USD" and rate is None and bool(total_fixed),
     }
 
 
@@ -1053,77 +1058,162 @@ def net_proceeds(gross_cents: Optional[int], fm: Dict[str, Any],
                  seller_pays_shipping: bool = True) -> Optional[int]:
     """What a sale at `gross_cents` actually leaves you.
 
-    `seller_pays_shipping` lets a listing whose real shippingPayerCode says the
-    BUYER paid skip the shipping deduction. Detail captures know this; sweeps
-    do not, which is why the marketplace default exists at all.
+    `seller_pays_shipping=False` drops any component whose label mentions
+    shipping — a detail capture whose shippingPayer says the BUYER paid should
+    not have the seller's shipping assumption taken off it. Sweeps cannot know,
+    which is why the assumption exists at all.
     """
     if gross_cents is None:
         return None
-    net = gross_cents * (1.0 - fm["fee_pct"]) - (fm.get("fee_fixed_usd") or 0)
-    if seller_pays_shipping:
-        net -= fm.get("ship_absorbed_usd") or 0
-    return int(round(net))
+    pct = fm["total_pct"]
+    fixed = fm.get("total_fixed_usd") or 0
+    if not seller_pays_shipping:
+        for c in fm.get("components", []):
+            if "shipping" in (c["label"] or "").lower():
+                pct -= c["pct"] or 0.0
+                # Native minor units; only correct to subtract directly when
+                # the marketplace already reports in USD.
+                if fm["currency"] == "USD":
+                    fixed -= c["fixed_minor"] or 0
+    return int(round(gross_cents * (1.0 - pct) - fixed))
+
+
+def landed_cost(price_cents: Optional[int], fm: Dict[str, Any]) -> Optional[int]:
+    """What a purchase at `price_cents` actually costs, all in.
+
+    The buy-side mirror of net_proceeds, and what makes "is Mercari US a better
+    deal than Neokyo for this card" answerable: both sides reduce to a USD
+    number that includes their own fees, shipping and duty.
+    """
+    if price_cents is None:
+        return None
+    return int(round(
+        price_cents * (1.0 + fm["total_pct"]) + (fm.get("total_fixed_usd") or 0)
+    ))
 
 
 def list_price_for(target_net_cents: int, fm: Dict[str, Any]) -> Optional[int]:
-    """The number to actually type into the marketplace to clear a target.
-
-    Inverse of net_proceeds, then padded for the offer gap. Returns None when
-    the fees make the target unreachable at any price -- a 100% fee, or an
-    offer discount of 100% -- rather than dividing by zero and reporting an
-    absurd figure with a straight face.
-    """
-    denom = 1.0 - fm["fee_pct"]
+    """The number to actually type into the marketplace to clear a target."""
+    denom = 1.0 - fm["total_pct"]
     if denom <= 0:
         return None
-    gross = (
-        target_net_cents
-        + (fm.get("fee_fixed_usd") or 0)
-        + (fm.get("ship_absorbed_usd") or 0)
-    ) / denom
+    gross = (target_net_cents + (fm.get("total_fixed_usd") or 0)) / denom
     pad = 1.0 - fm["offer_discount_pct"]
     if pad <= 0:
         return None
     return int(round(gross / pad))
 
 
-class FeeModelIn(BaseModel):
-    fee_pct: Optional[float] = None
-    # Minor units of the MARKETPLACE's currency, not cents and not USD.
-    fee_fixed_minor: Optional[int] = None
-    ship_absorbed_minor: Optional[int] = None
-    offer_discount_pct: Optional[float] = None
+class OfferDiscountIn(BaseModel):
+    offer_discount_pct: float
 
 
-@router.put("/marketplaces/{code}/fees")
-def set_marketplace_fees(code: str, body: FeeModelIn, db=Depends(get_db)):
-    sets: List[str] = []
-    params: Dict[str, Any] = {"m": code}
-    for field, col in (
-        ("fee_pct", "fee_pct"),
-        ("fee_fixed_minor", "fee_fixed_minor"),
-        ("ship_absorbed_minor", "ship_absorbed_minor"),
-        ("offer_discount_pct", "offer_discount_pct"),
-    ):
-        v = getattr(body, field)
-        if v is None:
-            continue
-        if field.endswith("_pct"):
-            if not (0.0 <= v < 1.0):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{field} is a fraction between 0 and 1 (0.10 = 10%); got {v}.")
-        elif v < 0:
-            raise HTTPException(status_code=400, detail=f"{field} cannot be negative.")
-        sets.append(f"{col} = :{field}")
-        params[field] = v
+class ComponentIn(BaseModel):
+    marketplace_code: Optional[str] = None
+    side: Optional[str] = None
+    label: Optional[str] = None
+    pct: Optional[float] = None
+    # Minor units of the MARKETPLACE's currency — not cents, not USD.
+    fixed_minor: Optional[int] = None
 
+
+@router.get("/fees")
+def list_fee_components(db=Depends(get_db)):
+    """Every marketplace with its buy-side and sell-side cost lines."""
+    out = []
+    for m in db.execute(text(
+        "SELECT marketplace_code, marketplace_name, currency, side, offer_discount_pct "
+        "FROM lkup_mkt_marketplaces WHERE is_active = 1 ORDER BY sort_order"
+    )).mappings():
+        out.append({
+            **dict(m),
+            "minor_exponent": minor_exp(m["currency"]),
+            "buy": fee_model(db, m["marketplace_code"], "buy"),
+            "sell": fee_model(db, m["marketplace_code"], "sell"),
+        })
+    return {"marketplaces": out}
+
+
+def _validate_component(pct, fixed):
+    if pct is not None and not (0.0 <= pct < 1.0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"pct is a fraction between 0 and 1 (0.10 = 10%); got {pct}.")
+    if fixed is not None and fixed < 0:
+        raise HTTPException(status_code=400, detail="fixed_minor cannot be negative.")
+
+
+@router.post("/fees/components", status_code=201)
+def create_fee_component(body: ComponentIn, db=Depends(get_db)):
+    if (not body.marketplace_code or body.side not in ("buy", "sell")
+            or not (body.label or "").strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="marketplace_code, side ('buy' or 'sell') and label are required.")
+    _validate_component(body.pct, body.fixed_minor)
+    try:
+        cid = db.execute(text(
+            "INSERT INTO mkt_fee_component "
+            "(marketplace_code, side, label, pct, fixed_minor, sort_order) "
+            "VALUES (:m, :s, :l, :p, :f, 99) RETURNING component_id"
+        ), {"m": body.marketplace_code, "s": body.side, "l": body.label.strip(),
+            "p": body.pct or 0.0, "f": body.fixed_minor or 0}).scalar_one()
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as ex:
+        db.rollback()
+        if "UNIQUE" in str(ex).upper():
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{body.label}' already exists on that marketplace and side.")
+        raise
+    return {"ok": True, "component_id": cid}
+
+
+@router.put("/fees/components/{component_id}")
+def update_fee_component(component_id: int, body: ComponentIn, db=Depends(get_db)):
+    _validate_component(body.pct, body.fixed_minor)
+    sets, params = [], {"id": component_id}
+    if body.pct is not None:
+        sets.append("pct = :p"); params["p"] = body.pct
+    if body.fixed_minor is not None:
+        sets.append("fixed_minor = :f"); params["f"] = body.fixed_minor
+    if body.label is not None and body.label.strip():
+        sets.append("label = :l"); params["l"] = body.label.strip()
     if not sets:
         return {"ok": True, "changed": False}
     res = db.execute(text(
-        f"UPDATE lkup_mkt_marketplaces SET {', '.join(sets)} "
-        "WHERE marketplace_code = :m"), params)
+        f"UPDATE mkt_fee_component SET {', '.join(sets)} WHERE component_id = :id"),
+        params)
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"No component {component_id}.")
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.delete("/fees/components/{component_id}")
+def delete_fee_component(component_id: int, db=Depends(get_db)):
+    db.execute(text("DELETE FROM mkt_fee_component WHERE component_id = :id"),
+               {"id": component_id})
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/marketplaces/{code}/offer-discount")
+def set_offer_discount(code: str, body: OfferDiscountIn, db=Depends(get_db)):
+    """Not a fee — how far below an ask buyers typically settle.
+
+    Sold prices are already net of it (they are accepted offers), so it is
+    never deducted from a comp. It is what a LIST price must be padded by.
+    """
+    if not (0.0 <= body.offer_discount_pct < 1.0):
+        raise HTTPException(
+            status_code=400, detail="offer_discount_pct is a fraction between 0 and 1.")
+    res = db.execute(text(
+        "UPDATE lkup_mkt_marketplaces SET offer_discount_pct = :v "
+        "WHERE marketplace_code = :m"), {"v": body.offer_discount_pct, "m": code})
     if res.rowcount == 0:
         raise HTTPException(status_code=404, detail=f"No marketplace '{code}'.")
     db.commit()
-    return {"ok": True, "changed": True, "fees": fee_model(db, code)}
+    return {"ok": True}
