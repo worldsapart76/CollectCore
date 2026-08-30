@@ -19,7 +19,7 @@ import {
 // in manifest.json -- a host listed there but missing here loads the script and
 // then never gets told the session is active, so the page comes up with no
 // buttons and nothing says why.
-const CAPTURE_HOSTS = /^https:\/\/(www\.)?(mercari\.com|neokyo\.com)\//;
+const CAPTURE_HOSTS = /^https:\/\/(www\.)?(mercari\.com|neokyo\.com|ebay\.com)\//;
 
 const ACTIVE_TABS = 'activeTabs';
 const ARMED_CARD = 'armedCard';
@@ -201,6 +201,14 @@ function bigThumb(url) {
   if (!url) return null;
   try {
     const u = new URL(url);
+    // eBay sizes in the FILENAME, not the query string: s-l225.jpg is the
+    // search thumbnail and s-l500.jpg the same image larger. Same idea as
+    // Mercari's `width`, a different mechanism, so it gets its own branch
+    // rather than a shared one that would be wrong on both.
+    if (/(^|\.)ebayimg\.com$/.test(u.hostname)) {
+      u.pathname = u.pathname.replace(/\/s-l\d+(\.\w+)$/, '/s-l500$1');
+      return u.toString();
+    }
     if (!/mercdn\.net$/.test(u.hostname)) return url;
     u.searchParams.set('width', String(IMAGE_WIDTH));
     u.searchParams.delete('height');
@@ -274,7 +282,16 @@ async function capture({
   const existing = await getObservation(key);
 
   const sighting = {
-    observedAt: new Date().toISOString(),
+    // The sale's OWN date where the page states one -- eBay prints it on both
+    // the tile and the listing page. A sold search returns months of sales in
+    // one sweep, and stamping them all with the capture time would make a
+    // March sale read as a day old, which is precisely what the grid's
+    // staleness colouring keys on. Capture time is the fallback, not the rule.
+    //
+    // It also makes re-capture idempotent where capture time is not: the
+    // server keys sightings on (listing, observed_at), so a fixed sale date
+    // lands on the same row twice while a moving clock creates a second one.
+    observedAt: item.soldAt || new Date().toISOString(),
     // Native MINOR units, whatever the currency: cents on Mercari, whole yen
     // on Neokyo. The name predates the second currency; the server reads it
     // through the currency's own exponent, so ¥350 must arrive as 350.

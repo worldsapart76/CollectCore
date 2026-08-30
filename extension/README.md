@@ -1,7 +1,8 @@
 # CollectCore Market Capture — Chrome Extension
 
-Captures photocard listing data from **Mercari US** (sell side and buy side)
-and **Neokyo** (buy side, proxying Mercari JP and Rakuma) while browsing.
+Captures photocard listing data from **Mercari US** (sell side and buy side),
+**Neokyo** (buy side, proxying Mercari JP and Rakuma) and **eBay** (both sides)
+while browsing.
 Design doc: [`docs/photocard_market_intel_plan.md`](../docs/photocard_market_intel_plan.md).
 
 ## There is no build step
@@ -29,7 +30,7 @@ tab.** That is the whole workflow.
 
 1. Go to `chrome://extensions`
 2. Click the **↻ reload** icon on the CollectCore card
-3. **Refresh every open Mercari and Neokyo tab**
+3. **Refresh every open Mercari, Neokyo and eBay tab**
 
 **Step 3 is required after *any* reload**, not just when content-script files
 changed. Reloading the extension orphans the content script already running in
@@ -382,18 +383,54 @@ Comps are then available at `GET /market/comps` (every card with data) and
 single-card prices** and returned separately as `excluded_lots` — a three-card
 bundle at $60 is real market signal, it just is not that card selling for $60.
 
+## What differs on eBay
+
+Server-rendered like Neokyo, but it is the first source that carries a **sale
+date on the tile itself** — a sold search shows `Sold  Sep 12, 2025` beside the
+price, where Mercari gives only a sold flag.
+
+- **"Sold" alone means nothing here.** A *live* eBay tile advertises how many
+  have gone: `3 sold`, `1,204 sold`. A bare `/sold/` test would file every
+  popular active listing as a sale at its asking price, which is the one kind
+  of bad row that quietly drags a card's median around. So the test requires a
+  **date** — `Sold Sep 12, 2025` — on tiles and on listing pages alike.
+- **Ended is not sold either.** A listing pulled by its seller, or an auction
+  that closed with no bids, sold for nothing. Only `Sold <date>`, `This listing
+  sold` and `Winning bid` count.
+- **Foreign prices are refused, not converted.** International listings surface
+  on ebay.com priced in their own currency. Where eBay states the US figure
+  beside it (`C $18.00 (US $13.20)`) that figure wins; where it does not, the
+  price is left empty rather than read as dollars — `C $18.00` taken as
+  eighteen US dollars is a silent ~30% error that looks entirely ordinary.
+- **The name has eBay's furniture on it.** The listing page's `h1` opens with a
+  screen-reader-only `Details about`, and search tiles prefix `New Listing` and
+  suffix `Opens in a new window or tab`. None of it is what the seller wrote,
+  and any of it welded on stops the card index matching, so `titleClean` strips
+  them from whichever source won.
+- **Bigger thumbnails are free, differently.** eBay sizes in the *filename* —
+  `s-l225.jpg` → `s-l500.jpg` — where Mercari sizes in the query string.
+  Separate branches in `bigThumb`, since one mechanism applied to the other
+  host produces a 404 rather than a bigger image.
+
 ## Sources and currency
 
 `marketplace` is recorded on every listing, and the DB knows four sources —
 `mercari_us` (USD), `neokyo` (JPY), `pocamarket` (KRW), `ebay` (USD).
-**Mercari US and Neokyo have capture parsers**; Pocamarket and eBay are declared
-so the schema, comps, and currency handling are ready for them.
+**Mercari US, Neokyo and eBay have capture parsers**; Pocamarket is declared so
+the schema, comps, and currency handling are ready for it.
 
-**Adding a site** means an entry in `SITES` at the top of `content/capture.js`
-and its host in `matches` in the `capture.js` content-script block of
-`manifest.json`. A **React** site additionally needs `hasFiber: true`, its host
-in the second (`"world": "MAIN"`) block, and its tile selector in
-`content/fiber.js`. A server-rendered site needs none of that — but everything
+**Adding a site** is three edits, and the extension stays silently inert if any
+is missed:
+
+1. an entry in `SITES` at the top of `content/capture.js`;
+2. the host in **both** `host_permissions` and the `capture.js`
+   content-script `matches` in `manifest.json` — plus the site's image CDN in
+   `host_permissions`, or thumbnails cannot be fetched;
+3. the host in `CAPTURE_HOSTS` in `background.js`, or a tab opened on that site
+   never comes up capturing.
+
+A **React** site additionally needs `hasFiber: true`, its host in the second
+(`"world": "MAIN"`) block, and its tile selector in `content/fiber.js`. A server-rendered site needs none of that — but everything
 the capture requires (price, title, a photo) has to be reachable from the DOM,
 since there is no page-world object to fall back to.
 

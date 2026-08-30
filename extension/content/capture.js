@@ -8,8 +8,15 @@
 (() => {
   // Supported sources, keyed by hostname.
   //
-  // ADDING A SITE: add an entry here and add its host to `matches` in the
-  // capture.js content_scripts block in manifest.json. Only a React site needs
+  // ADDING A SITE: an entry here is three edits, not one, and the extension
+  // stays silently inert if any is missed —
+  //   1. an entry below,
+  //   2. the host in `host_permissions` AND in the capture.js
+  //      `content_scripts` matches in manifest.json (plus its image CDN in
+  //      host_permissions, or thumbnails cannot be fetched),
+  //   3. the host in CAPTURE_HOSTS in background.js, or a tab opened on it
+  //      never comes up capturing.
+  // Only a React site needs
   // the second (MAIN-world) block and a selector in content/fiber.js; set
   // `hasFiber` for those. A server-rendered site is read from the DOM alone,
   // which is why `price`, `name` and a photo all have to be reachable from the
@@ -122,15 +129,100 @@
       photoHost: /img\.fril\.jp|mercdn\.net/,
     },
 
+    // Server-rendered, so no fiber and content/fiber.js is not injected here.
+    //
+    // The first source that carries a sale DATE on the tile itself: a sold
+    // search shows "Sold  Sep 12, 2025" beside the price, where Mercari gives
+    // only a sold flag. That date is what the sold series has been missing.
+    'www.ebay.com': {
+      code: 'ebay',
+      currency: 'USD',
+      minorExponent: 2,
+      tiles: 'a[href*="/itm/"]',
+      // The id is the trailing number. A listing URL may or may not carry a
+      // title slug before it (/itm/stray-kids-photocard/123456789012), so the
+      // pattern reaches for the digits rather than assuming which segment.
+      idFrom: (href) => href.match(/\/itm\/(?:[^/?#]*\/)?(\d{9,15})/)?.[1] || null,
+      // Rebuilt rather than taken from the anchor: a search-results href
+      // carries a long tail of tracking parameters, and two tiles for the same
+      // listing would otherwise produce two different URLs for one row.
+      urlFor: (id) => `https://www.ebay.com/itm/${id}`,
+      detailPath: /\/itm\//,
+      queryParam: '_nkw',
+      priceScope: ['.x-price-primary', '[data-testid="x-price-primary"]',
+                   '.x-bin-price__content', '.x-price-approx__price'],
+      // eBay's h1 is the listing name, but it opens with a screen-reader-only
+      // "Details about" label that textContent picks up. The bold span inside
+      // holds the name alone, so it is preferred outright and the h1 is the
+      // fallback for when that class name changes.
+      titleScope: ['h1', 'h2', 'h3', 'span', 'div'],
+      titlePrefer: 'h1 .ux-textspans, h1.x-item-title__mainTitle',
+      titleReject: /^(details about|shop on ebay|opens in a new window)\b/i,
+      titleOrder: ['scope', 'og', 'doc', 'h1'],
+      // Both surfaces prefix or suffix the name with their own furniture:
+      // "New Listing" on a search tile, "Details about" on a listing page.
+      // Neither is part of what the seller wrote, and either welded on is
+      // enough to stop the card index matching.
+      titleClean: (t) =>
+        t.replace(/^\s*(details about|new listing)\s*/i, '')
+         .replace(/\s*opens in a new (window|tab).*$/i, '')
+         .trim(),
+      // Foreign-currency listings surface on ebay.com with their own prefix.
+      // Reading "C $18.00" as eighteen US dollars is a silent ~30% error in a
+      // comp, and it would look completely ordinary on screen.
+      priceFrom: (text) => {
+        const s = String(text || '');
+        // Where a listing is priced in another currency eBay states the US
+        // figure explicitly beside it, so that form wins outright -- taking
+        // the first `$` on the page instead would read the foreign one.
+        const us = money(s, /\bUS\s?\$\s?([\d,]+(?:\.\d{2})?)/i, 2);
+        if (us !== null) return us;
+        // A foreign prefix with no US figure beside it is refused rather than
+        // guessed at.
+        if (/\b(?:C|AU|NZ|S|HK)\s?\$|[£€]\s?[\d,]/.test(s)) return null;
+        return money(s, /\$\s?([\d,]+(?:\.\d{2})?)/, 2);
+      },
+      // NOT a bare "sold". An ACTIVE eBay tile advertises how many have gone
+      // -- "3 sold" -- so the bare word would file every popular live listing
+      // as a sale at its asking price, which is the one kind of bad row that
+      // quietly drags a card's median around. A real sale states its date.
+      tileSoldFrom: (text) => /\bsold\s+\w+\s+\d{1,2},?\s*\d{4}/i.test(text),
+      // Same date requirement, plus the auction wording. Deliberately NOT
+      // "ended": a listing ended by its seller, or an auction that closed with
+      // no bids, sold for nothing and is not a comp.
+      soldFrom: (text) =>
+        /\bsold\s+\w+\s+\d{1,2},?\s*\d{4}|\bthis listing sold\b|\bwinning bid\b/i
+          .test(text),
+      // WHEN it sold, which no other source tells us. A sold search returns
+      // months of sales at once, and stamping them all with the capture time
+      // would collapse the time dimension entirely -- a sale from March would
+      // read as a day old, and the grid colours staleness off exactly that.
+      soldDateFrom: (text) => {
+        const m = String(text || '').match(
+          /\bsold\s+(\w{3,9})\.?\s+(\d{1,2}),?\s*(\d{4})/i);
+        if (!m) return null;
+        const month = MONTHS.indexOf(m[1].slice(0, 3).toLowerCase());
+        if (month < 0) return null;
+        const d = new Date(Date.UTC(+m[3], month, +m[2]));
+        return Number.isNaN(d.getTime()) ? null : d.toISOString();
+      },
+      photoHost: /i\.ebayimg\.com/,
+    },
+
     // Not built yet — see docs/photocard_market_intel_plan.md:
     //   pocamarket  (KRW)
-    //   ebay        (USD)
   };
 
   const SITE = SITES[location.hostname] || SITES[location.hostname.replace(/^www\./, '')];
   if (!SITE) return; // not a supported source; stay entirely inert
 
   // --- Site helpers --------------------------------------------------------
+
+  // Month abbreviations, for sites that print a sale date in words. Parsed
+  // here rather than handed to `new Date(string)`, whose behaviour on partial
+  // dates is implementation-defined and locale-sensitive.
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
   // Pulls a number out of page text and returns it in minor units. `exponent`
   // is the currency's, not the match's: 2 turns 12.34 into 1234, 0 leaves 1234
@@ -296,6 +388,9 @@
         '',
       ...readPrice(text),
       status: (SITE.tileSoldFrom || SITE.soldFrom)(text) ? 'trading' : 'on_sale',
+      // When the sale happened, where the tile says so. Null everywhere else,
+      // and the capture time stands in.
+      soldAt: SITE.soldDateFrom?.(text) ?? null,
       thumbnail: tilePhoto(anchor),
       itemCondition: null,
       category: null,
@@ -313,11 +408,14 @@
       'h1, h2, h3, h4, [class*="title"], [class*="name"]'
     );
     const raw = (el?.textContent || anchor.textContent || '').trim();
-    return raw
-      .replace(/[¥￥$]\s?[\d,]+(?:\.\d{2})?/g, ' ')
-      .replace(/[\d,]+\s*円/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return cleanTitle(
+      raw
+        .replace(/[¥￥$]\s?[\d,]+(?:\.\d{2})?/g, ' ')
+        .replace(/[\d,]+\s*円/g, ' ')
+        .replace(/[\d,]+\s*원/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    );
   }
 
   // Prefer a photo on the site's own image CDN; take any image rather than
@@ -626,9 +724,24 @@
     // Every marketplace suffixes its own name onto the document title.
     doc: () =>
       (document.title || '')
-        .replace(/\s*[|\-–]\s*(Mercari|Neokyo)[^|\-–]*$/i, '')
+        .replace(/\s*[|\-–]\s*(Mercari|Neokyo|eBay)[^|\-–]*$/i, '')
         .trim(),
   };
+
+  // Furniture a site welds onto the name on every listing: eBay's screen-
+  // reader "Details about" prefix, its "New Listing" flash. Applied to
+  // whichever source won rather than inside any one of them, because the same
+  // wrapper text shows up in the h1, the tile heading and the shortlist alike.
+  //
+  // Site-specific by necessity and secondary by design: nothing DEPENDS on it
+  // -- a title that keeps its prefix still captures, it just matches the card
+  // index worse.
+  function cleanTitle(t) {
+    const s = String(t || '').trim();
+    if (!s || !SITE.titleClean) return s;
+    // Never let a cleaner empty a title it was only supposed to trim.
+    return SITE.titleClean(s) || s;
+  }
 
   // Which source the last title came from. Recorded because "the title is
   // wrong" and "the title came from the wrong place" are the same bug, and
@@ -637,7 +750,7 @@
 
   function detailTitle() {
     for (const key of SITE.titleOrder || ['h1', 'og', 'doc']) {
-      const t = TITLE_SOURCES[key]?.();
+      const t = cleanTitle(TITLE_SOURCES[key]?.());
       if (t) {
         lastTitleSource = key;
         return t;
@@ -737,6 +850,7 @@
       // different elements.
       ...readPrice(scopedPrice, body),
       status: sold ? 'trading' : 'on_sale',
+      soldAt: sold ? SITE.soldDateFrom?.(body) ?? null : null,
       thumbnail: detailPhoto(),
       itemCondition: null,
       category: null,

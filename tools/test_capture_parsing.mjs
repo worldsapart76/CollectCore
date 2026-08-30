@@ -257,5 +257,91 @@ eq('rejects a nav link', idFromLastSegment('/en/about'), null);
 eq('rejects a short segment', idFromLastSegment('/en/p/12'), null);
 eq('rejects a wordy segment', idFromLastSegment('/en/search-results'), null);
 
+
+console.log('--- eBay: "3 sold" on a LIVE tile is not a sale ---');
+const EB = loadFor('www.ebay.com', '/itm/stray-kids-photocard/123456789012');
+const eb = SITES['www.ebay.com'];
+// The whole reason eBay cannot use a bare /sold/ test: an active listing
+// advertises how many have gone, and reading that as a sale would file a live
+// ask as a comp at the asking price.
+eq('active tile: "3 sold"', eb.tileSoldFrom('$12.99 Buy It Now 3 sold'), false);
+eq('active tile: "1,204 sold"', eb.tileSoldFrom('$8.50 1,204 sold'), false);
+eq('active tile: watchers', eb.tileSoldFrom('$8.50 12 watchers'), false);
+eq('sold tile states its date', eb.tileSoldFrom('$12.99 Sold  Sep 12, 2025'), true);
+eq('sold tile, no comma', eb.tileSoldFrom('Sold Sep 12 2025'), true);
+
+console.log('--- eBay: ended is not sold ---');
+eq('detail: sold with a date', eb.soldFrom('Sold  Sep 12, 2025'), true);
+eq('detail: this listing sold', eb.soldFrom('This listing sold on Sep 12'), true);
+eq('detail: auction won', eb.soldFrom('Winning bid: US $18.50'), true);
+// An auction that closed with no bids, or a listing pulled by its seller, sold
+// for nothing. Treating either as a sale invents a comp out of an absence.
+eq('detail: ended by seller', eb.soldFrom('This listing was ended by the seller'), false);
+eq('detail: bidding ended', eb.soldFrom('Bidding has ended on this item'), false);
+eq('detail: live listing', eb.soldFrom('Buy It Now  $12.99  3 sold'), false);
+
+console.log('--- eBay: foreign currency is refused, not mislabelled ---');
+eq('plain US price', eb.priceFrom('$12.99'), 1299);
+eq('explicit US price', eb.priceFrom('US $12.99'), 1299);
+eq('with shipping alongside', eb.priceFrom('$12.99 +$4.50 shipping'), 1299);
+// Reading C $18.00 as eighteen US dollars is a silent ~30% error that looks
+// entirely ordinary on screen.
+eq('Canadian is refused', eb.priceFrom('C $18.00'), null);
+eq('Australian is refused', eb.priceFrom('AU $24.00'), null);
+eq('US wins when both appear', eb.priceFrom('C $18.00 (US $13.20)'), 1320);
+eq('no price at all', eb.priceFrom('Buy It Now'), null);
+
+console.log('--- eBay: ids survive the slug and the tracking tail ---');
+eq('bare item path', eb.idFrom('/itm/123456789012'), '123456789012');
+eq('with a title slug', eb.idFrom('/itm/stray-kids-hyunjin-photocard/123456789012'),
+   '123456789012');
+eq('absolute href with tracking',
+   eb.idFrom('https://www.ebay.com/itm/123456789012?hash=item1c8&var=0&_trkparms=x'),
+   '123456789012');
+eq('canonical URL drops the tail', eb.urlFor('123456789012'),
+   'https://www.ebay.com/itm/123456789012');
+eq('a search link is not a listing', eb.idFrom('/sch/i.html?_nkw=photocard'), null);
+
+console.log('--- eBay: the furniture welded onto a name ---');
+// A title with "New Listing" or "Details about" on it matches nothing in the
+// card index, and both come from eBay rather than from the seller.
+eq('screen-reader prefix', eb.titleClean('Details about  Stray Kids Hyunjin PC'),
+   'Stray Kids Hyunjin PC');
+eq('new-listing flash', eb.titleClean('New ListingStray Kids Hyunjin PC'),
+   'Stray Kids Hyunjin PC');
+eq('link affordance suffix',
+   eb.titleClean('Stray Kids Hyunjin PC Opens in a new window or tab'),
+   'Stray Kids Hyunjin PC');
+eq('an ordinary title is untouched', eb.titleClean('Stray Kids Hyunjin PC'),
+   'Stray Kids Hyunjin PC');
+
+const EB2 = loadFor('www.ebay.com', '/itm/123456789012', [
+  ['Details about Stray Kids Hyunjin Rock Star Photocard', null, 28],
+  ['Stray Kids Hyunjin Rock Star Photocard', 'translate', 24],
+]);
+eq('the bold span beats the h1 that wraps it',
+   EB2.TITLE_SOURCES.scope(), 'Stray Kids Hyunjin Rock Star Photocard');
+
+console.log('--- eBay: the site currency ---');
+eq('dollars are the price, not a conversion',
+   EB.readPrice('$12.99'), { price: 1299, currency: 'USD', priceUsd: null });
+eq('nothing readable', EB.readPrice('Buy It Now'),
+   { price: null, currency: 'USD', priceUsd: null });
+
+
+console.log('--- eBay: the sale states its own date ---');
+// A sold search returns months of sales in one sweep. Stamping them all with
+// the capture time would make a March sale read as a day old, which is exactly
+// what the grid colours staleness on.
+eq('tile sold date', eb.soldDateFrom('$12.99 Sold  Sep 12, 2025'),
+   '2025-09-12T00:00:00.000Z');
+eq('abbreviated with a dot', eb.soldDateFrom('Sold Mar. 3, 2026'),
+   '2026-03-03T00:00:00.000Z');
+eq('spelled out in full', eb.soldDateFrom('Sold December 25, 2024'),
+   '2024-12-25T00:00:00.000Z');
+eq('a live listing has no sale date', eb.soldDateFrom('Buy It Now 3 sold'), null);
+eq('a made-up month is refused', eb.soldDateFrom('Sold Foo 12, 2025'), null);
+eq('other sites do not claim one', nk.soldDateFrom, undefined);
+
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

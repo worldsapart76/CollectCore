@@ -5,7 +5,7 @@ Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). The **v2
 market workspace** — card grid, lot analyzer, wanted-sourcing — is DESIGNED
 2026-08-30 and supersedes the card-first comp view as the destination; the v1
 comp view survives as its drill-down. Ledger designed, not built.
-Pocamarket / eBay declared, no parsers yet.
+eBay parser built 2026-08-30; Pocamarket declared, no parser yet.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -308,12 +308,16 @@ only the assumption that comps flow one direction.
 | **Mercari US** | USD | both | active + sold | **BUILT** — React fiber, search tiles |
 | **Neokyo** (proxies Mercari JP + Rakuma) | JPY | buy | active only | **BUILT + VERIFIED** — server-rendered DOM, no fiber |
 | **Pocamarket** | KRW | both | tbd | Declared, no parser |
-| **eBay** | USD | both | tbd | Declared, no parser |
+| **eBay** | USD | both | active + sold | **BUILT** — server-rendered DOM, no fiber |
 
 All four rows exist with currency and side set, so ingest, FX conversion and
-comps accept them today. What each still needs is a **capture parser** — tile
-shape, id, price, URL — which is one unit of work per site. Pocamarket also
-needs a KRW rate on file, exactly as JPY does.
+comps accept them today. **Pocamarket** is the one still without a parser, and
+also needs a KRW rate on file, exactly as JPY does.
+
+eBay is the only source whose **sold tiles carry a date**, so its sold comps
+arrive with a real observation date rather than the capture time. It is also
+the one where the word "sold" is actively dangerous: a live tile advertises
+`3 sold`, so the state test requires a date. See the extension README.
 
 Neokyo remains the checkout and consolidation layer for JP purchases, which is
 why capturing there matters: the saved URL is the one that can actually be
@@ -1938,6 +1942,36 @@ No backup changes needed.
     units rather than letting that pass. `tools/test_lot_analyzer.py`, 56 cases
     on a fresh DB with real photocard rows across both eras.
 
+17. **eBay capture — BUILT 2026-08-30.** The third source, server-rendered
+    like Neokyo, and the first carrying **both sides with real sold prices**.
+    Three things about it are unlike either source already built:
+
+    - **"Sold" alone is dangerous here.** A *live* eBay tile advertises how
+      many have gone — `3 sold`, `1,204 sold` — so the bare-word test that
+      works on Mercari would file every popular active listing as a sale at its
+      asking price. The state test requires a **date**. "Ended" is excluded for
+      the same reason: a listing pulled by its seller, or an auction closing
+      with no bids, sold for nothing.
+    - **The sale states its own date, and that becomes `observed_at`.** No
+      other source tells us when. A sold search returns months of sales in one
+      sweep, and stamping them all with the capture time would collapse the
+      time dimension — a March sale reading as a day old, which is exactly what
+      the grid colours staleness on. It also makes re-capture idempotent, since
+      the server keys sightings on `(listing, observed_at)`.
+    - **Foreign prices are refused, not converted.** International listings
+      surface on ebay.com in their own currency. Where eBay prints the US
+      figure beside it that figure wins; where it does not, the price is left
+      empty. `C $18.00` read as eighteen US dollars is a silent ~30% error that
+      looks entirely ordinary on screen.
+
+    Also: `titleClean`, a small shared hook, because eBay welds its own
+    furniture onto the name on both surfaces — `Details about` (screen-reader
+    only) on a listing page, `New Listing` and `Opens in a new window or tab`
+    on a tile. None of it is what the seller wrote and any of it stops the card
+    index matching. 30 new cases in `tools/test_capture_parsing.mjs`.
+
+    **Pocamarket is now the only declared source without a parser.**
+
 ### Next
 
 **Steps 1 and 2 of the v2 market workspace are built** (card grid +
@@ -1968,9 +2002,9 @@ needs, cut it.
 Comp charting beyond the quartile bands; automatic sync; any `/pcs/` exposure of
 price data.
 
-**Pocamarket and eBay parsers** moved out of this list 2026-08-29 — both are
-places purchases actually happen, so they are queued behind Neokyo rather than
-deferred indefinitely. The **enrich tier** left this document entirely: it is
+**Pocamarket** is the last declared source without a parser. eBay shipped
+2026-08-30 (entry 17); Pocamarket is queued behind it and needs a KRW rate on
+file as well as the parser. The **enrich tier** left this document entirely: it is
 superseded by detail-page capture, not deferred.
 
 ## Open Questions
