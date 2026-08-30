@@ -19,6 +19,18 @@ import {
 const usd = (cents) =>
   cents == null ? "—" : `$${(cents / 100).toFixed(2)}`;
 
+// Amounts in a marketplace's OWN currency. JPY and KRW have no minor unit, so
+// ¥350 is stored as 350 — dividing by 100 and printing a dollar sign is how a
+// Neokyo fee showed up as "$350.00". usd() above stays for the comp figures,
+// which really are USD.
+const SYMBOL = { USD: "$", JPY: "¥", KRW: "₩", EUR: "€", GBP: "£", CAD: "$" };
+
+const money = (minor, currency, exponent) => {
+  if (minor == null) return "—";
+  const exp = exponent ?? 2;
+  return `${SYMBOL[currency] || ""}${(minor / 10 ** exp).toFixed(exp)}`;
+};
+
 function quartiles(values) {
   if (!values.length) return null;
   const v = [...values].sort((a, b) => a - b);
