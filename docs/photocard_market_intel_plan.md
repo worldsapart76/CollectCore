@@ -1210,7 +1210,7 @@ implies POB), while the flag encodes the judgement directly.
 > `Seoul Polaroid POB` — i.e. it sweeps expensive cards into the cheapest tier.
 > Word boundaries, and a preview count before committing.
 
-As built, `ID` is a **registered SQLite function** (`cc_is_id_version`)
+As built, `\bID\b` is a **registered SQLite function** (`cc_is_id_version`)
 rather than a `LIKE` pattern, because SQLite has no word-boundary operator and
 the approximation is exactly the trap above. The era boundary is a request
 parameter, not a constant, so it can be slid and re-previewed: at `2019-12-31`

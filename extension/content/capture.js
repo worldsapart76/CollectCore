@@ -255,44 +255,67 @@
   // Same posture as itemFromDom() for tiles, including the _viaFallback flag.
   // A degraded capture has to be visible as degraded -- silently bad data is
   // the failure mode this whole module is built to avoid.
+  function detailTitle() {
+    // h1 first, but never rely on it alone -- Mercari does not guarantee one
+    // and it can render after the button is wanted. document.title always
+    // exists and carries the listing name, so the chain always terminates.
+    const h1 = document.querySelector('h1')?.textContent?.trim();
+    if (h1) return h1;
+    const og = document
+      .querySelector('meta[property="og:title"]')
+      ?.getAttribute('content')
+      ?.trim();
+    if (og) return og;
+    return (document.title || '').replace(/\s*[|\-–]\s*Mercari.*$/i, '').trim();
+  }
+
+  function detailPhoto() {
+    // Largest Mercari-CDN photo, EXCEPT that a not-yet-decoded image reports
+    // zero dimensions -- so the first match is taken as a baseline and only
+    // replaced by something measurably bigger. Requiring area > 0 to win is
+    // what left the button unrendered on pages whose photos had not loaded.
+    let best = null;
+    let bestArea = -1;
+    for (const img of document.querySelectorAll('img')) {
+      const src = img.currentSrc || img.src || '';
+      if (!/mercdn\.net\/photos\//.test(src)) continue;
+      const area =
+        (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
+      if (area > bestArea) {
+        bestArea = area;
+        best = src;
+      }
+    }
+    return best;
+  }
+
+  // DOM fallback for a listing's own page.
+  //
+  // The fiber walk finds SOMETHING carrying the listing id on a detail page
+  // but not the full item, so the page itself is read instead: the title,
+  // price and photo are rendered and are not going anywhere.
+  //
+  // Same posture as itemFromDom() for tiles, _viaFallback flag included. A
+  // degraded capture has to be visible as degraded.
   function detailFromDom() {
     const id = detailIdFromUrl();
     if (!id) return null;
 
-    const h1 = document.querySelector('h1');
-    const name = (h1?.textContent || '').trim();
-
-    // The listing photo, not a thumbnail from the "you might also like" rail:
-    // take the largest image that comes from Mercari's photo CDN.
-    let thumbnail = null;
-    let bestArea = 0;
-    for (const img of document.querySelectorAll('img')) {
-      const src = img.currentSrc || img.src || '';
-      if (!/mercdn\.net\/photos\//.test(src)) continue;
-      const area = (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
-      if (area > bestArea) {
-        bestArea = area;
-        thumbnail = src;
-      }
-    }
-
-    // Mercari renders the discounted price first and the struck-through
-    // original after it, so the FIRST match is what the item actually costs.
     const body = document.body.innerText || '';
+    // Mercari renders the discounted price before the struck-through original,
+    // so the FIRST match is what the item actually costs.
     const dollars = body.match(/\$\s?([\d,]+(?:\.\d{2})?)/)?.[1];
-
-    // "Item sold" button / "Sold 20h ago" overlay. Checked against the page
-    // rather than the search filter, for the same reason status is elsewhere.
     const sold = /\bitem sold\b|\bsold\s+\d+\s*(h|m|d|hour|min|day)/i.test(body);
 
-    if (!name && !thumbnail) return null; // nothing usable; do not fake a row
-
+    // Being on a listing URL is enough to offer a capture. Bailing out when the
+    // title or photo could not be read is what made the button vanish
+    // entirely, which is far worse than a capture that needs a name later.
     return {
       id,
-      name,
+      name: detailTitle(),
       price: dollars ? Math.round(parseFloat(dollars.replace(/,/g, '')) * 100) : null,
       status: sold ? 'trading' : 'on_sale',
-      thumbnail,
+      thumbnail: detailPhoto(),
       itemCondition: null,
       category: null,
       categoryId: null,
@@ -306,36 +329,39 @@
     };
   }
 
-  // Prefer the fiber, but only where it actually carried the listing. A stamp
-  // with no name and no image is a fragment, not the item -- merging the DOM
-  // read over it keeps whatever the fiber did get (status, condition, shipping)
-  // while filling in what it missed.
+  // Prefer the fiber where it actually carried the listing; merge the DOM read
+  // underneath to fill what it missed.
   function readDetailItem() {
+    const urlId = detailIdFromUrl();
+    if (!urlId) return null;
+
     const stamped = detailItem();
     const scraped = detailFromDom();
-    if (!stamped) {
-      if (scraped) {
-        try {
-          scraped._scanKeys = JSON.parse(document.body.dataset.ccDetailScan || 'null');
-        } catch {
-          scraped._scanKeys = null;
-        }
-      }
-      return scraped;
+    let scan = null;
+    try {
+      scan = JSON.parse(document.body.dataset.ccDetailScan || 'null');
+    } catch {
+      scan = null;
     }
-    if (!scraped) return stamped;
 
-    const merged = { ...stamped };
+    const merged = { ...(scraped || {}), ...(stamped || {}) };
+    // The URL is authoritative for WHICH listing this is. The fiber may key on
+    // a bare numeric id, and letting that through made the click-time identity
+    // check fail against the URL and refuse the capture.
+    merged.id = urlId;
+
+    // Anything the fiber left empty, take from the page.
     let borrowed = false;
     for (const k of ['name', 'thumbnail', 'price', 'status']) {
       const missing =
         merged[k] === null || merged[k] === undefined || merged[k] === '';
-      if (missing && scraped[k] !== null && scraped[k] !== '') {
+      if (missing && scraped && scraped[k] !== null && scraped[k] !== '') {
         merged[k] = scraped[k];
         borrowed = true;
       }
     }
-    if (borrowed) merged._viaFallback = true;
+    if (borrowed || !stamped) merged._viaFallback = true;
+    if (scan) merged._scanKeys = scan;
     return merged;
   }
 
