@@ -197,6 +197,18 @@ invisible to them. The walk therefore runs in `content/fiber.js`, declared
 not. **Do not move that walk into `capture.js`** — it will silently fall back to
 DOM scraping, which is exactly what happened on 2026-08-28.
 
+### If a detail capture reads "(partial read)"
+
+The button says **+ Capture (partial read)** when the page's own DOM had to
+supply the title or image because the fiber scan did not. The capture still
+works and is tagged `DOM fallback` in the panel — it is flagged rather than
+hidden, because a silently degraded capture is worse than a loud one.
+
+To help fix it: open DevTools on that listing (F12 → Console) and look for a
+line starting `[CollectCore] detail fiber scan:`. It prints how many candidate
+objects carried the listing id and what keys each had. That says where Mercari
+actually keeps the item, which is the one thing guessing has not settled.
+
 ### If Mercari changes and captures stop working
 
 The fiber walk uses React internals, which are not a public API. When it fails,

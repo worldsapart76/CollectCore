@@ -127,14 +127,20 @@
     return n;
   }
 
-  function looksLikeItem(v, wantId) {
-    return (
-      v &&
-      typeof v === 'object' &&
-      !Array.isArray(v) &&
-      v.id === wantId &&
-      ITEM_KEYS.some((k) => k in v)
-    );
+  // Mercari's public id is 'm70832633154'; internal objects were observed
+  // carrying only a fragment under that exact key, so the bare numeric form
+  // and `itemId` are accepted too rather than assuming one spelling.
+  function idVariants(wantId) {
+    const bare = wantId.replace(/^m/, '');
+    return new Set([wantId, bare, Number(bare)]);
+  }
+
+  function looksLikeItem(v, want) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+    const id = v.id ?? v.itemId;
+    if (id === undefined || id === null) return false;
+    if (!want.has(id) && !want.has(String(id))) return false;
+    return ITEM_KEYS.some((k) => k in v);
   }
 
   // Bounded, cycle-safe walk. The cap matters: an unbounded fiber traversal on
@@ -152,8 +158,11 @@
     let best = null;
     let bestScore = 0;
 
+    const want = idVariants(wantId);
+    const seenCandidates = [];
     const consider = (v) => {
-      if (!looksLikeItem(v, wantId)) return;
+      if (!looksLikeItem(v, want)) return;
+      seenCandidates.push(v);
       const score = itemScore(v);
       if (score > bestScore) {
         best = v;
@@ -176,6 +185,26 @@
       }
       if (node.child) stack.push(node.child);
       if (node.sibling) stack.push(node.sibling);
+    }
+
+    // Diagnostic. The detail page's real item object has not been located by
+    // inspection, and a silent partial match is what produced a capture with a
+    // price but no name. Printing what WAS found turns the next fix into a
+    // reading rather than another guess.
+    try {
+      console.info(
+        '[CollectCore] detail fiber scan:',
+        {
+          wantId,
+          nodesVisited: visited,
+          candidates: seenCandidates.length,
+          bestScore,
+          bestKeys: best ? Object.keys(best).slice(0, 40) : null,
+        },
+        seenCandidates.slice(0, 5).map((c) => Object.keys(c).slice(0, 25))
+      );
+    } catch {
+      /* console unavailable — never let diagnostics break capture */
     }
     return best;
   }

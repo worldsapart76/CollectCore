@@ -244,8 +244,94 @@
     }
   }
 
+  // DOM fallback for a listing's own page.
+  //
+  // The fiber walk finds SOMETHING carrying the listing id on a detail page,
+  // but not the full item -- the first attempt produced a row with a price and
+  // a status but no name and no image. Rather than keep guessing at where
+  // Mercari keeps the real object, read the page: the title, price and photo
+  // are rendered, visible, and not going anywhere.
+  //
+  // Same posture as itemFromDom() for tiles, including the _viaFallback flag.
+  // A degraded capture has to be visible as degraded -- silently bad data is
+  // the failure mode this whole module is built to avoid.
+  function detailFromDom() {
+    const id = detailIdFromUrl();
+    if (!id) return null;
+
+    const h1 = document.querySelector('h1');
+    const name = (h1?.textContent || '').trim();
+
+    // The listing photo, not a thumbnail from the "you might also like" rail:
+    // take the largest image that comes from Mercari's photo CDN.
+    let thumbnail = null;
+    let bestArea = 0;
+    for (const img of document.querySelectorAll('img')) {
+      const src = img.currentSrc || img.src || '';
+      if (!/mercdn\.net\/photos\//.test(src)) continue;
+      const area = (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
+      if (area > bestArea) {
+        bestArea = area;
+        thumbnail = src;
+      }
+    }
+
+    // Mercari renders the discounted price first and the struck-through
+    // original after it, so the FIRST match is what the item actually costs.
+    const body = document.body.innerText || '';
+    const dollars = body.match(/\$\s?([\d,]+(?:\.\d{2})?)/)?.[1];
+
+    // "Item sold" button / "Sold 20h ago" overlay. Checked against the page
+    // rather than the search filter, for the same reason status is elsewhere.
+    const sold = /\bitem sold\b|\bsold\s+\d+\s*(h|m|d|hour|min|day)/i.test(body);
+
+    if (!name && !thumbnail) return null; // nothing usable; do not fake a row
+
+    return {
+      id,
+      name,
+      price: dollars ? Math.round(parseFloat(dollars.replace(/,/g, '')) * 100) : null,
+      status: sold ? 'trading' : 'on_sale',
+      thumbnail,
+      itemCondition: null,
+      category: null,
+      categoryId: null,
+      brand: null,
+      shippingPayerCode: null,
+      description: null,
+      sellerId: null,
+      photos: null,
+      dates: null,
+      _viaFallback: true,
+    };
+  }
+
+  // Prefer the fiber, but only where it actually carried the listing. A stamp
+  // with no name and no image is a fragment, not the item -- merging the DOM
+  // read over it keeps whatever the fiber did get (status, condition, shipping)
+  // while filling in what it missed.
+  function readDetailItem() {
+    const stamped = detailItem();
+    const scraped = detailFromDom();
+    if (!stamped) return scraped;
+    if (!scraped) return stamped;
+
+    const merged = { ...stamped };
+    let borrowed = false;
+    for (const k of ['name', 'thumbnail', 'price', 'status']) {
+      const missing =
+        merged[k] === null || merged[k] === undefined || merged[k] === '';
+      if (missing && scraped[k] !== null && scraped[k] !== '') {
+        merged[k] = scraped[k];
+        borrowed = true;
+      }
+    }
+    if (borrowed) merged._viaFallback = true;
+    return merged;
+  }
+
   function decorateDetail() {
-    const item = detailItem();
+    const item = detailIdFromUrl() ? readDetailItem() : null;
     let bar = document.getElementById(BAR_ID);
 
     // Mercari is an SPA: navigating from a listing back to search leaves the
@@ -267,7 +353,11 @@
 
   function syncDetailBar(bar, item) {
     const on = captured.has(keyFor(item.id));
-    const label = on ? '✓ Captured' : '+ Capture';
+    const label = on
+      ? '✓ Captured'
+      : item._viaFallback
+        ? '+ Capture (partial read)'
+        : '+ Capture';
     // Conditional writes only -- see syncDot. An unconditional textContent
     // assignment is a childList mutation, and the observer that calls this
     // watches for exactly that.
@@ -282,7 +372,7 @@
 
     // Re-read at click time. The SPA can navigate between listings in place,
     // so anything read when the bar was created may describe a different card.
-    const item = detailItem();
+    const item = readDetailItem();
     const bar = document.getElementById(BAR_ID);
     if (!bar) return;
     if (!item || item.id !== detailIdFromUrl()) {
@@ -343,7 +433,7 @@
       if (dot) syncDot(anchor, dot);
     });
     const bar = document.getElementById(BAR_ID);
-    const di = detailItem();
+    const di = detailIdFromUrl() ? readDetailItem() : null;
     if (bar && di) syncDetailBar(bar, di);
   }
 
