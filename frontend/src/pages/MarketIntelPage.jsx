@@ -1156,24 +1156,33 @@ function FeesPanel({ onError, onChanged }) {
       .catch((e) => onError(e.message || "Failed to load fees"));
   }, [open, rows, onError]);
 
-  // Deliberately asks about a typical ORDER, not what the shipping fee covers.
+  // Asks what a shipment actually CONTAINS, which is sometimes the fee's
+  // capacity and sometimes nothing like it. What decides is whether a storage
+  // clock forces the box out before it is full:
   //
-  // "$12 for up to 40 cards" makes 40 the obvious answer and it is the wrong
-  // one: the fee is only $0.30 a card if forty cards actually turn up in the
-  // box. Buy six and it is $2.00 a card, so answering with the capacity
-  // understates every purchase on that marketplace roughly sevenfold -- and
-  // understated cost is the direction that talks you into a bad buy.
+  //   Pocamarket holds cards indefinitely, so boxes go out full and 40 of a
+  //   "$12 up to 40 items" fee is honest -- $0.30 a card, really.
+  //
+  //   Neokyo's 45-day limit ships whatever has accumulated, so the capacity is
+  //   a fiction there: six cards paying a forty-card fee is $2.00 each.
+  //
+  // An earlier version of this prompt said flatly "not what the fee covers",
+  // which is wrong half the time and would have understated Pocamarket by a
+  // factor of six. The rule is the contents; the storage terms decide them.
   async function editBoxSize(m) {
     const entered = prompt(
-      `${m.marketplace_name} — how many cards you TYPICALLY buy in one shipment.
+      `${m.marketplace_name} — how many cards a TYPICAL shipment contains.
 
 ` +
         "Per-box costs (shipping, handling, wire fees) are divided by this to " +
         "get a per-card share.\n\n" +
-        "Not what the fee covers — if shipping is $12 for up to 40 cards but " +
-        "you usually buy 6, answer 6. Answering 40 would price those 6 cards " +
-        "as though the box were full.\n\n" +
-        "Leave blank to clear it.",
+        "Answer what actually goes in the box, which is not always what the " +
+        "fee covers:\n\n" +
+        "  • Storage open-ended, you choose when to ship — boxes go out full, " +
+        "so the fee's capacity IS the answer.\n" +
+        "  • A storage clock forces it out — answer what accumulates in that " +
+        "window. Six cards paying a forty-card fee is $2.00 each, not $0.30." +
+        "\n\nLeave blank to clear it.",
       m.buy?.typical_items_per_shipment ?? ""
     );
     if (entered == null) return;
@@ -1253,7 +1262,7 @@ function FeesPanel({ onError, onChanged }) {
                 </button>
                 <button
                   onClick={() => editBoxSize(m)}
-                  title="How many cards you typically buy in one shipment — not what the shipping fee covers. Divides the per-box cost lines into a per-card share."
+                  title="How many cards a typical shipment CONTAINS. Where storage is open-ended a box goes out full, so the fee's capacity is right; where a storage clock forces it out, answer what accumulates in that window."
                   style={{
                     border: "1px solid #ddd", borderRadius: 3, background: "#fff",
                     padding: "1px 6px", cursor: "pointer", fontSize: 12,

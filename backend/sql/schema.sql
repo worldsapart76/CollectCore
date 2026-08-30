@@ -2028,14 +2028,21 @@ CREATE TABLE IF NOT EXISTS lkup_mkt_marketplaces (
     -- net of this (they are accepted offers), so it does NOT come off a sold
     -- comp -- it is what a LIST price has to be padded by to clear a target.
     offer_discount_pct   REAL NOT NULL DEFAULT 0,
-    -- How many cards a TYPICAL ORDER contains -- not what the shipping fee
-    -- covers. Divides the per_shipment cost lines into a per-card estimate.
+    -- How many cards a typical shipment CONTAINS. Divides the per_shipment
+    -- cost lines into a per-card estimate.
     --
-    -- The distinction is the whole point. Pocamarket charges $12 "for up to 40
-    -- items", which makes 40 the obvious answer and the wrong one: that fee is
-    -- $0.30 a card only if forty cards actually turn up in the box. Buy six and
-    -- it is $2.00 a card, so answering with the capacity understates every
-    -- purchase there roughly sevenfold -- and understated cost is the direction
+    -- Sometimes the fee's capacity, sometimes nothing like it, and what decides
+    -- is whether a STORAGE CLOCK forces the box out before it is full:
+    --
+    --   Pocamarket stores cards indefinitely and you choose when to ship, so
+    --   boxes go out full: 40 against its "$12 up to 40 items" is honest, and
+    --   the per-card share really is $0.30.
+    --
+    --   Neokyo holds for 45 days and then ships whatever has accumulated, so
+    --   its capacity is a fiction -- six cards paying a forty-card fee is
+    --   $2.00 each, not $0.30.
+    --
+    -- Getting this backwards is a ~7x error in landed cost, in the direction
     -- that talks you into a bad buy.
     --
     -- NULL means unknown, and the per_shipment lines are then left OUT and

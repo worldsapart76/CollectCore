@@ -320,6 +320,25 @@ arrive with a real observation date rather than the capture time. It is also
 the one where the word "sold" is actively dangerous: a live tile advertises
 `3 sold`, so the state test requires a date. See the extension README.
 
+#### Storage terms set the box size, and the box size sets per-card cost
+
+`typical_items_per_shipment` divides the per-shipment cost lines, so it decides
+what consolidated shipping actually costs per card. The right number is what a
+box **contains**, which is the fee's capacity on one marketplace and nothing
+like it on another — and what separates them is whether a storage clock forces
+the box out before it is full:
+
+| | Storage | So a box goes out | Box size |
+|---|---|---|---|
+| **Pocamarket** | indefinite; you choose when to ship | **full** | its capacity — 40, against "$12 up to 40 items", really is $0.30/card |
+| **Neokyo** | **45 days**, then it ships | with whatever accumulated | what accumulates in 45 days, *not* the capacity |
+
+Answering with the capacity where a clock applies understates landed cost by
+however empty the box really is — six cards paying a forty-card fee is $2.00
+each, not $0.30. That is a ~7x error in the direction that talks you into a bad
+buy, which is why an unset box size leaves those lines **out** and flagged
+rather than guessing.
+
 Neokyo remains the checkout and consolidation layer for JP purchases, which is
 why capturing there matters: the saved URL is the one that can actually be
 bought. Proxies surface only purchasable items, so JP-side sold comps do not
