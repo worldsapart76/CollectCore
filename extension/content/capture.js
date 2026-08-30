@@ -65,18 +65,39 @@
       // No urlFor: the anchor's own href is the URL, so nothing has to be
       // reconstructed from a shape this file would have to know.
       queryParam: 'keyword',
-      // Neokyo's h1 is the section heading "Item Details", not the listing
-      // name, so taking h1 first filed every capture under that same title.
-      titleOrder: ['og', 'doc', 'h1'],
-      // ¥1,234 and 1,234円 are both current on Neokyo depending on where the
-      // number is rendered. Whole yen: no decimals, exponent 0.
+      // The listing name is a heading in the left column. It is NOT the h1,
+      // the og:title or the document title — all three say "Item Details",
+      // Neokyo's generic page name, which is how every capture ended up filed
+      // under it. Headings are read in DOM order and the page's own section
+      // headings are rejected by name, since they are fixed furniture.
+      titleScope: [
+        '[class*="product-title"]',
+        '[class*="item-title"]',
+        'h1',
+        'h2',
+        'h3',
+      ],
+      titleReject:
+        /^(item details|item price|purchase request|new user guide|categories)\b/i,
+      titleOrder: ['scope', 'og', 'doc', 'h1'],
+      // Neokyo spells the unit out — "3399 Yen" — with no ¥ and no 円, which
+      // is why the first version found no price at all and fell through to the
+      // dollars. The symbol forms stay as fallbacks; the page has used both.
+      //
+      // Spelled-out "Yen" first is also what makes searching the whole page
+      // safe: the header's points badges render as bare numbers next to a yen
+      // glyph, and a symbol-first search would read one of those as the price.
       priceFrom: (text) =>
-        money(text, /[¥￥]\s?([\d,]+)/, 0) ?? money(text, /([\d,]+)\s*円/, 0),
-      // Neokyo prints its own USD conversion beside the yen. Recorded as the
-      // marketplace's own number rather than converted here — it beats any
-      // rate we would look up, and it gives the JPY rate for free.
+        money(text, /([\d,]+)\s*Yen\b/i, 0) ??
+        money(text, /[¥￥]\s?([\d,]+)/, 0) ??
+        money(text, /([\d,]+)\s*円/, 0),
+      // "Approximately : US$ 21.07" — Neokyo's own conversion, beside the yen.
+      // Its rate is the one actually charged, so it beats anything looked up.
       usdFrom: (text) => money(text, /\$\s?([\d,]+(?:\.\d{2})?)/, 2),
-      soldFrom: (text) => /\bsold\s*out\b|売り切れ|販売終了/i.test(text),
+      // "Availability: In stock" is a field on every product page, so its
+      // opposite is the reliable signal here rather than the word "sold".
+      soldFrom: (text) =>
+        /\bsold\s*out\b|\bout of stock\b|売り切れ|販売終了/i.test(text),
       photoHost: /img\.fril\.jp|mercdn\.net/,
     },
 
@@ -111,9 +132,20 @@
   // So the symbol on the page decides. Native first (JPY here), and only if
   // there is none does the USD figure become the price in its own right rather
   // than a conversion of something.
-  function readPrice(text) {
-    const native = SITE.priceFrom(text);
-    const usd = SITE.usdFrom ? SITE.usdFrom(text) : null;
+  // `fallback` is the wider text to try when the narrow one came up empty --
+  // on a detail page, the price element first and the whole page after it.
+  // Narrowing alone was not enough: Neokyo renders the yen and the dollars in
+  // separate elements, so scoping to one of them found the dollars and missed
+  // the yen entirely.
+  function readPrice(text, fallback = null) {
+    const pick = (fn) => {
+      if (!fn) return null;
+      const a = fn(text);
+      if (a !== null && a !== undefined) return a;
+      return fallback === null ? null : fn(fallback);
+    };
+    const native = pick(SITE.priceFrom);
+    const usd = pick(SITE.usdFrom);
     if (native !== null && native !== undefined) {
       // Both present: the site is showing its own conversion beside the
       // native price, and that conversion is the rate actually charged.
@@ -437,6 +469,21 @@
   // the section heading "Item Details" -- taking h1 first there captured every
   // listing under the same useless title.
   const TITLE_SOURCES = {
+    // Headings in DOM order, minus the page's own fixed furniture. Querying
+    // every selector at once rather than in turn is deliberate: DOM order is
+    // the signal — a listing's name is rendered before the panels beside it —
+    // and taking selectors in turn would override that with my guess about
+    // which class name is most likely to exist.
+    scope: () => {
+      if (!SITE.titleScope) return null;
+      for (const el of document.querySelectorAll(SITE.titleScope.join(','))) {
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t.length < 3 || t.length > 200) continue;
+        if (SITE.titleReject?.test(t)) continue;
+        return t;
+      }
+      return null;
+    },
     h1: () => document.querySelector('h1')?.textContent?.trim(),
     og: () =>
       document
@@ -451,11 +498,20 @@
         .trim(),
   };
 
+  // Which source the last title came from. Recorded because "the title is
+  // wrong" and "the title came from the wrong place" are the same bug, and
+  // knowing which source won says immediately which one to fix.
+  let lastTitleSource = null;
+
   function detailTitle() {
     for (const key of SITE.titleOrder || ['h1', 'og', 'doc']) {
       const t = TITLE_SOURCES[key]?.();
-      if (t) return t;
+      if (t) {
+        lastTitleSource = key;
+        return t;
+      }
     }
+    lastTitleSource = null;
     return '';
   }
 
@@ -498,7 +554,7 @@
     // holds only where the body's first price IS the item's -- a page with a
     // currency switcher or a shipping quote above the fold needs the price
     // read from a narrower element, which is what priceScope is for.
-    const priceText = scopedText(SITE.priceScope) ?? body;
+    const scopedPrice = scopedText(SITE.priceScope);
     const sold = SITE.soldFrom(body);
 
     // What the page actually offered, recorded whether or not the read
@@ -506,8 +562,9 @@
     // "why is this one empty" is otherwise unanswerable without a screenshot
     // and a round of guessing. Truncated: this is a hint, not a page dump.
     const domScan = {
-      priceText: priceText.replace(/\s+/g, ' ').trim().slice(0, 80),
-      scoped: scopedText(SITE.priceScope) !== null,
+      priceText: (scopedPrice || body).replace(/\s+/g, ' ').trim().slice(0, 80),
+      scoped: scopedPrice !== null,
+      scope: (TITLE_SOURCES.scope() || '').slice(0, 60),
       h1: (TITLE_SOURCES.h1() || '').slice(0, 60),
       og: (TITLE_SOURCES.og() || '').slice(0, 60),
       doc: (TITLE_SOURCES.doc() || '').slice(0, 60),
@@ -516,12 +573,19 @@
     // Being on a listing URL is enough to offer a capture. Bailing out when the
     // title or photo could not be read is what made the button vanish
     // entirely, which is far worse than a capture that needs a name later.
+    // Before the object literal: domScan records which source won, and that is
+    // only known once the title has actually been read.
+    const name = detailTitle();
+    domScan.titleFrom = lastTitleSource;
+
     return {
       id,
-      name: detailTitle(),
+      name,
       // price, currency and priceUsd together -- the currency is whichever one
       // the page was actually showing, not an assumption about the site.
-      ...readPrice(priceText),
+      // Price element first, whole page second: the two figures can live in
+      // different elements.
+      ...readPrice(scopedPrice, body),
       status: sold ? 'trading' : 'on_sale',
       thumbnail: detailPhoto(),
       itemCondition: null,

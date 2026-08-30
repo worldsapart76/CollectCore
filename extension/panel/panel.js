@@ -150,13 +150,20 @@ function row(rec) {
   // what did the page actually offer? Without it, "why is this one empty" can
   // only be settled by a screenshot and a round of guessing.
   const dom = rec.domScan;
-  if (dom && (!rec.name || rec.priceCents == null)) {
+  // Also when the title came from a FALLBACK source. A title read off the
+  // document title is usually the page's generic name -- "Item Details" on
+  // every Neokyo listing -- which is wrong in a way that looks fine, so
+  // waiting for it to be missing never surfaces it.
+  const titleFellBack = dom?.titleFrom && dom.titleFrom !== 'scope';
+  if (dom && (!rec.name || rec.priceCents == null || titleFellBack)) {
     const dbg = document.createElement('div');
     dbg.className = 'scan-debug';
     dbg.textContent =
-      `page read: price from ${dom.scoped ? 'the price element' : 'the whole page'}` +
+      `page read: title from ${dom.titleFrom || 'nowhere'}` +
+      ` · price from ${dom.scoped ? 'the price element' : 'the whole page'}` +
       ` — "${dom.priceText || 'nothing'}"` +
-      ` · h1 "${dom.h1 || '—'}" · og "${dom.og || '—'}" · title "${dom.doc || '—'}"`;
+      ` · heading "${dom.scope || '—'}" · h1 "${dom.h1 || '—'}"` +
+      ` · og "${dom.og || '—'}" · title "${dom.doc || '—'}"`;
     body.append(dbg);
   }
 
