@@ -2005,7 +2005,24 @@ CREATE TABLE IF NOT EXISTS lkup_mkt_marketplaces (
     currency         TEXT NOT NULL,
     side             TEXT,              -- 'buy' | 'sell' | 'both'
     sort_order       INTEGER NOT NULL DEFAULT 0,
-    is_active        INTEGER NOT NULL DEFAULT 1
+    is_active        INTEGER NOT NULL DEFAULT 1,
+
+    -- What a sale actually nets, and what a purchase actually costs. Every
+    -- figure in the comp view was GROSS without these: a $13.00 sold median
+    -- against a $2.50 basis read as $10.50 of margin, before the platform's
+    -- cut and before any shipping absorbed.
+    --
+    -- All default to 0, which reproduces the old gross behaviour exactly. They
+    -- are deliberately NOT pre-filled with real fee schedules -- those change,
+    -- differ per seller, and a wrong number confidently displayed is worse
+    -- than an obviously unset one. The UI says when they are unset.
+    fee_pct              REAL NOT NULL DEFAULT 0,  -- 0.10 = 10% of sale price
+    fee_fixed_cents      INTEGER NOT NULL DEFAULT 0,
+    ship_absorbed_cents  INTEGER NOT NULL DEFAULT 0,  -- typical, when seller pays
+    -- How far below the ask buyers typically settle. Sold prices are already
+    -- net of this (they are accepted offers), so it does NOT come off a sold
+    -- comp -- it is what a LIST price has to be padded by to clear a target.
+    offer_discount_pct   REAL NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO lkup_mkt_marketplaces

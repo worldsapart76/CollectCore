@@ -1426,7 +1426,13 @@ No backup changes needed.
    and lots captured, linked, synced, cleared. Session-wide activation;
    composed across candidate objects; Mercari's detail field names recorded in
    `extension/README.md`.
-10. **Per-card override + margin in the comp view** —
+10. **Net, not gross** — per-marketplace `fee_pct`, `fee_fixed_cents`,
+    `ship_absorbed_cents`, `offer_discount_pct` on `lkup_mkt_marketplaces`,
+    all defaulting to 0 so an unconfigured marketplace reproduces gross exactly
+    and is labelled **GROSS — FEES NOT SET**. The comp view leads with what you
+    keep, and gives the list price that still clears it after an offer.
+    Verified to round-trip: list → offer → sale → net returns the target.
+11. **Per-card override + margin in the comp view** —
    `PUT /market/cost-basis/item/{id}`, marked `source = 'manual'` and preserved
    by the sweep. The card detail reads
    *cost $2.50 (Older era) · margin $10.50 vs sold median $13.00 · ESTIMATED*.
@@ -1434,9 +1440,6 @@ No backup changes needed.
 
 ### Next
 
-- **Net, not gross.** Per-marketplace fee/shipping/offer-discount assumptions,
-  applied to comps, plus the "list at X to net Y" figure. The comp view is
-  currently gross and reads as more profit than it is.
 - **Neokyo capture** (buy side). Server-rendered HTML per v3's POC, so no fiber
   read — plain DOM parsing, more brittle but simpler. Brings the Japanese
   lexicon into play and is the first live exercise of the JPY path.

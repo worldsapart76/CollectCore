@@ -1502,6 +1502,18 @@ export async function backfillFxUsd() {
 // the sale pile (trade + pending_outgoing) — a card that was never owned has no
 // basis, and a card being kept is a collecting cost, not a trading one.
 
+// Per-marketplace fee model. All zero until set, which reproduces gross
+// figures exactly — real fee schedules are deliberately NOT pre-filled, since
+// a wrong number shown confidently is worse than an obviously unset one.
+export async function setMarketplaceFees(code, payload) {
+  const res = await fetch(`${API}/market/marketplaces/${code}/fees`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res, 'Failed to save fees');
+}
+
 export async function listCostTiers() {
   const res = await fetch(`${API}/market/cost-tiers`);
   return handleJsonResponse(res, 'Failed to load cost tiers');

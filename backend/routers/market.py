@@ -348,7 +348,8 @@ def list_marketplaces(db=Depends(get_db)):
     rows = db.execute(
         text(
             "SELECT marketplace_code, marketplace_name, currency, side,"
-            " is_active FROM lkup_mkt_marketplaces "
+            " is_active, fee_pct, fee_fixed_cents, ship_absorbed_cents,"
+            " offer_discount_pct FROM lkup_mkt_marketplaces "
             "WHERE is_active = 1 ORDER BY sort_order"
         )
     ).mappings().all()
@@ -583,10 +584,39 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     if not series and not lots:
         raise HTTPException(status_code=404, detail="no comp data for this card")
 
+    # Comps can span marketplaces; the fee model belongs to whichever one the
+    # sales actually happened on. Sold rows decide it — that is the side being
+    # modelled — falling back to the most common marketplace overall.
+    sold_mkts = [r["marketplace"] for r in series if r["listing_state"] == "sold"]
+    mkts = sold_mkts or [r["marketplace"] for r in series]
+    mkt = max(set(mkts), key=mkts.count) if mkts else "mercari_us"
+    fm = fee_model(db, mkt)
+
+    sold_stats = stats(sold)
+    basis = effective_basis(db, item_id)
+    net_median = net_proceeds(sold_stats["median"], fm) if sold_stats else None
+    margin = (
+        net_median - basis["cost_cents"]
+        if net_median is not None and basis else None
+    )
+
     return {
         "item_id": item_id,
         "currency": "USD",
-        "basis": effective_basis(db, item_id),
+        "basis": basis,
+        "fees": {**fm, "marketplace": mkt},
+        # Gross is what the market paid; net is what you would keep. Both are
+        # returned because the difference is the entire point.
+        "net": {
+            "sold_median_net": net_median,
+            "margin_vs_basis": margin,
+            # What to list at to clear the basis plus the same margin again --
+            # the number actually typed into the marketplace.
+            "list_to_net": (
+                list_price_for(basis["cost_cents"] + margin, fm)
+                if margin is not None and basis else None
+            ),
+        },
         "unconverted": unconverted,
         "active": stats(active),
         "sold": stats(sold),
@@ -890,3 +920,118 @@ def set_item_basis(item_id: int, body: ItemBasisIn, db=Depends(get_db)):
     """), {"i": item_id, "t": body.cost_tier_id, "c": body.cost_cents})
     db.commit()
     return {"ok": True, "basis": effective_basis(db, item_id)}
+
+
+# ───────────────────────── Net, not gross ────────────────────────────────────
+#
+# Three deductions, routinely conflated, and the comp view applied none of them:
+#
+#   marketplace fee   the platform's cut of a sale        sell side
+#   shipping          whoever actually pays it            either side
+#   the offer gap     buyers negotiate down from the ask  BEFORE listing
+#
+# The offer gap works the opposite way to the other two and is the one usually
+# got wrong. Mercari's sold prices come back as odd amounts -- 407, 425, 567,
+# 1045 -- because they are accepted offers and automatic price drops. So a sold
+# median is ALREADY net of negotiation: it is what buyers paid, not what
+# sellers asked. Nothing is deducted from it for haggling.
+#
+# It matters in the other direction: to CLEAR a number you must list above it,
+# because the offer arrives against the ask. That is `list_price_for()`.
+
+
+def fee_model(db, marketplace: str) -> Dict[str, Any]:
+    row = db.execute(text(
+        "SELECT fee_pct, fee_fixed_cents, ship_absorbed_cents, offer_discount_pct "
+        "FROM lkup_mkt_marketplaces WHERE marketplace_code = :m"
+    ), {"m": marketplace}).fetchone()
+    if row is None:
+        return {"fee_pct": 0.0, "fee_fixed_cents": 0,
+                "ship_absorbed_cents": 0, "offer_discount_pct": 0.0,
+                "configured": False}
+    fee_pct, fee_fixed, ship, offer = row
+    return {
+        "fee_pct": fee_pct or 0.0,
+        "fee_fixed_cents": fee_fixed or 0,
+        "ship_absorbed_cents": ship or 0,
+        "offer_discount_pct": offer or 0.0,
+        # All zero means nobody has set this up. Reported rather than inferred,
+        # so the UI can say "these are gross" instead of quietly implying a
+        # net figure that had nothing taken off it.
+        "configured": bool(fee_pct or fee_fixed or ship or offer),
+    }
+
+
+def net_proceeds(gross_cents: Optional[int], fm: Dict[str, Any],
+                 seller_pays_shipping: bool = True) -> Optional[int]:
+    """What a sale at `gross_cents` actually leaves you.
+
+    `seller_pays_shipping` lets a listing whose real shippingPayerCode says the
+    BUYER paid skip the shipping deduction. Detail captures know this; sweeps
+    do not, which is why the marketplace default exists at all.
+    """
+    if gross_cents is None:
+        return None
+    net = gross_cents * (1.0 - fm["fee_pct"]) - fm["fee_fixed_cents"]
+    if seller_pays_shipping:
+        net -= fm["ship_absorbed_cents"]
+    return int(round(net))
+
+
+def list_price_for(target_net_cents: int, fm: Dict[str, Any]) -> Optional[int]:
+    """The number to actually type into the marketplace to clear a target.
+
+    Inverse of net_proceeds, then padded for the offer gap. Returns None when
+    the fees make the target unreachable at any price -- a 100% fee, or an
+    offer discount of 100% -- rather than dividing by zero and reporting an
+    absurd figure with a straight face.
+    """
+    denom = 1.0 - fm["fee_pct"]
+    if denom <= 0:
+        return None
+    gross = (target_net_cents + fm["fee_fixed_cents"] + fm["ship_absorbed_cents"]) / denom
+    pad = 1.0 - fm["offer_discount_pct"]
+    if pad <= 0:
+        return None
+    return int(round(gross / pad))
+
+
+class FeeModelIn(BaseModel):
+    fee_pct: Optional[float] = None
+    fee_fixed_cents: Optional[int] = None
+    ship_absorbed_cents: Optional[int] = None
+    offer_discount_pct: Optional[float] = None
+
+
+@router.put("/marketplaces/{code}/fees")
+def set_marketplace_fees(code: str, body: FeeModelIn, db=Depends(get_db)):
+    sets: List[str] = []
+    params: Dict[str, Any] = {"m": code}
+    for field, col in (
+        ("fee_pct", "fee_pct"),
+        ("fee_fixed_cents", "fee_fixed_cents"),
+        ("ship_absorbed_cents", "ship_absorbed_cents"),
+        ("offer_discount_pct", "offer_discount_pct"),
+    ):
+        v = getattr(body, field)
+        if v is None:
+            continue
+        if field.endswith("_pct"):
+            if not (0.0 <= v < 1.0):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} is a fraction between 0 and 1 (0.10 = 10%); got {v}.")
+        elif v < 0:
+            raise HTTPException(status_code=400, detail=f"{field} cannot be negative.")
+        sets.append(f"{col} = :{field}")
+        params[field] = v
+
+    if not sets:
+        return {"ok": True, "changed": False}
+    res = db.execute(text(
+        f"UPDATE lkup_mkt_marketplaces SET {', '.join(sets)} "
+        "WHERE marketplace_code = :m"), params)
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"No marketplace '{code}'.")
+    db.commit()
+    return {"ok": True, "changed": True, "fees": fee_model(db, code)}

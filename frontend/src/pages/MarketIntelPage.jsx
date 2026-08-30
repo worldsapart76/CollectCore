@@ -3,6 +3,7 @@ import { Button, Alert } from "../components/primitives";
 import {
   listMarketComps, getMarketComps, listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
+  listMarketplaces, setMarketplaceFees,
 } from "../api";
 
 // Price comps from the browser-extension captures.
@@ -131,6 +132,13 @@ export default function MarketIntelPage() {
         </Alert>
       )}
 
+      <FeesPanel
+        onError={setError}
+        onChanged={async () => {
+          setCards((await listMarketComps()).cards || []);
+          if (selected) setDetail(await getMarketComps(selected));
+        }}
+      />
       <CostBasisPanel onError={setError} />
 
       {cards === null && <div style={{ color: "#666" }}>Loading…</div>}
@@ -187,6 +195,142 @@ export default function MarketIntelPage() {
               />
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Per-marketplace fee model.
+//
+// Everything starts at zero, which reproduces gross figures exactly. Real fee
+// schedules are deliberately not pre-filled: they change, they differ by
+// seller, and a wrong number shown confidently is worse than an obviously
+// unset one. Until these are set, the comp view says GROSS rather than
+// implying a net figure that had nothing taken off it.
+function FeesPanel({ onError, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || rows) return;
+    listMarketplaces()
+      .then((d) => setRows(d.marketplaces || []))
+      .catch((e) => onError(e.message || "Failed to load marketplaces"));
+  }, [open, rows, onError]);
+
+  async function edit(m, field, label, asPct) {
+    const current = asPct
+      ? ((m[field] || 0) * 100).toFixed(1)
+      : ((m[field] || 0) / 100).toFixed(2);
+    const entered = prompt(
+      `${m.marketplace_name} — ${label}\n` +
+      (asPct ? "Enter a percentage, e.g. 10 for 10%." : "Enter dollars, e.g. 1.20."),
+      current
+    );
+    if (entered == null) return;
+    const n = Number(entered);
+    if (!Number.isFinite(n) || n < 0) {
+      onError("Enter a non-negative number");
+      return;
+    }
+    if (asPct && n >= 100) {
+      onError("A 100% fee leaves nothing to net — enter less than 100.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const value = asPct ? n / 100 : Math.round(n * 100);
+      await setMarketplaceFees(m.marketplace_code, { [field]: value });
+      setRows((await listMarketplaces()).marketplaces || []);
+      await onChanged();
+    } catch (e) {
+      onError(e.message || "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const FIELDS = [
+    ["fee_pct", "Fee %", true],
+    ["fee_fixed_cents", "Fixed fee", false],
+    ["ship_absorbed_cents", "Shipping you absorb", false],
+    ["offer_discount_pct", "Typical offer below ask", true],
+  ];
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 6, marginBottom: 12 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 10px",
+          background: "#fafafa", border: "none", borderRadius: 6, cursor: "pointer",
+          textAlign: "left", fontSize: 13,
+        }}
+      >
+        <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
+        <strong>Fees &amp; shipping</strong>
+        <span style={{ color: "#666" }}>what a sale actually nets</span>
+        {rows && !rows.some((m) => m.fee_pct || m.fee_fixed_cents || m.ship_absorbed_cents) && (
+          <span style={{ marginLeft: "auto", color: "#b45309", fontSize: 12 }}>
+            not set — figures are gross
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #eee" }}>
+          {!rows && <div style={{ color: "#666", fontSize: 13 }}>Loading…</div>}
+          {rows && (
+            <>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+                Sold prices are already what buyers <em>paid</em> — Mercari&apos;s odd
+                amounts are accepted offers — so the offer figure is not deducted
+                from a comp. It is how far above a target you must{" "}
+                <strong>list</strong> to still clear it.
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#666", fontSize: 11 }}>
+                    <th style={{ padding: "3px 6px" }}>Marketplace</th>
+                    {FIELDS.map(([, label]) => (
+                      <th key={label} style={{ padding: "3px 6px", textAlign: "right" }}>
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((m) => (
+                    <tr key={m.marketplace_code} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "4px 6px" }}>
+                        {m.marketplace_name}
+                        <span style={{ color: "#999", fontSize: 11 }}> {m.currency}</span>
+                      </td>
+                      {FIELDS.map(([field, label, asPct]) => (
+                        <td key={field} style={{ padding: "4px 6px", textAlign: "right" }}>
+                          <button
+                            disabled={busy}
+                            onClick={() => edit(m, field, label, asPct)}
+                            style={{
+                              border: "1px solid #ddd", borderRadius: 3, background: "#fff",
+                              padding: "1px 6px", cursor: "pointer", fontSize: 12,
+                              color: m[field] ? "#111" : "#999",
+                            }}
+                          >
+                            {asPct
+                              ? `${((m[field] || 0) * 100).toFixed(1)}%`
+                              : usd(m[field] || 0)}
+                          </button>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -374,7 +518,7 @@ function CostBasisPanel({ onError }) {
 // The estimate is labelled everywhere it appears. On a blended basis an
 // individual card's margin is noise -- only the aggregate is sound -- so the
 // number must never read as measured.
-function BasisLine({ itemId, basis, soldMedian, onChanged }) {
+function BasisLine({ itemId, basis, soldMedian, net, fees, onChanged }) {
   const [busy, setBusy] = useState(false);
 
   async function edit() {
@@ -428,13 +572,39 @@ function BasisLine({ itemId, basis, soldMedian, onChanged }) {
                   : ""}
             </span>
           </span>
-          {margin != null ? (
+          {net?.margin_vs_basis != null ? (
+            <span style={{ color: net.margin_vs_basis >= 0 ? "#15803d" : "#b91c1c" }}>
+              margin <strong>{usd(net.margin_vs_basis)}</strong>
+              <span style={{ color: "#666" }}>
+                {" "}— sells {usd(soldMedian)}, you keep {usd(net.sold_median_net)}
+              </span>
+            </span>
+          ) : margin != null ? (
             <span style={{ color: margin >= 0 ? "#15803d" : "#b91c1c" }}>
               margin <strong>{usd(margin)}</strong>
               <span style={{ color: "#666" }}> vs sold median {usd(soldMedian)}</span>
             </span>
           ) : (
             <span style={{ color: "#666" }}>no sales yet — margin unknown</span>
+          )}
+          {net?.list_to_net != null && (
+            <span
+              title="List above your target: buyers negotiate down from the ask, and sold prices already reflect that."
+              style={{ color: "#1d4ed8" }}
+            >
+              list at <strong>{usd(net.list_to_net)}</strong>
+            </span>
+          )}
+          {fees && !fees.configured && (
+            <span
+              title="No fees or shipping set for this marketplace, so these figures are gross."
+              style={{
+                fontSize: 10, letterSpacing: 0.5, padding: "1px 5px", borderRadius: 3,
+                background: "#e5e7eb", color: "#374151",
+              }}
+            >
+              GROSS — FEES NOT SET
+            </span>
           )}
           {basis.estimated && (
             <span
@@ -475,6 +645,8 @@ function CardDetail({ detail, onChanged }) {
         itemId={detail.item_id}
         basis={detail.basis}
         soldMedian={soldStats?.median ?? null}
+        net={detail.net}
+        fees={detail.fees}
         onChanged={onChanged}
       />
 

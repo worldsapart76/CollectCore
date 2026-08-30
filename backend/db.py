@@ -142,6 +142,24 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_sighting.%s", col)
 
+    # Migration: marketplace fee model.
+    if "lkup_mkt_marketplaces" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(lkup_mkt_marketplaces)").fetchall()}
+        for col, ddl in (
+            ("fee_pct",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN fee_pct REAL NOT NULL DEFAULT 0"),
+            ("fee_fixed_cents",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN fee_fixed_cents INTEGER NOT NULL DEFAULT 0"),
+            ("ship_absorbed_cents",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN ship_absorbed_cents INTEGER NOT NULL DEFAULT 0"),
+            ("offer_discount_pct",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN offer_discount_pct REAL NOT NULL DEFAULT 0"),
+        ):
+            if col not in cols:
+                raw.execute(ddl)
+                logger.info("Migration: added lkup_mkt_marketplaces.%s", col)
+
     # Migration: detail-page capture fields on mkt_listing.
     if "mkt_listing" in tables:
         cols = {r[1] for r in raw.execute("PRAGMA table_info(mkt_listing)").fetchall()}
