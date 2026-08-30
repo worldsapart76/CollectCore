@@ -243,6 +243,19 @@ async function capture({
     if (item.itemCondition && !existing.itemCondition) {
       existing.itemCondition = item.itemCondition;
     }
+    // Repair, not just enrich. A record captured while the reader was broken
+    // holds an empty name and no image, and nothing here used to touch either
+    // -- so re-capturing the same listing left the bad row exactly as it was
+    // and the only fix was deleting it by hand. Fill anything missing, and
+    // let a real name replace a placeholder.
+    if (item.name && !existing.name) existing.name = item.name;
+    if (item.thumbnail && !existing.thumbnailUrl) {
+      existing.thumbnailUrl = bigThumb(item.thumbnail);
+      await cacheImage(key, item.thumbnail);
+    }
+    // Once a clean read lands, stop calling the record degraded.
+    if (existing.viaFallback && !item._viaFallback) existing.viaFallback = false;
+    if (item._scanKeys) existing.scanKeys = item._scanKeys;
     if (item.dates) existing.dates = { ...(existing.dates || {}), ...item.dates };
     // Re-seen means changed: a price move or a sale is exactly what a second
     // sighting records, so this needs pushing again.
@@ -283,6 +296,9 @@ async function capture({
     // means posted and which means sold is decided from real captures, not
     // guessed here — see datesFrom() in content/fiber.js.
     dates: item.dates || null,
+    // What the detail fiber scan actually found, so a bad read can be
+    // diagnosed from the panel instead of from a noisy page console.
+    scanKeys: item._scanKeys || null,
     // Set by the panel after a successful sync. Until then a record is the
     // only copy that exists, which is why Clear is destructive.
     syncedAt: null,

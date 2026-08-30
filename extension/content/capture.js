@@ -313,7 +313,16 @@
   function readDetailItem() {
     const stamped = detailItem();
     const scraped = detailFromDom();
-    if (!stamped) return scraped;
+    if (!stamped) {
+      if (scraped) {
+        try {
+          scraped._scanKeys = JSON.parse(document.body.dataset.ccDetailScan || 'null');
+        } catch {
+          scraped._scanKeys = null;
+        }
+      }
+      return scraped;
+    }
     if (!scraped) return stamped;
 
     const merged = { ...stamped };

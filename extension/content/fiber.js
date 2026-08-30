@@ -147,6 +147,11 @@
   // a busy page is exactly the kind of thing that froze the tab once already.
   const MAX_NODES = 20000;
 
+  // What the last scan found. Travels with the capture so a bad read is
+  // diagnosable from the panel -- a page console full of Mercari's own errors
+  // is not somewhere a diagnostic gets noticed.
+  let lastScan = null;
+
   function findDetailItem(wantId) {
     let root = anyFiber();
     if (!root) return null;
@@ -191,8 +196,17 @@
     // inspection, and a silent partial match is what produced a capture with a
     // price but no name. Printing what WAS found turns the next fix into a
     // reading rather than another guess.
+    lastScan = {
+      nodes: visited,
+      candidates: seenCandidates.length,
+      bestScore,
+      keys: best ? Object.keys(best).slice(0, 30) : [],
+      // Keys of the runner-up candidates, which is what says where the real
+      // object might be hiding.
+      others: seenCandidates.slice(0, 4).map((c) => Object.keys(c).slice(0, 20)),
+    };
     try {
-      console.info(
+      console.warn(
         '[CollectCore] detail fiber scan:',
         {
           wantId,
@@ -233,8 +247,10 @@
 
     const item = findDetailItem(wantId);
     if (!item) {
-      // Nothing usable. Clear rather than leave a stamp describing the previous
-      // listing -- Mercari is an SPA and navigates between items in place.
+      // Nothing usable from the fiber. The content script's DOM fallback still
+      // produces a capture, so publish the scan result for it rather than
+      // leaving no trace of why the fiber came up empty.
+      document.body.dataset.ccDetailScan = JSON.stringify(lastScan || {});
       if (stamped) delete document.body.dataset.ccDetailItem;
       return;
     }
@@ -257,6 +273,7 @@
       sellerId: item.seller?.id ?? item.sellerId ?? null,
       photos: photoList(item),
       dates: datesFrom(item),
+      _scanKeys: lastScan,
     });
   }
 

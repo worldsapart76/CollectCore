@@ -428,3 +428,17 @@ button.danger {
   background: #fee2e2;
   color: #b91c1c;
 }
+
+/* Fiber-scan diagnostic. Only rendered on rows that read badly, so it costs
+   nothing on a healthy queue. Wraps and selects, because the point is to be
+   copied out. */
+.scan-debug {
+  margin-top: 4px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #78350f;
+  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  user-select: text;
+}
