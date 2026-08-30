@@ -142,6 +142,23 @@ def _run_migrations(conn) -> None:
                 raw.execute(ddl)
                 logger.info("Migration: added mkt_sighting.%s", col)
 
+    # Migration: the fee columns shipped as *_cents, which is wrong for the
+    # JPY and KRW marketplaces -- those have no minor unit at all. Renamed to
+    # *_minor before anyone had filled them in. Rename first so the ADD COLUMN
+    # below sees the new names and does not create a second, empty pair.
+    if "lkup_mkt_marketplaces" in tables:
+        cols = {r[1] for r in raw.execute(
+            "PRAGMA table_info(lkup_mkt_marketplaces)").fetchall()}
+        for old_c, new_c in (
+            ("fee_fixed_cents", "fee_fixed_minor"),
+            ("ship_absorbed_cents", "ship_absorbed_minor"),
+        ):
+            if old_c in cols and new_c not in cols:
+                raw.execute(
+                    f"ALTER TABLE lkup_mkt_marketplaces RENAME COLUMN {old_c} TO {new_c}")
+                logger.info("Migration: renamed lkup_mkt_marketplaces.%s -> %s",
+                            old_c, new_c)
+
     # Migration: marketplace fee model.
     if "lkup_mkt_marketplaces" in tables:
         cols = {r[1] for r in raw.execute(
@@ -149,10 +166,10 @@ def _run_migrations(conn) -> None:
         for col, ddl in (
             ("fee_pct",
              "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN fee_pct REAL NOT NULL DEFAULT 0"),
-            ("fee_fixed_cents",
-             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN fee_fixed_cents INTEGER NOT NULL DEFAULT 0"),
-            ("ship_absorbed_cents",
-             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN ship_absorbed_cents INTEGER NOT NULL DEFAULT 0"),
+            ("fee_fixed_minor",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN fee_fixed_minor INTEGER NOT NULL DEFAULT 0"),
+            ("ship_absorbed_minor",
+             "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN ship_absorbed_minor INTEGER NOT NULL DEFAULT 0"),
             ("offer_discount_pct",
              "ALTER TABLE lkup_mkt_marketplaces ADD COLUMN offer_discount_pct REAL NOT NULL DEFAULT 0"),
         ):

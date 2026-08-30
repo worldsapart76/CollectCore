@@ -925,6 +925,27 @@ target net
 That is the number typed into Mercari, and it is what "price this card" should
 mean.
 
+### Fee amounts are NATIVE, in minor units
+
+`fee_fixed_minor` and `ship_absorbed_minor` are in the **marketplace's own
+currency**, in minor units — not cents, and not USD. Neokyo charges ¥350 and JPY
+has no subdivision, so that is stored as `350`.
+
+The columns shipped as `*_cents`, which was wrong the moment a JPY marketplace
+existed: the name implies an exponent of 2 for every currency, which is exactly
+the assumption that turned ¥2500 into $0.17 earlier in this module's life. The
+UI compounded it by formatting every amount with a dollar sign and asking for
+"dollars" in the edit prompt, so a Neokyo fee was displayed and entered wrong in
+both directions.
+
+`fee_model()` therefore returns **both**: the native figures, which are what the
+user typed and what the UI must show, and `fee_fixed_usd` / `ship_absorbed_usd`
+for the arithmetic, since the comp series is in USD. Returning only one of them
+is how a yen amount ends up subtracted from a dollar figure. The USD fields are
+`None` — never 0 — when a non-USD marketplace has no FX rate on file, and
+`fx_missing` says so, because treating a missing rate as zero would silently
+understate every cost on that marketplace.
+
 ### Per-marketplace assumptions are the baseline
 
 Detail capture yields a real `shippingPayerCode` — but only for listings opened

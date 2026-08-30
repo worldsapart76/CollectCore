@@ -221,12 +221,18 @@ function FeesPanel({ onError, onChanged }) {
   }, [open, rows, onError]);
 
   async function edit(m, field, label, asPct) {
+    const exp = m.minor_exponent ?? 2;
+    const cur = m.currency || "USD";
     const current = asPct
       ? ((m[field] || 0) * 100).toFixed(1)
-      : ((m[field] || 0) / 100).toFixed(2);
+      : ((m[field] || 0) / 10 ** exp).toFixed(exp);
     const entered = prompt(
       `${m.marketplace_name} — ${label}\n` +
-      (asPct ? "Enter a percentage, e.g. 10 for 10%." : "Enter dollars, e.g. 1.20."),
+      (asPct
+        ? "Enter a percentage, e.g. 10 for 10%."
+        // Named explicitly. Neokyo bills in yen, and a prompt saying "dollars"
+        // invites a number wrong by the exchange rate.
+        : `Enter an amount in ${cur}, e.g. ${exp === 0 ? "350" : "1.20"}.`),
       current
     );
     if (entered == null) return;
@@ -241,7 +247,7 @@ function FeesPanel({ onError, onChanged }) {
     }
     setBusy(true);
     try {
-      const value = asPct ? n / 100 : Math.round(n * 100);
+      const value = asPct ? n / 100 : Math.round(n * 10 ** exp);
       await setMarketplaceFees(m.marketplace_code, { [field]: value });
       setRows((await listMarketplaces()).marketplaces || []);
       await onChanged();
@@ -254,8 +260,8 @@ function FeesPanel({ onError, onChanged }) {
 
   const FIELDS = [
     ["fee_pct", "Fee %", true],
-    ["fee_fixed_cents", "Fixed fee", false],
-    ["ship_absorbed_cents", "Shipping you absorb", false],
+    ["fee_fixed_minor", "Fixed fee", false],
+    ["ship_absorbed_minor", "Shipping you absorb", false],
     ["offer_discount_pct", "Typical offer below ask", true],
   ];
 
@@ -272,7 +278,7 @@ function FeesPanel({ onError, onChanged }) {
         <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
         <strong>Fees &amp; shipping</strong>
         <span style={{ color: "#666" }}>what a sale actually nets</span>
-        {rows && !rows.some((m) => m.fee_pct || m.fee_fixed_cents || m.ship_absorbed_cents) && (
+        {rows && !rows.some((m) => m.fee_pct || m.fee_fixed_minor || m.ship_absorbed_minor) && (
           <span style={{ marginLeft: "auto", color: "#b45309", fontSize: 12 }}>
             not set — figures are gross
           </span>
@@ -321,7 +327,7 @@ function FeesPanel({ onError, onChanged }) {
                           >
                             {asPct
                               ? `${((m[field] || 0) * 100).toFixed(1)}%`
-                              : usd(m[field] || 0)}
+                              : money(m[field] || 0, m.currency, m.minor_exponent)}
                           </button>
                         </td>
                       ))}

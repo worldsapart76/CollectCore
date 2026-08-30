@@ -348,12 +348,17 @@ def list_marketplaces(db=Depends(get_db)):
     rows = db.execute(
         text(
             "SELECT marketplace_code, marketplace_name, currency, side,"
-            " is_active, fee_pct, fee_fixed_cents, ship_absorbed_cents,"
+            " is_active, fee_pct, fee_fixed_minor, ship_absorbed_minor,"
             " offer_discount_pct FROM lkup_mkt_marketplaces "
             "WHERE is_active = 1 ORDER BY sort_order"
         )
     ).mappings().all()
-    return {"marketplaces": [dict(r) for r in rows]}
+    return {"marketplaces": [
+        # The UI cannot format an amount without knowing how many decimal
+        # places the currency has: ¥350 is 350, not 3.50.
+        {**dict(r), "minor_exponent": minor_exp(r["currency"])}
+        for r in rows
+    ]}
 
 
 class FxRateIn(BaseModel):
@@ -990,25 +995,57 @@ def set_item_basis(item_id: int, body: ItemBasisIn, db=Depends(get_db)):
 # because the offer arrives against the ask. That is `list_price_for()`.
 
 
-def fee_model(db, marketplace: str) -> Dict[str, Any]:
+def fee_model(db, marketplace: str, on_date: Optional[str] = None) -> Dict[str, Any]:
+    """The marketplace's fee model, in its OWN currency and converted to USD.
+
+    Both are returned deliberately. The native figures are what the user typed
+    and what the UI must show -- a Neokyo fee is ¥350, not $350 -- while the
+    comp series is in USD, so the arithmetic needs USD. Returning only one of
+    them is how a yen amount ends up subtracted from a dollar figure.
+    """
     row = db.execute(text(
-        "SELECT fee_pct, fee_fixed_cents, ship_absorbed_cents, offer_discount_pct "
-        "FROM lkup_mkt_marketplaces WHERE marketplace_code = :m"
+        "SELECT m.fee_pct, m.fee_fixed_minor, m.ship_absorbed_minor,"
+        " m.offer_discount_pct, m.currency "
+        "FROM lkup_mkt_marketplaces m WHERE m.marketplace_code = :m"
     ), {"m": marketplace}).fetchone()
     if row is None:
-        return {"fee_pct": 0.0, "fee_fixed_cents": 0,
-                "ship_absorbed_cents": 0, "offer_discount_pct": 0.0,
-                "configured": False}
-    fee_pct, fee_fixed, ship, offer = row
+        return {"fee_pct": 0.0, "fee_fixed_minor": 0, "ship_absorbed_minor": 0,
+                "offer_discount_pct": 0.0, "currency": "USD", "minor_exponent": 2,
+                "fee_fixed_usd": 0, "ship_absorbed_usd": 0,
+                "configured": False, "fx_missing": False}
+
+    fee_pct, fee_fixed, ship, offer, currency = row
+    fee_fixed = fee_fixed or 0
+    ship = ship or 0
+    currency = currency or "USD"
+
+    # Fees are a standing cost, not a historical observation, so today's
+    # rate is the right one -- unlike a sighting, which must use the rate as
+    # of when it was seen.
+    as_of = on_date or datetime.utcnow().strftime("%Y-%m-%d")
+    rate = None if currency == "USD" else rate_for(db, currency, as_of)
+    fee_usd = (fee_fixed if currency == "USD"
+               else to_usd_minor(fee_fixed, currency, rate))
+    ship_usd = (ship if currency == "USD"
+                else to_usd_minor(ship, currency, rate))
+
     return {
         "fee_pct": fee_pct or 0.0,
-        "fee_fixed_cents": fee_fixed or 0,
-        "ship_absorbed_cents": ship or 0,
+        "fee_fixed_minor": fee_fixed,
+        "ship_absorbed_minor": ship,
         "offer_discount_pct": offer or 0.0,
+        "currency": currency,
+        "minor_exponent": minor_exp(currency),
+        # Nulls when a non-USD marketplace has no rate on file. Left as None
+        # rather than silently treated as zero, which would quietly understate
+        # every cost on that marketplace.
+        "fee_fixed_usd": fee_usd,
+        "ship_absorbed_usd": ship_usd,
         # All zero means nobody has set this up. Reported rather than inferred,
         # so the UI can say "these are gross" instead of quietly implying a
         # net figure that had nothing taken off it.
         "configured": bool(fee_pct or fee_fixed or ship or offer),
+        "fx_missing": currency != "USD" and rate is None and bool(fee_fixed or ship),
     }
 
 
@@ -1022,9 +1059,9 @@ def net_proceeds(gross_cents: Optional[int], fm: Dict[str, Any],
     """
     if gross_cents is None:
         return None
-    net = gross_cents * (1.0 - fm["fee_pct"]) - fm["fee_fixed_cents"]
+    net = gross_cents * (1.0 - fm["fee_pct"]) - (fm.get("fee_fixed_usd") or 0)
     if seller_pays_shipping:
-        net -= fm["ship_absorbed_cents"]
+        net -= fm.get("ship_absorbed_usd") or 0
     return int(round(net))
 
 
@@ -1039,7 +1076,11 @@ def list_price_for(target_net_cents: int, fm: Dict[str, Any]) -> Optional[int]:
     denom = 1.0 - fm["fee_pct"]
     if denom <= 0:
         return None
-    gross = (target_net_cents + fm["fee_fixed_cents"] + fm["ship_absorbed_cents"]) / denom
+    gross = (
+        target_net_cents
+        + (fm.get("fee_fixed_usd") or 0)
+        + (fm.get("ship_absorbed_usd") or 0)
+    ) / denom
     pad = 1.0 - fm["offer_discount_pct"]
     if pad <= 0:
         return None
@@ -1048,8 +1089,9 @@ def list_price_for(target_net_cents: int, fm: Dict[str, Any]) -> Optional[int]:
 
 class FeeModelIn(BaseModel):
     fee_pct: Optional[float] = None
-    fee_fixed_cents: Optional[int] = None
-    ship_absorbed_cents: Optional[int] = None
+    # Minor units of the MARKETPLACE's currency, not cents and not USD.
+    fee_fixed_minor: Optional[int] = None
+    ship_absorbed_minor: Optional[int] = None
     offer_discount_pct: Optional[float] = None
 
 
@@ -1059,8 +1101,8 @@ def set_marketplace_fees(code: str, body: FeeModelIn, db=Depends(get_db)):
     params: Dict[str, Any] = {"m": code}
     for field, col in (
         ("fee_pct", "fee_pct"),
-        ("fee_fixed_cents", "fee_fixed_cents"),
-        ("ship_absorbed_cents", "ship_absorbed_cents"),
+        ("fee_fixed_minor", "fee_fixed_minor"),
+        ("ship_absorbed_minor", "ship_absorbed_minor"),
         ("offer_discount_pct", "offer_discount_pct"),
     ):
         v = getattr(body, field)

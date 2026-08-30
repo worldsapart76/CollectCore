@@ -2016,9 +2016,14 @@ CREATE TABLE IF NOT EXISTS lkup_mkt_marketplaces (
     -- are deliberately NOT pre-filled with real fee schedules -- those change,
     -- differ per seller, and a wrong number confidently displayed is worse
     -- than an obviously unset one. The UI says when they are unset.
+    -- Amounts are in the marketplace's OWN currency, in MINOR units -- not
+    -- cents, and not USD. Neokyo charges ¥350, and JPY has no subdivision, so
+    -- that is stored as 350. Calling the column _cents implied an exponent of
+    -- 2 for every currency, which is exactly the assumption that turned ¥2500
+    -- into $0.17 earlier in this module's life.
     fee_pct              REAL NOT NULL DEFAULT 0,  -- 0.10 = 10% of sale price
-    fee_fixed_cents      INTEGER NOT NULL DEFAULT 0,
-    ship_absorbed_cents  INTEGER NOT NULL DEFAULT 0,  -- typical, when seller pays
+    fee_fixed_minor      INTEGER NOT NULL DEFAULT 0,
+    ship_absorbed_minor  INTEGER NOT NULL DEFAULT 0,  -- typical, when seller pays
     -- How far below the ask buyers typically settle. Sold prices are already
     -- net of this (they are accepted offers), so it does NOT come off a sold
     -- comp -- it is what a LIST price has to be padded by to clear a target.
