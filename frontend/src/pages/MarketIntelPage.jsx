@@ -26,9 +26,11 @@ const usd = (cents) =>
 // which really are USD.
 const SYMBOL = { USD: "$", JPY: "¥", KRW: "₩", EUR: "€", GBP: "£", CAD: "$" };
 
+const EXPONENT = { USD: 2, JPY: 0, KRW: 0, EUR: 2, GBP: 2, CAD: 2 };
+
 const money = (minor, currency, exponent) => {
   if (minor == null) return "—";
-  const exp = exponent ?? 2;
+  const exp = exponent ?? EXPONENT[currency] ?? 2;
   return `${SYMBOL[currency] || ""}${(minor / 10 ** exp).toFixed(exp)}`;
 };
 
@@ -965,6 +967,74 @@ function CardDetail({ detail, onChanged }) {
         ))}
       </div>
 
+      {/* Buying — the other half of the question, and the half that had no
+          view at all. A Neokyo listing used to appear only under "excluded
+          lots", which reads as a data problem rather than as a place to buy
+          the card. Landed, so a yen ask and a dollar ask are comparable. */}
+      {detail.buy_options?.length > 0 && (
+        <>
+          <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>
+            Buying — what it would cost to acquire ({detail.buy_options.length})
+          </h4>
+          {detail.buy?.spread_vs_net_cents != null && (
+            <p style={{ margin: "0 0 6px", fontSize: 12 }}>
+              Cheapest landed{" "}
+              <strong>{usd(detail.buy.cheapest_landed_cents)}</strong> · sells
+              for <strong>{usd(detail.net?.sold_median_net)}</strong> net ·{" "}
+              <strong style={{
+                color: detail.buy.spread_vs_net_cents >= 0 ? "#166534" : "#b91c1c",
+              }}>
+                {detail.buy.spread_vs_net_cents >= 0 ? "+" : "−"}
+                {usd(Math.abs(detail.buy.spread_vs_net_cents))}
+              </strong>{" "}
+              a card
+            </p>
+          )}
+          <p style={{ margin: "0 0 6px", fontSize: 12, color: "#666" }}>
+            Active listings on marketplaces you can buy from, priced all-in —
+            item plus that marketplace&apos;s own fees, duty and shipping. A
+            bundle is divided by its card count, which is what decides whether
+            buying the bundle for one card is worth it.
+          </p>
+          <div style={{ border: "1px solid #ddd", borderRadius: 6 }}>
+            {detail.buy_options.map((o) => (
+              <a key={o.listing_id} href={o.listing_url} target="_blank" rel="noreferrer"
+                 style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px",
+                          borderBottom: "1px solid #eee", textDecoration: "none", color: "inherit" }}>
+                <img src={o.thumbnail_url} alt="" loading="lazy"
+                     style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, background: "#f0f0f0" }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {o.title_raw}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#666" }}>
+                    {o.marketplace} · {money(o.price_cents, o.currency)}
+                    {o.line_count > 1 && ` · ${o.line_count} cards`}
+                    {!o.fees_configured && (
+                      <span style={{ color: "#b45309" }}> · fees not set</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
+                  {o.fx_missing ? (
+                    <span style={{ color: "#b45309", fontSize: 11 }}>
+                      no {o.currency} rate
+                    </span>
+                  ) : (
+                    <>
+                      <div><strong>{usd(o.landed_per_card_cents)}</strong></div>
+                      <div style={{ fontSize: 10, color: "#666" }}>
+                        landed{o.line_count > 1 ? " / card" : ""}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </a>
+            ))}
+          </div>
+        </>
+      )}
+
       {detail.excluded_lots?.length > 0 && (
         <>
           <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>
@@ -986,8 +1056,15 @@ function CardDetail({ detail, onChanged }) {
                   {r.title_raw}
                 </div>
                 <div style={{ fontSize: 11, color: "#666", whiteSpace: "nowrap" }}>
-                  {r.line_count} cards · {usd(r.price_cents)}
-                  {r.line_count > 1 && ` · ${usd(Math.round(r.price_cents / r.line_count))}/card`}
+                  {r.line_count} cards ·{" "}
+                  {/* The lot's own currency. Rendering a ¥3,399 bundle through
+                      a dollar formatter printed "$33.99" — the same currency
+                      bug as the fee fields, one layer down. */}
+                  {money(r.price_cents, r.currency)}
+                  {r.currency !== "USD" && r.price_usd != null &&
+                    ` (${usd(r.price_usd)})`}
+                  {r.line_count > 1 && r.price_usd != null &&
+                    ` · ${usd(Math.round(r.price_usd / r.line_count))}/card`}
                 </div>
               </a>
             ))}

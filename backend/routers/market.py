@@ -671,10 +671,14 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         {"id": item_id},
     ).mappings().all()
 
+    # currency and price_usd come along because a lot can be on a marketplace
+    # that does not price in dollars. Without them the panel rendered ¥3,399 as
+    # "$33.99" -- the same currency bug as the fee fields, one layer down.
     lots = db.execute(
         text(
-            "SELECT l.listing_id, l.listing_url, l.title_raw,"
-            " l.thumbnail_url, s.price_cents, s.listing_state, s.observed_at,"
+            "SELECT l.listing_id, l.marketplace, l.listing_url, l.title_raw,"
+            " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+            " s.listing_state, s.observed_at,"
             " (SELECT COUNT(*) FROM mkt_listing_line x"
             "   WHERE x.listing_id = l.listing_id) AS line_count "
             "FROM mkt_listing l "
@@ -692,8 +696,19 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     # min/max as a dollar one produces a number that means nothing. Sightings
     # with no conversion available are excluded from the stats and counted, so
     # a missing rate shows up rather than quietly shrinking the sample.
+    # Competition, which is a SELL-side idea: where your ask would stand among
+    # the asks a buyer sees instead of yours. A proxy like Neokyo is a place to
+    # BUY, never somewhere you can list, so its asks are not competing with you
+    # and pooling them in moved the standing around for no reason. Which
+    # marketplaces you can sell on is a fact already on the lookup row.
+    sellable = {
+        r[0] for r in db.execute(text(
+            "SELECT marketplace_code FROM lkup_mkt_marketplaces "
+            "WHERE side IN ('sell', 'both')"))
+    }
     active = [r["price_usd"] for r in series
-              if r["listing_state"] == "active" and r["price_usd"] is not None]
+              if r["listing_state"] == "active" and r["price_usd"] is not None
+              and r["marketplace"] in sellable]
     sold = [r["price_usd"] for r in series
             if r["listing_state"] == "sold" and r["price_usd"] is not None]
     unconverted = sum(1 for r in series if r["price_usd"] is None)
@@ -733,11 +748,88 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         if net_median is not None and basis else None
     )
 
+    # ---- Where this card could be BOUGHT, landed ----------------------------
+    #
+    # The other half of the question the module exists to answer, and the half
+    # that had no view at all: a Neokyo listing showed up under "excluded lots"
+    # as though it were a data-quality problem, when it is a purchase option.
+    #
+    # Excluded from the SERIES is right -- a two-card bundle at ¥3,399 is not
+    # this card at ¥3,399 -- but that says nothing about whether it is worth
+    # buying. Divided by its line count it is exactly the per-card acquisition
+    # price, which is the arbitrage thesis quantified.
+    #
+    # Landed, not listed: a price on a proxy is meaningless until the service
+    # fee, PayPal, duty and shipping are on it. That is what makes a yen ask
+    # and a dollar ask comparable at all.
+    buy_rows = db.execute(
+        text(
+            "SELECT l.listing_id, l.marketplace, l.listing_url, l.title_raw,"
+            " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+            " s.observed_at,"
+            " (SELECT COUNT(*) FROM mkt_listing_line x"
+            "   WHERE x.listing_id = l.listing_id) AS line_count "
+            "FROM mkt_listing l "
+            "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+            "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+            "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
+            "WHERE ln.item_id = :id AND s.listing_state = 'active' "
+            "  AND m.side IN ('buy', 'both') "
+            # Only the latest sighting of each listing: an older, higher price
+            # for a listing still on sale is history, not an option.
+            "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
+            "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
+            "GROUP BY l.listing_id"
+        ),
+        {"id": item_id},
+    ).mappings().all()
+
+    buy_fees: Dict[str, Any] = {}
+    buy_options = []
+    for r in buy_rows:
+        code = r["marketplace"]
+        if code not in buy_fees:
+            buy_fees[code] = fee_model(db, code, "buy")
+        bfm = buy_fees[code]
+        n = max(1, r["line_count"] or 1)
+        landed = landed_cost(r["price_usd"], bfm)
+        buy_options.append({
+            **dict(r),
+            "landed_cents": landed,
+            # What one card costs out of this listing. For a single that IS the
+            # landed cost; for a bundle it is the number that decides whether
+            # buying the bundle for one card is worth it.
+            "landed_per_card_cents": (
+                None if landed is None else int(round(landed / n))
+            ),
+            "fees_configured": bfm["configured"],
+            # No rate on file, so the yen could not be converted. Reported
+            # rather than treated as zero, which would show it as free.
+            "fx_missing": r["price_usd"] is None,
+        })
+
+    priced = [o for o in buy_options if o["landed_per_card_cents"] is not None]
+    priced.sort(key=lambda o: o["landed_per_card_cents"])
+    buy_options = priced + [o for o in buy_options
+                            if o["landed_per_card_cents"] is None]
+    cheapest = priced[0]["landed_per_card_cents"] if priced else None
+
     return {
         "item_id": item_id,
         "currency": "USD",
         "basis": basis,
         "fees": {**fm, "marketplace": mkt},
+        # Every route to acquiring this card right now, cheapest landed first.
+        "buy_options": buy_options,
+        "buy": {
+            "cheapest_landed_cents": cheapest,
+            # The spread the whole module is pointed at: buy there, sell here.
+            # Against the NET sold median, because gross is not what you keep.
+            "spread_vs_net_cents": (
+                None if cheapest is None or net_median is None
+                else net_median - cheapest
+            ),
+        },
         # Where a proposed list price would sit among the listings actually
         # competing with it right now.
         #
