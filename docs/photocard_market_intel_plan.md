@@ -954,39 +954,48 @@ shipping and duty.
 `offer_discount_pct` stays on the marketplace, because it is **not a cost** — it
 is how far below an ask buyers settle. Sold comps are already net of it.
 
-### Predictable costs are modelled; shipping is estimated
+### Predictable costs are modelled; shipping is estimated per card
 
-Measured against two real Neokyo shipments (Feb 2026, 36 listings / 124 cards;
-Jun 2026, ~40 mixed items):
+Measured against two real Neokyo shipments (Feb 2026: 36 listings / 124 cards;
+Jun 2026: 32 card listings + one Android phone):
 
 | Cost | Behaviour |
 |---|---|
 | Service fee | ¥350 **per listing** — fixed and known |
 | PayPal | 3.6% + ¥40/batch — proportional |
-| Import tax | % of declared value — proportional |
-| Shipping + handling + wire | **not predictable** |
+| Import tax | % of declared value — proportional, but see the warning below |
+| Shipping + handling + wire | **stable per CARD**, ~$0.40–0.50 |
 
-Shipping prices on weight and volume, so the same item count costs wildly
-different amounts depending on contents. Per card it ran **$0.47** on a
-card-heavy box and **$1.21–1.56** on one carrying albums and DVDs — a 3× spread
-that no per-box figure divided by a typical count can predict.
+**Per-card shipping is the stable unit, not per-box.** Feb measured $0.40/card
+across 124 cards. June's ¥8,039 of box cost over an estimated ~110 cards (32
+listings at Feb's 3.44 cards per listing) gives ~$0.50/card. A box is priced on
+weight and volume and varies enormously; divided by the cards inside it, the
+figure holds. That is why the estimate is a per-card amount the user tunes, and
+why it can be trusted at roughly ±25% rather than being a guess.
 
-So it is a **per-card estimate the user tunes from their own orders**, not a
-modelled box. The `per_shipment` scope still exists and still works for a box
-you actually know, but nothing is seeded that way. Actual shipping belongs on
-the real purchase in the ledger; the estimate exists only so a comp can answer
-*"roughly what will this land at"* before anything is bought.
+`per_shipment` scope still exists and still works for a box you actually know,
+but nothing is seeded that way. Actual shipping belongs on the real purchase in
+the ledger; the estimate exists only so a comp can answer *"roughly what will
+this land at"* before anything is bought.
 
-> **Import tax is not a constant.** It was **14.03%** of goods in Feb 2026 and
-> **23.65%** in Jun 2026 — it doubled between two shipments four months apart.
-> Any landed-cost estimate carrying an old rate is wrong by that much, so it is
-> a field to revisit per shipment rather than set once.
+> **A single high-duty item distorts a shared box.** The Jun shipment's import
+> tax was 23.65% of declared value against Feb's 14.03%, which looked like the
+> rate doubling. It probably did not: that box contained an **Android phone**,
+> and electronics attract far higher duty than photocards. At any plausible
+> phone value the cards themselves stay near Feb's ~14%, with the phone
+> carrying 30–47%. Read a box-level rate as an average over its contents, not
+> as the rate on cards.
 
 **A spreadsheet is not a full accounting.** The Feb sheet tracked goods, service
 fee, shipping and customs, and omitted PayPal on the purchases, PayPal on the
-box bill, the per-batch fixed fee, and packing — $25.15, understating the true
-landed cost by 4.4%. Worth remembering when a number looks like it came from
-records: it did, and the records were incomplete.
+box bill, the per-batch fixed fee, and packing — $25.15, understating true
+landed cost by 4.4% ($4.63 → $4.83/card).
+
+> **Count cards, not listings.** An earlier draft of this section claimed
+> per-card shipping varied 3× between the two boxes. It does not; that came
+> from reading "35-45 items" as 35-45 cards when they were 32 *listings*
+> averaging ~3.4 cards each. Neokyo's UI counts orders, the cost model counts
+> cards, and the two differ by more than 3×.
 
 ### Fee amounts are NATIVE, in minor units
 
