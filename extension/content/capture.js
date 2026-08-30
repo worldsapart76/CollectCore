@@ -529,13 +529,28 @@
       return titleMemo.list;
     }
     const out = [];
-    for (const el of document.querySelectorAll(SITE.titleScope.join(','))) {
+    const scopeSel = SITE.titleScope.join(',');
+    for (const el of document.querySelectorAll(scopeSel)) {
       if (el.closest?.(CHROME)) continue;
-      // Innermost only. A wrapper carries the same text as the element inside
-      // it, and reporting both fills the shortlist with duplicates of one node.
-      if (el.children?.length) continue;
       const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!text || text.length > 160) continue;
+
+      // Innermost only: a wrapper carries the same text as the element inside
+      // it, and keeping both fills the shortlist with duplicates of one node.
+      //
+      // "Has any children" was the wrong test. Chrome's page translation
+      // rewrites each translated text node as a <font> wrapper, so the
+      // listing's own <h6> acquired an element child and was dropped -- taking
+      // the site's `translate` marker with it and leaving the shortlist to a
+      // category menu. Untranslated furniture kept no wrapper and survived,
+      // which is exactly backwards: the wrapper marks the SELLER's text.
+      //
+      // So the test is whether a candidate the ranking could pick instead sits
+      // inside carrying the same text. A <font> is not one, so the h6 stays.
+      const inner = el.querySelector?.(scopeSel);
+      if (inner && (inner.textContent || '').replace(/\s+/g, ' ').trim() === text) {
+        continue;
+      }
 
       // The site's own marker for seller-written text. Where it exists it is
       // not a hint to be weighed against others -- it is the answer, so the
@@ -686,7 +701,7 @@
       // is what turns "the title is wrong" into a selector rather than into
       // another round of guessing.
       cands: titleCandidates()
-        .slice(0, 4)
+        .slice(0, 6)
         .map(
           (c) =>
             `${c.where} @${c.size}px${c.preferred ? ' *' : ''}: ` +

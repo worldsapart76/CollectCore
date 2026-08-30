@@ -46,15 +46,21 @@ function loadFor(hostname, pathname, headings = []) {
         // the part that has to keep working when the page is machine-
         // translated and no English string matches anything. `kind:
         // 'translate'` gives it Neokyo's own seller-content marker.
-        const [text, kind, px] = Array.isArray(h) ? h : [h, null, 16];
+        const [text, kind, px, inner] = Array.isArray(h) ? h : [h, null, 16, null];
+        const marked = kind === 'translate' || kind === 'translate-wrapped';
         return {
           textContent: text,
-          tagName: kind === 'translate' ? 'H6' : 'DIV',
-          className: kind === 'translate' ? 'font-gothamRounded mb-0 translate' : '',
-          children: [],
+          tagName: marked ? 'H6' : 'DIV',
+          className: marked ? 'font-gothamRounded mb-0 translate' : '',
+          // Chrome's page translation rewrites each translated text node as a
+          // <font> wrapper, so a translated element HAS children -- but none
+          // of them is a candidate the ranking could pick instead. `inner` is
+          // the in-scope descendant, if any, and that is what decides.
+          children: kind === 'translate-wrapped' ? [{ tagName: 'FONT' }] : [],
+          querySelector: () => inner || null,
           __px: px ?? 16,
           closest: (sel) => (kind === 'chrome' ? { sel } : null),
-          matches: (sel) => kind === 'translate' && sel.includes('.translate'),
+          matches: (sel) => marked && sel.includes('.translate'),
         };
       }),
     getElementById: () => null,
@@ -203,6 +209,33 @@ const NK8 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397
 ]);
 eq('a short marked title is still the title',
    NK8.TITLE_SOURCES.scope(), 'トレカ');
+
+// Viewed with Chrome's page translation on -- which is how the page is
+// actually being browsed, and how this went wrong. Translation rewrites each
+// translated text node as a <font> wrapper, so the listing's own h6 gains an
+// element child. Testing for "has children" dropped it, along with the
+// `translate` marker on it, and left the shortlist to a category menu whose
+// English text Chrome had not touched. The wrapper marks the SELLER's text;
+// dropping the wrapped element is exactly backwards.
+const NK9 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['Stray Kids Hyunjin KMS Rakuten Store Bonus', 'translate-wrapped', 16],
+  ['Anime, Manga, TCG', null, 18],
+  ['Japanese Fashion', null, 18],
+  ['Online Shopping', null, 18],
+  ['Multiple Stores', null, 18],
+]);
+eq('a Chrome-translated title is not discarded as a wrapper',
+   NK9.TITLE_SOURCES.scope(), 'Stray Kids Hyunjin KMS Rakuten Store Bonus');
+
+// The rule the wrapper test replaced still has to work: a container holding
+// nothing but an in-scope element loses to the element inside it.
+const INNER = { textContent: 'Stray Kids Hyunjin KMS Rakuten Store Bonus' };
+const NK10 = loadFor('neokyo.com', '/en/product/rakuma/41885a3084a99635a6dabdf397fd084a', [
+  ['Stray Kids Hyunjin KMS Rakuten Store Bonus', null, 30, INNER],
+  ['Estimate Total Cost', null, 20],
+]);
+eq('a wrapper around the same text is still skipped',
+   NK10.TITLE_SOURCES.scope(), 'Estimate Total Cost');
 eq('mercari has no scope, so h1 first', mus.titleOrder ?? ['h1', 'og', 'doc'], ['h1', 'og', 'doc']);
 
 console.log('--- sold state ---');

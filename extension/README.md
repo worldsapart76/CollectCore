@@ -179,6 +179,13 @@ It is a **proxy**, and that shapes the data rather than just the parsing.
   for, stated by the site itself. A heading carrying it wins outright and the
   heuristics below are skipped rather than allowed to veto it.
 
+  **Chrome's page translation rewrites each translated text node as a `<font>`
+  wrapper**, so a translated element *has* element children. Rejecting
+  candidates on "has children" therefore threw away the listing title — marker
+  and all — while leaving untouched site furniture in place, which is exactly
+  backwards. A candidate is skipped only when another element the ranking could
+  pick sits inside it carrying the same text; a `<font>` is not one of those.
+
   Everything else on the page misleads: the `h1` is empty, and `og:title` and
   the document title both say *Item Details*, which is what every early capture
   got filed under.
