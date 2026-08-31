@@ -2304,6 +2304,17 @@ No backup changes needed.
     been the first move here, not the sixth. The click-to-cycle override stays:
     it is what makes the next unnumbered marketplace a click rather than a round.
 
+26. **A lot can hold two of the same card — FIXED 2026-08-30.** Picking a card
+    already on the listing was a no-op, so the second copy was **uncountable**:
+    the lot's cost split across one fewer card than it contained, flattering
+    every per-card figure it produced.
+
+    It now counts the line **up**, rather than adding a second line, because the
+    line already carries a `qty` and everything downstream sums it — a lot's
+    units, the divisor for per-card landed cost, the line's own value. The chip
+    shows `×2` with a `−` beside it, so a mis-click walks back without hunting
+    for the card again.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

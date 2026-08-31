@@ -190,6 +190,12 @@ Pocamarket's from `<title>`): **look for the fact the site publishes before
 reasoning about how the page renders.** The click-to-cycle override stays — it
 is what makes the next unnumbered marketplace a click rather than a round.
 
+**A lot can hold two of the same card (entry 26).** Picking an
+already-associated card was a no-op, so the second copy was uncountable and the
+lot's cost split across one fewer card than it held. It now counts the line up
+— `qty` on the existing line, which is what units, per-card cost and line value
+all already sum — with a `−` on the chip to walk it back.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

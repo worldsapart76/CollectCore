@@ -299,6 +299,47 @@ check("and are called out", detail2["unidentified_units"], 3)
 check("allocation still sums to the whole",
       sum(ln["alloc_cents"] for ln in detail2["lines"]), detail2["landed_cents"])
 
+print("\n--- a lot can hold two of the same card ---")
+# Picking a card twice in the extension counts the line up rather than adding a
+# second one, so this arrives as one line with qty 2. Everything downstream sums
+# qty, and the copy has to be countable: otherwise the lot's cost splits across
+# one fewer card than it contains, which flatters every per-card figure.
+c.post("/market/captures", json={"captures": [
+    {"marketplace": "mercari_us", "currency": "USD", "externalId": "lot3",
+     "name": "Two Bang Chans and a Felix", "capturedAt": "2026-09-08T00:00:00Z",
+     "isLot": True,
+     # 201 sells $75, 202 sells $10. Two of the 201.
+     "lines": [{"lineType": "card", "cardId": 201, "qty": 2},
+               {"lineType": "card", "cardId": 202, "qty": 1}],
+     "sightings": [{"observedAt": "2026-09-08T00:00:00Z", "priceCents": 9000,
+                    "listingState": "active", "rawStatus": "on_sale"}]},
+]})
+three = [x for x in c.get("/market/lots").json()["lots"]
+         if x["title"] == "Two Bang Chans and a Felix"][0]
+d3 = c.get(f"/market/lots/{three['listing_id']}").json()["lot"]
+by_item = {ln["item_id"]: ln for ln in d3["lines"]}
+check("one line, not two", len(d3["lines"]), 2)
+check("three cards in the lot", d3["units"], 3)
+check("the value is per unit", by_item[201]["value_cents"], 7500)
+check("and the line is worth both copies", by_item[201]["line_value_cents"], 15000)
+# 15000 / (15000 + 1000) of $90.
+check("so it carries its share of the cost for both",
+      by_item[201]["alloc_cents"], round(9000 * 15000 / 16000))
+check("allocation still sums to the whole",
+      sum(ln["alloc_cents"] for ln in d3["lines"]), 9000)
+
+# The buy side divides a lot's landed cost by UNITS, so the duplicate has to
+# count there too -- $90 over three cards, not two. Looked up by listing rather
+# than through the grid's buy_lot, which reports only the CHEAPEST lot and by
+# this point in the fixture is a different one.
+opts = {o["listing_id"]: o
+        for o in c.get("/market/comps/201").json()["buy_options"]}
+mine = opts[three["listing_id"]]
+check("counted as three cards, not two", mine["line_count"], 3)
+check("which is what per-card means", mine["landed_per_card_cents"],
+      round(mine["landed_cents"] / 3))
+check("and that is $30, not $45", mine["landed_per_card_cents"], 3000)
+
 print("\n--- guards ---")
 check("bad disposition refused",
       c.patch(f"/market/lots/{lot_id}/lines/{lid}",

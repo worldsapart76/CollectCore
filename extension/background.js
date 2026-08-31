@@ -508,20 +508,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       case 'ASSOCIATE': {
         const rec = await getObservation(msg.key);
+        let qty = 0;
         if (rec) {
           rec.lines = rec.lines || [];
-          if (!rec.lines.some((l) => l.cardId === msg.card.id)) {
+          const line = rec.lines.find((l) => l.cardId === msg.card.id);
+          if (line) {
+            // A lot really can hold two of the same card, and picking it twice
+            // used to be a no-op -- so the second copy was uncountable and the
+            // lot's cost split across one fewer card than it contained. Counted
+            // on the line rather than added as a second one, because the line
+            // already carries a qty and everything downstream sums it.
+            line.qty = (line.qty || 1) + 1;
+            qty = line.qty;
+          } else {
             rec.lines.push({
               lineType: 'card',
               cardId: msg.card.id,
               label: msg.card.label,
               qty: 1,
             });
+            qty = 1;
           }
+          if (rec.lines.length > 1 || qty > 1) rec.isLot = true;
+          rec.syncedAt = null;
           await putObservation(rec);
           broadcastStoreChanged();
         }
-        sendResponse({ ok: !!rec });
+        sendResponse({ ok: !!rec, qty });
+        break;
+      }
+      // Down as well as up. Zero removes the line, so one control walks it all
+      // the way back rather than leaving a stuck count that only remove clears.
+      case 'SET_LINE_QTY': {
+        const rec = await getObservation(msg.key);
+        const line = rec?.lines?.[msg.index];
+        if (line) {
+          const qty = Math.max(0, msg.qty | 0);
+          if (qty === 0) rec.lines.splice(msg.index, 1);
+          else line.qty = qty;
+          rec.syncedAt = null;
+          await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!line });
         break;
       }
       // A line that is not a card: the album in the bundle, or the four

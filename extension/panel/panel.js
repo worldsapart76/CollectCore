@@ -460,7 +460,24 @@ function renderLines() {
     el.className = line.lineType === 'card' ? 'line' : 'line line-other';
     el.textContent =
       line.label || (line.lineType === 'unidentified' ? 'unidentified' : 'item');
-    if (line.qty > 1) el.append(tag(`×${line.qty}`));
+    if (line.qty > 1) {
+      // Counts down as well as up: picking the card again counts up, and
+      // without this the only way back from a mis-click is removing the line
+      // and finding the card again.
+      const minus = document.createElement('button');
+      minus.type = 'button';
+      minus.className = 'line-x';
+      minus.textContent = '−';
+      minus.title = 'One fewer of this card';
+      minus.addEventListener('click', async () => {
+        await send({
+          type: 'SET_LINE_QTY', key: current.key, index: i, qty: line.qty - 1,
+        });
+        line.qty -= 1;
+        renderLines();
+      });
+      el.append(tag(`×${line.qty}`), minus);
+    }
     // Shown because it is the number that decides how much of the lot's cost
     // this line carries, and a value typed in the wrong units is invisible
     // otherwise.
@@ -546,12 +563,23 @@ async function associate(card) {
     card: { id: card.id, label: cardIndex.cardLabel(card) },
   });
   current.lines = current.lines || [];
-  if (!current.lines.some((l) => l.cardId === card.id)) {
+  const line = current.lines.find((l) => l.cardId === card.id);
+  if (line) {
+    // Picking the same card again means a second COPY of it, which a lot really
+    // can hold. It used to mean nothing at all, so the extra copy was
+    // uncountable and the lot's cost split across one fewer card than it held.
+    line.qty = (line.qty || 1) + 1;
+  } else {
     current.lines.push({
       lineType: 'card',
       cardId: card.id,
       label: cardIndex.cardLabel(card),
+      qty: 1,
     });
+  }
+  if (current.lines.length > 1 || (line?.qty || 0) > 1) {
+    current.isLot = true;
+    $('assoc-lot').checked = true;
   }
   renderLines();
   // Deliberately stays open: a lot needs several cards, and bouncing back to

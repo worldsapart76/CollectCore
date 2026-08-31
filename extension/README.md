@@ -179,6 +179,13 @@ Beside the *This is a lot* checkbox: **+ non-card** and **+ unidentified**.
   thumbnail. What matters is that the cost gets split across *everything* in
   the box rather than only the cards that were named.
 
+**A lot can hold two of the same card**, so picking a card that is already on
+the listing counts its line **up** rather than doing nothing. The chip shows
+`×2` with a `−` beside it to count back down; `×` removes the line outright.
+Counted on the line rather than added as a second one, because the line already
+carries a `qty` and everything downstream sums it — units in a lot, the divisor
+for per-card cost, the value of the line.
+
 Either one marks the listing a lot. Lines are removed by position, not by card
 id: two non-card lines are two different things.
 
