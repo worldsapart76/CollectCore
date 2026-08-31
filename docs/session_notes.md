@@ -204,6 +204,23 @@ expressible by sorting one composed string. Empty parts return null rather than
 amber past a fortnight. **No backfill needed**: `observed_at` is NOT NULL, so
 the date was already in every sighting and only missing from the view.
 
+**The decision views (entry 28).** The grid answers "what should I act on";
+opening a row now answers "so should I buy it, and why". Fees and cost basis
+became tabs rather than bars pinned above the grid. A card opens **over** the
+grid on double-click, so filters and sort survive; a lot opens over the card,
+stacked. **Buy to keep** puts singles and lots in one table with card count and
+wanted count as columns, two medians of the asks side by side, and the sold
+median **landed** so it compares with the landed asks. **Buy to resell** is
+Neokyo against Mercari US, showing a lot's per-card share by the same
+allocation the lot screen uses; with no comps it inverts to the price needed to
+clear the target profit, in red. The **lot verdict** gives % useful with
+deliberately no pass mark, and states how many cards were judged on their era's
+median rather than their own comps. Raw Listings is collapsed at the bottom.
+
+`tools/test_buy_decisions.py`, 38 cases, run with real fees on both sides — the
+claim is landed-against-net and a zeroed suite would pass on code that ignored
+fees entirely.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

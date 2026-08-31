@@ -3,7 +3,7 @@ import { Button, Alert } from "../components/primitives";
 import {
   getMarketGrid, getMarketComps, setListingOutcome,
   listMarketLots, getMarketLot, addLotLine, updateLotLine, deleteLotLine,
-  deleteMarketListing,
+  deleteMarketListing, setMarketSettings,
   listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
@@ -186,7 +186,7 @@ const COLUMNS = [
 
 const TEXT_COLUMNS = new Set(["members", "origin", "version", "label"]);
 
-function MarketGrid({ cards, selected, onSelect }) {
+function MarketGrid({ cards, selected, onSelect, onOpen }) {
   const [q, setQ] = useState("");
   const [onlySold, setOnlySold] = useState(false);
   const [onlyBuy, setOnlyBuy] = useState(false);
@@ -314,9 +314,13 @@ function MarketGrid({ cards, selected, onSelect }) {
               <tr
                 key={c.item_id}
                 onClick={() => onSelect(c.item_id)}
+                onDoubleClick={() => onOpen(c.item_id)}
                 style={{
                   borderTop: "1px solid #f0f0f0", cursor: "pointer",
                   background: selected === c.item_id ? "#eef6ff" : "transparent",
+                  // The browser selects the row's text on a double-click
+                  // otherwise, so every open leaves a blue smear behind it.
+                  userSelect: "none",
                 }}
               >
                 <td style={{ ...td, textAlign: "center" }}>
@@ -778,11 +782,434 @@ function LotAnalyzer({ lot, onChanged, onDeleted, onError }) {
   );
 }
 
+// ───────────────────────── Overlays and tabs ────────────────────────────────
+
+// A tab strip. One component for all three levels — page, card, lot — because
+// three hand-rolled strips drift apart and the reader has to relearn each one.
+function Tabs({ value, onChange, items, style }) {
+  return (
+    <div style={{ display: "flex", gap: 4, ...style }}>
+      {items.map(({ key, label, badge }) => (
+        <button
+          key={key}
+          onClick={() => onChange(key)}
+          style={{
+            padding: "3px 12px", fontSize: 13, cursor: "pointer",
+            borderRadius: 4, border: "1px solid #ddd",
+            background: value === key ? "#eef6ff" : "#fff",
+            fontWeight: value === key ? 600 : 400,
+          }}
+        >
+          {label}
+          {badge != null && (
+            <span style={{ color: "#999", fontWeight: 400 }}> {badge}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// The card and lot views open OVER the grid rather than below it, so the grid
+// keeps its filters and its sort while you read one row: closing returns you to
+// exactly where you were, which a scroll-to-a-panel-underneath never does.
+function Overlay({ title, subtitle, onClose, children }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 40,
+        background: "rgba(15,23,42,0.35)",
+        display: "flex", alignItems: "flex-start", justifyContent: "center",
+        padding: "3vh 2vw",
+      }}
+    >
+      <div
+        // The backdrop closes; the panel must not, or every click inside
+        // dismisses the thing being read.
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: 8, width: "min(1180px, 96vw)",
+          maxHeight: "94vh", display: "flex", flexDirection: "column",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10,
+                      padding: "10px 14px", borderBottom: "1px solid #eee" }}>
+          <strong style={{ fontSize: 15 }}>{title}</strong>
+          {subtitle && (
+            <span style={{ fontSize: 12, color: "#666" }}>{subtitle}</span>
+          )}
+          <button
+            onClick={onClose}
+            title="Close (Esc)"
+            style={{ marginLeft: "auto", border: "1px solid #ddd", borderRadius: 4,
+                     background: "#fff", padding: "2px 9px", cursor: "pointer",
+                     fontSize: 13 }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ padding: "12px 14px", overflow: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// One figure in a summary strip. Null reads as "—" rather than as zero: no data
+// and a value of nothing are different claims, and only one of them is a price.
+function Stat({ label, value, hint, tone }) {
+  return (
+    <div style={{ minWidth: 130 }}>
+      <div style={{ fontSize: 11, color: "#666" }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 600,
+                    color: value == null ? "#bbb" : tone || "inherit" }}>
+        {value == null ? "—" : value}
+      </div>
+      {hint && <div style={{ fontSize: 10, color: "#999" }}>{hint}</div>}
+    </div>
+  );
+}
+
+const statRow = {
+  display: "flex", gap: 22, flexWrap: "wrap", padding: "8px 10px",
+  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6,
+  marginBottom: 10,
+};
+
+const th = {
+  padding: "4px 6px", textAlign: "right", fontSize: 11, color: "#444",
+  borderBottom: "1px solid #ddd", background: "#fafafa", whiteSpace: "nowrap",
+};
+const td = { padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" };
+
+// ───────────────────────── Buy to Keep ──────────────────────────────────────
+
+function BuyToKeep({ detail, onChanged, onOpenLot, onError }) {
+  const k = detail.keep;
+  const rows = detail.buy_options || [];
+
+  return (
+    <div>
+      <div style={statRow}>
+        <Stat
+          label="cheapest single"
+          value={usd(k.cheapest_single?.landed_cents)}
+          hint={k.cheapest_single ? `${k.cheapest_single.marketplace} · landed` : "none listed"}
+        />
+        {/* Kept apart from the single on purpose: a per-card figure inside a
+            lot is real, and reaching it means buying the whole box. */}
+        <Stat
+          label="cheapest via lot"
+          value={usd(k.cheapest_lot?.landed_per_card_cents)}
+          hint={k.cheapest_lot
+            ? `${k.cheapest_lot.line_count} cards · ${usd(k.cheapest_lot.landed_cents)} all in`
+            : "none listed"}
+        />
+        {/* Two medians, because they answer the same question about different
+            purchases. The gap between them is how much the lots are moving
+            this card's market. */}
+        <Stat
+          label="median ask, singles"
+          value={usd(k.median_single_cents)}
+          hint={`${k.n_single} listing${k.n_single === 1 ? "" : "s"} you can buy one of`}
+        />
+        <Stat
+          label="median ask, all routes"
+          value={usd(k.median_all_per_card_cents)}
+          hint={`${k.n_all} routes, lots counted per card`}
+        />
+        {/* Landed, so it compares with the asks beside it rather than always
+            looking cheaper than them. */}
+        <Stat
+          label="median sold"
+          value={usd(k.sold.median_cents)}
+          hint={k.sold.n
+            ? `${k.sold.n} sold, landed · ${k.sold.n_shipping_known} with real postage`
+            : "no sold comps"}
+          tone={k.sold.n && k.sold.n < 3 ? "#b45309" : undefined}
+        />
+      </div>
+
+      {rows.length === 0 && (
+        <Alert tone="info">Nothing is listed for this card right now.</Alert>
+      )}
+
+      {rows.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>listing</th>
+              <th style={th} title="cards in the listing, counting quantity">cards</th>
+              <th style={th} title="how many of them are on your wanted list">wanted</th>
+              <th style={th}>ask</th>
+              <th style={th} title="all in: price plus that marketplace's buying costs and postage">landed</th>
+              <th style={th} title="landed cost divided by the cards in the listing">per card</th>
+              <th style={th} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((o) => (
+              <tr
+                key={o.listing_id}
+                // Only a lot has anything more to say; double-clicking a single
+                // would open a screen that just repeats this row.
+                onDoubleClick={o.line_count > 1 ? () => onOpenLot(o.listing_id) : undefined}
+                title={o.line_count > 1 ? "Double-click to judge the whole lot" : undefined}
+                style={{ borderTop: "1px solid #f0f0f0",
+                         cursor: o.line_count > 1 ? "pointer" : "default" }}
+              >
+                <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                  <a href={o.listing_url} target="_blank" rel="noreferrer"
+                     style={{ color: "inherit" }}>{o.title_raw || `listing ${o.listing_id}`}</a>
+                  <span style={{ color: "#999" }}> · {o.marketplace}</span>
+                  {!o.fees_configured && (
+                    <span style={{ color: "#b45309" }}> · fees not set</span>
+                  )}
+                  {o.shipping_usd == null && (
+                    <span style={{ color: "#b45309" }} title="postage not read from the listing; the marketplace estimate is standing in"> · est. post</span>
+                  )}
+                </td>
+                <td style={td}>{o.line_count}</td>
+                <td style={{ ...td, color: o.wanted_count ? "#b45309" : "#bbb" }}>
+                  {o.wanted_count || "—"}
+                </td>
+                <td style={td}>{money(o.price_cents, o.currency)}</td>
+                <td style={td}>{usd(o.landed_cents)}</td>
+                <td style={td}><strong>{usd(o.landed_per_card_cents)}</strong></td>
+                <td style={{ ...td, textAlign: "left" }}>
+                  <ListingOutcome listing={o} onDone={onChanged} onError={onError} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────── Buy to Resell ────────────────────────────────────
+
+function BuyToResell({ detail, onChanged, onOpenLot, onError, onTargetChanged }) {
+  const r = detail.resell;
+
+  async function editTarget() {
+    const now = (r.target_profit_cents / 100).toFixed(2);
+    const entered = prompt(
+      "What does a flip have to clear to be worth doing, in dollars?\n\n" +
+      "Used in two places: the price a card with no sold comps would have to " +
+      "fetch, and whether an unwanted card earns its place in a lot.", now);
+    if (entered === null) return;
+    const n = Number(entered);
+    if (!Number.isFinite(n) || n < 0) return onError("Enter a positive number.");
+    await setMarketSettings({ target_profit_cents: Math.round(n * 100) });
+    await onTargetChanged();
+  }
+
+  return (
+    <div>
+      <div style={statRow}>
+        <Stat
+          label="est. sale, net"
+          value={usd(r.sell_net_cents)}
+          hint={r.n_sold
+            ? `median of ${r.n_sold} sold on ${r.sell_marketplace}, after fees`
+            : "no sold comps — see below"}
+          tone={r.n_sold && r.n_sold < 3 ? "#b45309" : undefined}
+        />
+        <Stat
+          label="target profit"
+          value={usd(r.target_profit_cents)}
+          hint="click to change · also used by the lot verdict"
+        />
+        <div style={{ alignSelf: "center" }}>
+          <Button size="sm" onClick={editTarget}>Set target</Button>
+        </div>
+      </div>
+
+      {r.rows.length === 0 && (
+        <Alert tone="info">
+          Nothing on {r.sources.join(", ")} for this card right now. This tab
+          compares what a proxy would cost against what the card sells for on{" "}
+          {r.sell_marketplace}, so it stays empty until there is something to
+          buy there.
+        </Alert>
+      )}
+
+      {r.rows.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>listing</th>
+              <th style={th}>cards</th>
+              <th style={th} title="what THIS card costs you — its share of a lot, not the price of the box">your cost</th>
+              <th style={th} title="median sold, net of selling fees">est. sale</th>
+              <th style={th} title="est. sale less your cost">profit</th>
+              <th style={th} />
+            </tr>
+          </thead>
+          <tbody>
+            {r.rows.map((o) => (
+              <tr
+                key={o.listing_id}
+                onDoubleClick={o.is_lot ? () => onOpenLot(o.listing_id) : undefined}
+                title={o.is_lot ? "Double-click to judge the whole lot" : undefined}
+                style={{ borderTop: "1px solid #f0f0f0",
+                         cursor: o.is_lot ? "pointer" : "default" }}
+              >
+                <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                  <a href={o.listing_url} target="_blank" rel="noreferrer"
+                     style={{ color: "inherit" }}>{o.title_raw || `listing ${o.listing_id}`}</a>
+                  <span style={{ color: "#999" }}> · {money(o.price_cents, o.currency)}</span>
+                </td>
+                <td style={td}>{o.units}</td>
+                <td style={td}>
+                  {usd(o.buy_cost_cents)}
+                  {o.is_lot && (
+                    <span style={{ color: "#999" }}
+                          title={`this card's share of a ${o.units}-card lot costing ${usd(o.landed_cents)} landed`}> ᴸ</span>
+                  )}
+                </td>
+                <td style={td}>
+                  {o.sell_net_cents != null ? usd(o.sell_net_cents) : (
+                    // A requirement, not a measurement: with no comps there is
+                    // nothing to estimate, so the question inverts to what it
+                    // would HAVE to fetch. Red because it is not evidence.
+                    <span style={{ color: "#b91c1c" }}
+                          title="No sold comps. This is what it would have to list at to clear the target profit — a requirement, not an estimate.">
+                      {usd(o.required_list_cents)}?
+                    </span>
+                  )}
+                </td>
+                <td style={td}>
+                  {o.profit_cents == null
+                    ? <span style={{ color: "#bbb" }}>—</span>
+                    : <Margin cents={o.profit_cents} />}
+                  {o.meets_target && (
+                    <span title="clears the target profit" style={{ color: "#166534" }}> ✓</span>
+                  )}
+                </td>
+                <td style={{ ...td, textAlign: "left" }}>
+                  <ListingOutcome listing={o} onDone={onChanged} onError={onError} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────── Is this lot worth buying? ────────────────────────
+
+function LotVerdict({ lot, useful }) {
+  const pct = useful.pct_useful;
+  // Deliberately no pass/fail threshold. Whether 60% is good depends on the
+  // price and on which cards those are, and a green tick over that judgement
+  // would be the screen pretending to know something it does not.
+  const tone = pct == null ? "#666" : pct >= 60 ? "#166534" : pct >= 35 ? "#b45309" : "#b91c1c";
+
+  return (
+    <div>
+      <div style={statRow}>
+        <Stat
+          label="useful cards"
+          value={pct == null ? null : `${pct}%`}
+          hint={`${useful.useful_units} of ${useful.card_units}`}
+          tone={tone}
+        />
+        <Stat label="landed" value={usd(lot.landed_cents)}
+              hint={`${lot.units} cards in the box`} />
+        <Stat label="known value" value={usd(lot.known_value_cents)}
+              hint={lot.unvalued_units ? `${lot.unvalued_units} unvalued` : "every line valued"} />
+        <Stat label="target profit" value={usd(useful.target_profit_cents)}
+              hint="what an unwanted card has to clear" />
+        {useful.estimated_units > 0 && (
+          // The percentage cannot say this and it changes how much weight it
+          // carries: a verdict built mostly on era medians is a guess with a
+          // number on it.
+          <Stat label="judged on estimates" value={`${useful.estimated_units}`}
+                hint="priced off their era, not their own comps" tone="#b45309" />
+        )}
+      </div>
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>card</th>
+            <th style={th} title="this card's share of the lot's landed cost">its share</th>
+            <th style={th} title="cheapest single-card listing of it anywhere">alone</th>
+            <th style={th} title="what it would net on a sale">worth</th>
+            <th style={th} title="worth less its share">profit</th>
+            <th style={{ ...th, textAlign: "left" }}>verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          {useful.lines.map((ln) => (
+            <tr key={ln.line_id}
+                style={{ borderTop: "1px solid #f0f0f0",
+                         background: ln.useful === true ? "#f0fdf4"
+                                   : ln.useful === false ? "#fef2f2" : "transparent" }}>
+              <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                {ln.wanted && <span style={{ color: "#b45309" }}>★ </span>}
+                {ln.label}
+                {ln.qty > 1 && <span style={{ color: "#999" }}> ×{ln.qty}</span>}
+              </td>
+              <td style={td}>{usd(ln.alloc_per_unit_cents)}</td>
+              <td style={td}>
+                {ln.best_single_cents == null
+                  ? <span style={{ color: "#bbb" }}>—</span>
+                  : usd(ln.best_single_cents)}
+              </td>
+              <td style={td}>
+                {usd(ln.value_cents)}
+                {ln.value_source === "era" && (
+                  <span style={{ color: "#b45309", fontSize: 10 }} title="no comps of its own; priced off its era"> est.</span>
+                )}
+              </td>
+              <td style={td}>
+                {ln.profit_cents == null
+                  ? <span style={{ color: "#bbb" }}>—</span>
+                  : <Margin cents={ln.profit_cents} />}
+              </td>
+              <td style={{ ...td, textAlign: "left", whiteSpace: "normal",
+                           color: ln.useful === true ? "#166534"
+                                : ln.useful === false ? "#b91c1c" : "#999" }}>
+                {ln.judged === false ? "not a card" : ln.reason}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function MarketIntelPage() {
   // Two entry points, two questions. Cards answers "what should I act on";
   // Lots answers "is this specific listing worth buying", which is about a
   // whole listing at once and so cannot be asked of a card-shaped view.
   const [view, setView] = useState("cards");
+  // Which tab of the card overlay, and which of the lot overlay. Held here
+  // rather than inside the overlays so reopening a row lands where you left it.
+  // Selecting and OPENING are separate: a click highlights a row, a
+  // double-click opens it. Keeping them apart is what lets the grid go on
+  // holding a selection while nothing is overlaid.
+  const [open, setOpen] = useState(false);
+  const [cardTab, setCardTab] = useState("keep");
+  const [lotTab, setLotTab] = useState("verdict");
+  // A lot opened FROM a card overlay, stacked on top of it. Separate from the
+  // Lots tab's own selection: closing this one has to return you to the card
+  // you were reading, not to the lot list.
+  const [overlayLot, setOverlayLot] = useState(null);
   const [cards, setCards] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -830,6 +1257,26 @@ export default function MarketIntelPage() {
   // Editing a line changes the lot AND the row summarising it in the list, so
   // both are refetched — a stale summary above a fresh analysis is the kind of
   // disagreement that gets read as a bug in the arithmetic.
+  // Everything the open card overlay reads, and the grid row behind it. Both,
+  // because marking a listing sold changes the card's comps AND its row.
+  async function refreshCard() {
+    if (selected) setDetail(await getMarketComps(selected));
+    setCards((await getMarketGrid()).cards || []);
+  }
+
+  async function openLotOverlay(listingId) {
+    setLotTab("verdict");
+    try {
+      const d = await getMarketLot(listingId);
+      // Flattened: the overlay header wants the lot's own fields and the
+      // verdict wants `useful`, and threading two objects through every child
+      // buys nothing.
+      setOverlayLot({ ...d.lot, lot: d.lot, useful: d.useful });
+    } catch (e) {
+      setError(e.message || "Failed to load the lot");
+    }
+  }
+
   async function refreshLot() {
     const [d, list] = await Promise.all([getMarketLot(lotId), listMarketLots()]);
     setLot(d.lot);
@@ -884,34 +1331,32 @@ export default function MarketIntelPage() {
         </Alert>
       )}
 
-      <FeesPanel
-        onError={setError}
-        onChanged={async () => {
-          setCards((await getMarketGrid()).cards || []);
-          if (selected) setDetail(await getMarketComps(selected));
-        }}
+      {/* Fees and cost basis were collapsible bars pinned above the grid,
+          costing vertical space on every visit to pay for something edited
+          once a month. They are tabs now: same content, none of the rent. */}
+      <Tabs
+        value={view}
+        onChange={setView}
+        style={{ margin: "12px 0 8px" }}
+        items={[
+          { key: "cards", label: "Cards" },
+          { key: "lots", label: "Lots", badge: lots?.length || null },
+          { key: "fees", label: "Fees & shipping" },
+          { key: "basis", label: "Cost basis" },
+        ]}
       />
-      <CostBasisPanel onError={setError} />
 
-      <div style={{ display: "flex", gap: 4, margin: "12px 0 8px" }}>
-        {[["cards", "Cards"], ["lots", "Lots"]].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setView(key)}
-            style={{
-              padding: "3px 12px", fontSize: 13, cursor: "pointer",
-              borderRadius: 4, border: "1px solid #ddd",
-              background: view === key ? "#eef6ff" : "#fff",
-              fontWeight: view === key ? 600 : 400,
-            }}
-          >
-            {label}
-            {key === "lots" && lots?.length > 0 && (
-              <span style={{ color: "#999", fontWeight: 400 }}> {lots.length}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      {view === "fees" && (
+        <FeesPanel
+          alwaysOpen
+          onError={setError}
+          onChanged={async () => {
+            setCards((await getMarketGrid()).cards || []);
+            if (selected) setDetail(await getMarketComps(selected));
+          }}
+        />
+      )}
+      {view === "basis" && <CostBasisPanel alwaysOpen onError={setError} />}
 
       {view === "lots" && (
         <>
@@ -965,26 +1410,104 @@ export default function MarketIntelPage() {
           {/* The grid leads, and the per-card comp view below is its
               drill-down. That inversion is what v2 is about: you no longer
               have to already know which card you came to look at. */}
-          <MarketGrid cards={cards} selected={selected} onSelect={setSelected} />
-
-          <div style={{ marginTop: 14 }}>
-            {!selected && (
-              <div style={{ color: "#666", fontSize: 13 }}>
-                Pick a row for its price history and buying options.
-              </div>
-            )}
-            {selected && !detail && <div style={{ color: "#666" }}>Loading…</div>}
-            {detail && (
-              <CardDetail
-                detail={detail}
-                onChanged={async () => {
-                  setDetail(await getMarketComps(selected));
-                  setCards((await getMarketGrid()).cards || []);
-                }}
-              />
-            )}
+          <MarketGrid
+            cards={cards}
+            selected={selected}
+            onSelect={setSelected}
+            onOpen={(id) => { setCardTab("keep"); setSelected(id); setOpen(true); }}
+          />
+          <div style={{ color: "#666", fontSize: 13, marginTop: 8 }}>
+            Double-click a row to open it.
           </div>
         </>
+      )}
+
+      {/* The card, over the grid. The grid stays mounted underneath with its
+          filters and its sort intact, so closing returns you to exactly where
+          you were rather than to a reset list. */}
+      {open && selected && (
+        <Overlay
+          title={cards?.find((c) => c.item_id === selected)?.label || "Card"}
+          subtitle={detail ? `${detail.series?.length || 0} sightings` : "loading…"}
+          onClose={() => setOpen(false)}
+        >
+          {!detail && <div style={{ color: "#666" }}>Loading…</div>}
+          {detail && (
+            <>
+              <Tabs
+                value={cardTab}
+                onChange={setCardTab}
+                style={{ marginBottom: 10 }}
+                items={[
+                  { key: "keep", label: "Buy to keep",
+                    badge: detail.buy_options?.length || null },
+                  { key: "resell", label: "Buy to resell",
+                    badge: detail.resell?.rows?.length || null },
+                  { key: "history", label: "Price history" },
+                ]}
+              />
+              {cardTab === "keep" && (
+                <BuyToKeep
+                  detail={detail}
+                  onChanged={refreshCard}
+                  onOpenLot={openLotOverlay}
+                  onError={setError}
+                />
+              )}
+              {cardTab === "resell" && (
+                <BuyToResell
+                  detail={detail}
+                  onChanged={refreshCard}
+                  onOpenLot={openLotOverlay}
+                  onError={setError}
+                  onTargetChanged={refreshCard}
+                />
+              )}
+              {cardTab === "history" && (
+                <CardDetail detail={detail} onChanged={refreshCard} />
+              )}
+            </>
+          )}
+        </Overlay>
+      )}
+
+      {/* A lot, over the card that led to it. Stacked rather than replacing:
+          you got here asking about one card, and closing has to give that
+          question back. */}
+      {overlayLot && (
+        <Overlay
+          title={overlayLot.title || `Lot ${overlayLot.listing_id}`}
+          subtitle={`${overlayLot.marketplace} · ${overlayLot.units} cards · ${usd(overlayLot.landed_cents)} landed`}
+          onClose={() => setOverlayLot(null)}
+        >
+          <Tabs
+            value={lotTab}
+            onChange={setLotTab}
+            style={{ marginBottom: 10 }}
+            items={[
+              { key: "verdict", label: "Worth buying?" },
+              { key: "split", label: "Cost split" },
+            ]}
+          />
+          {lotTab === "verdict" && overlayLot.useful && (
+            <LotVerdict lot={overlayLot.lot} useful={overlayLot.useful} />
+          )}
+          {lotTab === "split" && (
+            <LotAnalyzer
+              lot={overlayLot.lot}
+              onChanged={async () => {
+                const d = await getMarketLot(overlayLot.listing_id);
+                setOverlayLot({ ...d.lot, ...d, listing_id: overlayLot.listing_id });
+              }}
+              onDeleted={async () => {
+                setOverlayLot(null);
+                await refreshCard();
+                setCards((await getMarketGrid()).cards || []);
+              }}
+              onError={setError}
+            />
+          )}
+        </Overlay>
       )}
     </div>
   );
@@ -1175,8 +1698,10 @@ function FeeSide({ market, side, onError, refresh }) {
   );
 }
 
-function FeesPanel({ onError, onChanged }) {
-  const [open, setOpen] = useState(false);
+function FeesPanel({ alwaysOpen = false, onError, onChanged }) {
+  // In a tab there is nothing to collapse INTO -- the header would be a button
+  // that hides the only thing on screen.
+  const [open, setOpen] = useState(alwaysOpen);
   const [rows, setRows] = useState(null);
 
   async function refresh() {
@@ -1259,14 +1784,14 @@ function FeesPanel({ onError, onChanged }) {
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 6, marginBottom: 12 }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={alwaysOpen ? undefined : () => setOpen((v) => !v)}
         style={{
           display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 10px",
           background: "#fafafa", border: "none", borderRadius: 6, cursor: "pointer",
           textAlign: "left", fontSize: 13,
         }}
       >
-        <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
+        {!alwaysOpen && <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>}
         <strong>Fees &amp; shipping</strong>
         <span style={{ color: "#666" }}>what a sale nets, what a purchase costs</span>
         {rows && !anySet && (
@@ -1357,8 +1882,8 @@ function FeesPanel({ onError, onChanged }) {
 // writes. That ordering is the point — a bad rule sweeps expensive cards into
 // the cheapest tier, and once written the mistake looks exactly like a correct
 // assignment.
-function CostBasisPanel({ onError }) {
-  const [open, setOpen] = useState(false);
+function CostBasisPanel({ alwaysOpen = false, onError }) {
+  const [open, setOpen] = useState(alwaysOpen);
   const [tiers, setTiers] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1421,14 +1946,14 @@ function CostBasisPanel({ onError }) {
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 6, marginBottom: 12 }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={alwaysOpen ? undefined : () => setOpen((v) => !v)}
         style={{
           display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "8px 10px",
           background: "#fafafa", border: "none", borderRadius: 6, cursor: "pointer",
           textAlign: "left", fontSize: 13,
         }}
       >
-        <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>
+        {!alwaysOpen && <span style={{ color: "#666" }}>{open ? "▾" : "▸"}</span>}
         <strong>Cost basis</strong>
         <span style={{ color: "#666" }}>
           {preview
@@ -1767,8 +2292,10 @@ function ListingOutcome({ listing, onDone, onError }) {
   );
 }
 
+// The evidence behind the figures: the price bands, the basis line, and the raw
+// sightings. Buying options moved to the Buy-to-keep tab, and with them the
+// only thing on this panel that could fail — hence no error state here.
 function CardDetail({ detail, onChanged }) {
-  const [localError, setLocalError] = useState("");
   const series = detail.series || [];
   const activeVals = series.filter((r) => r.listing_state === "active" && r.price_usd != null).map((r) => r.price_usd);
   const soldVals = series.filter((r) => r.listing_state === "sold" && r.price_usd != null).map((r) => r.price_usd);
@@ -1779,7 +2306,6 @@ function CardDetail({ detail, onChanged }) {
 
   return (
     <div>
-      {localError && <Alert tone="error">{localError}</Alert>}
       <BasisLine
         itemId={detail.item_id}
         basis={detail.basis}
@@ -1810,7 +2336,19 @@ function CardDetail({ detail, onChanged }) {
       {/* The evidence. Shown with thumbnails on purpose: a statistic you cannot
           audit is one you will eventually stop trusting, and a mis-associated
           listing is only findable by eye. */}
-      <h4 style={{ margin: "0 0 6px", fontSize: 13 }}>Listings ({series.length})</h4>
+      {/* The evidence, collapsed. It is what makes a statistic auditable --
+          a mis-associated listing is only findable by eye -- but it is not
+          what anyone comes here to read, and open by default it pushed every
+          figure that IS the point below the fold.
+
+          Buying options and excluded lots used to sit under this too. They
+          are the Buy-to-keep tab now: one place to read them, not two that
+          can disagree. */}
+      <details>
+        <summary style={{ cursor: "pointer", fontSize: 13, color: "#444",
+                          padding: "6px 0" }}>
+          Listings ({series.length}) — every sighting behind these figures
+        </summary>
       <div style={{ maxHeight: "44vh", overflowY: "auto", border: "1px solid #ddd", borderRadius: 6 }}>
         {series.map((r, i) => (
           <a
@@ -1843,130 +2381,7 @@ function CardDetail({ detail, onChanged }) {
           </a>
         ))}
       </div>
-
-      {/* Buying — the other half of the question, and the half that had no
-          view at all. A Neokyo listing used to appear only under "excluded
-          lots", which reads as a data problem rather than as a place to buy
-          the card. Landed, so a yen ask and a dollar ask are comparable. */}
-      {detail.buy_options?.length > 0 && (
-        <>
-          <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>
-            Buying — what it would cost to acquire ({detail.buy_options.length})
-          </h4>
-          {detail.buy?.spread_vs_net_cents != null && (
-            <p style={{ margin: "0 0 6px", fontSize: 12 }}>
-              Cheapest landed{" "}
-              <strong>{usd(detail.buy.cheapest_landed_cents)}</strong> · sells
-              for <strong>{usd(detail.net?.sold_median_net)}</strong> net ·{" "}
-              <strong style={{
-                color: detail.buy.spread_vs_net_cents >= 0 ? "#166534" : "#b91c1c",
-              }}>
-                {detail.buy.spread_vs_net_cents >= 0 ? "+" : "−"}
-                {usd(Math.abs(detail.buy.spread_vs_net_cents))}
-              </strong>{" "}
-              a card
-            </p>
-          )}
-          <p style={{ margin: "0 0 6px", fontSize: 12, color: "#666" }}>
-            Active listings on marketplaces you can buy from, priced all-in —
-            item plus that marketplace&apos;s own fees, duty and shipping. A
-            bundle is divided by its card count, which is what decides whether
-            buying the bundle for one card is worth it.
-          </p>
-          <div style={{ border: "1px solid #ddd", borderRadius: 6 }}>
-            {detail.buy_options.map((o) => (
-              <div key={o.listing_id}
-                 style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px",
-                          borderBottom: "1px solid #eee", color: "inherit" }}>
-                <img src={o.thumbnail_url} alt="" loading="lazy"
-                     style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, background: "#f0f0f0" }} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    <a href={o.listing_url} target="_blank" rel="noreferrer"
-                       style={{ color: "inherit" }}>{o.title_raw}</a>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#666" }}>
-                    {o.marketplace} · {money(o.price_cents, o.currency)}
-                    {o.line_count > 1 && ` · ${o.line_count} cards`}
-                    {/* Postage is a large part of what a cheap card costs, so
-                        whether it is a real figure off the listing or the
-                        marketplace-wide estimate standing in is worth saying.
-                        A listing that states free postage says so too — it is
-                        a real answer, not a missing one. */}
-                    {o.shipping_usd != null && (
-                      <span title="postage stated on the listing itself">
-                        {" · "}
-                        {o.shipping_usd === 0 ? "free post" : `+${usd(o.shipping_usd)} post`}
-                      </span>
-                    )}
-                    {o.shipping_usd == null && (
-                      <span style={{ color: "#b45309" }}
-                            title="the listing's postage was not read, so the marketplace estimate is standing in">
-                        {" · est. post"}
-                      </span>
-                    )}
-                    {!o.fees_configured && (
-                      <span style={{ color: "#b45309" }}> · fees not set</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
-                  {o.fx_missing ? (
-                    <span style={{ color: "#b45309", fontSize: 11 }}>
-                      no {o.currency} rate
-                    </span>
-                  ) : (
-                    <>
-                      <div><strong>{usd(o.landed_per_card_cents)}</strong></div>
-                      <div style={{ fontSize: 10, color: "#666" }}>
-                        landed{o.line_count > 1 ? " / card" : ""}
-                      </div>
-                    </>
-                  )}
-                </div>
-                <ListingOutcome listing={o} onDone={onChanged} onError={setLocalError} />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {detail.excluded_lots?.length > 0 && (
-        <>
-          <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>
-            Excluded lots ({detail.excluded_lots.length})
-          </h4>
-          <p style={{ margin: "0 0 6px", fontSize: 12, color: "#666" }}>
-            Bundles containing this card. Kept out of the prices above — a
-            multi-card lot's price is not this card's price — but real signal
-            for what bundles go for.
-          </p>
-          <div style={{ border: "1px solid #ddd", borderRadius: 6 }}>
-            {detail.excluded_lots.map((r, i) => (
-              <a key={i} href={r.listing_url} target="_blank" rel="noreferrer"
-                 style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px",
-                          borderBottom: "1px solid #eee", textDecoration: "none", color: "inherit" }}>
-                <img src={r.thumbnail_url} alt="" loading="lazy"
-                     style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, background: "#f0f0f0" }} />
-                <div style={{ minWidth: 0, flex: 1, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {r.title_raw}
-                </div>
-                <div style={{ fontSize: 11, color: "#666", whiteSpace: "nowrap" }}>
-                  {r.line_count} cards ·{" "}
-                  {/* The lot's own currency. Rendering a ¥3,399 bundle through
-                      a dollar formatter printed "$33.99" — the same currency
-                      bug as the fee fields, one layer down. */}
-                  {money(r.price_cents, r.currency)}
-                  {r.currency !== "USD" && r.price_usd != null &&
-                    ` (${usd(r.price_usd)})`}
-                  {r.line_count > 1 && r.price_usd != null &&
-                    ` · ${usd(Math.round(r.price_usd / r.line_count))}/card`}
-                </div>
-              </a>
-            ))}
-          </div>
-        </>
-      )}
+      </details>
     </div>
   );
 }

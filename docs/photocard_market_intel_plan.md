@@ -2336,6 +2336,57 @@ No backup changes needed.
     every sighting ever recorded already carries the date it was seen; the date
     was in the data and only missing from the view.
 
+28. **The decision views — BUILT 2026-08-30.** The grid answers "what should I
+    act on"; opening a row now answers "so should I buy it, and why".
+
+    **The page is tabs.** Fees and cost basis were collapsible bars pinned above
+    the grid, charging vertical space on every visit to pay for something edited
+    once a month. They are tabs beside Cards and Lots now — same content, none
+    of the rent.
+
+    **A card opens OVER the grid**, on double-click, not below it. The grid
+    stays mounted underneath with its filters and its sort intact, so closing
+    returns you exactly where you were rather than to a reset list. Escape and
+    the backdrop both close it. Selecting and opening stay separate gestures.
+
+    **Buy to keep.** Every route in one table, singles and lots together —
+    both are ways of getting the card, and splitting them into two tables
+    buries whichever is cheaper today. The card count is a column instead, so
+    the commitment travels with the price, and so is how many of a listing's
+    cards are on your wanted list. Above it: cheapest single, cheapest via lot,
+    **two** medians of the asks (one over things you can buy one of, one
+    including lots' per-card shares — the gap between them is how much the lots
+    are moving this card's market), and the median sold **landed**, so it
+    compares like with like against the landed asks rather than always looking
+    cheaper than them.
+
+    **Buy to resell.** Neokyo against Mercari US. A lot shows this card's
+    **share** of the box, allocated by value using the same maths the lot
+    screen shows, so the two cannot give different answers. With no sold comps
+    the question inverts: what would it have to fetch to clear the target
+    profit — shown in the estimate's place, in red, because it is a requirement
+    rather than a measurement.
+
+    **A lot opens over the card**, stacked: you got there asking about one card
+    and closing has to give that question back. Two tabs — *Worth buying?* and
+    the existing *Cost split*.
+
+    **The verdict.** A card earns its place two ways and either is enough: you
+    want it and its share costs no more than the cheapest single listing of it
+    anywhere, or it resells above target. Deliberately **no pass mark** on the
+    percentage: whether 60% is good depends on the price and on which cards
+    those are, and a green tick over that judgement would be the screen
+    pretending to know something it does not. It does say how many of the cards
+    were judged on their **era's** median rather than their own comps — a 70%
+    built mostly on estimates is a guess with a number on it, and the
+    percentage alone cannot say so.
+
+    **Listings — the raw sighting series — is collapsed** at the foot of the
+    price-history tab. It is what makes a statistic auditable, since a
+    mis-associated listing is only findable by eye, but it is not what anyone
+    opens the card to read. The old *Buying* and *Excluded lots* sections are
+    gone: Buy to keep is that, and two places to read one thing can disagree.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

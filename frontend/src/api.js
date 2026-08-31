@@ -1498,6 +1498,20 @@ export async function deleteMarketListing(listingId) {
   return handleJsonResponse(res, 'Failed to delete the listing');
 }
 
+// The profit a flip has to clear to be worth doing. One number, read by both
+// the resell view and the lot verdict — two thresholds that could drift apart
+// would let one screen recommend what the other rejects. Read back through the
+// card endpoint rather than fetched on its own: every screen that needs it is
+// already loading one.
+export async function setMarketSettings(body) {
+  const res = await fetch(`${API}/market/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to save settings');
+}
+
 // Multi-card listings, each with its cost split across its lines by value.
 export async function listMarketLots() {
   const res = await fetch(`${API}/market/lots`);
