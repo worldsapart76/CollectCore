@@ -487,3 +487,16 @@ button.danger {
     45deg, #fafafa, #fafafa 4px, #f1f1f1 4px, #f1f1f1 8px
   );
 }
+
+/* A thumbnail with alternates behind it. The page offered more than one image
+   and the automatic pick is a guess, so say the guess can be overridden --
+   silently correct-looking is the failure mode worth avoiding. */
+.thumb-pick {
+  cursor: pointer;
+  box-shadow: 2px 2px 0 -1px var(--bg), 2px 2px 0 0 var(--line);
+}
+
+.thumb-pick:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

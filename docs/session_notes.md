@@ -173,6 +173,16 @@ empty one — a wrong image was otherwise permanent, which made the refresh
 button useless for the case it most obviously applies to.
 `tools/test_thumb_urls.mjs`, 12 cases; it had none.
 
+**Which photo is primary (entry 25).** With the 403 fixed the image loaded and
+it was the *second* of two. DOM order cannot settle it — a looping carousel
+clones its slides, so the first `<img>` is routinely a copy of the last photo.
+Added `ogAmong` (og:image, but only when it matches an image the page is
+actually showing, by filename) and made **the panel thumbnail clickable** to
+step through every candidate the page offered. Fifth round on photo selection;
+the first four each swapped one heuristic for a better one, and this is the
+first to admit it is not reliably solvable from markup and put a one-click
+override in front of it.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

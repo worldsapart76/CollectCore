@@ -623,7 +623,43 @@ eq('and a landscape-only page yields nothing rather than a banner',
    loadFor('neokyo.com', '/en/product/mercari/m47235147985', [], {
      images: [['https://neokyo.com/img/banner.png', 1200, 300]],
    }).detailPhoto(), null);
-eq('that is the declared order', nk.photoOrder.join(), 'largest,portrait');
+eq('that is the declared order', nk.photoOrder.join(),
+   'ogAmong,largest,portrait');
+
+console.log('--- og:image, but only when the page is actually showing it ---');
+// DOM order cannot settle which photo is primary: a looping carousel clones its
+// slides, so the first <img> in the document is routinely a copy of the LAST
+// photo. That is why Neokyo captured photo _2 of a two-image gallery.
+const P1 = 'https://static.mercdn.net/item/detail/orig/photos/m472_1.jpg?178';
+const P2 = 'https://static.mercdn.net/item/detail/orig/photos/m472_2.jpg?178';
+eq('og names the primary, so the clone in front of it loses',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     meta: { 'og:image': 'https://static.mercdn.net/item/detail/orig/photos/m472_1.jpg' },
+     images: [[P2, 600, 800], [P1, 600, 800], [P2, 600, 800]],
+   }).detailPhoto(), P1);
+// Matched by FILENAME: the same image is served with different cache-busters
+// and size parameters in the two places, so whole-URL equality finds nothing.
+eq('a different cache-buster still matches',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     meta: { 'og:image': 'https://static.mercdn.net/x/m472_1.jpg?999&width=200' },
+     images: [[P2, 600, 800], [P1, 600, 800]],
+   }).detailPhoto(), P1);
+// The safety that makes it usable FIRST: a site whose og:image is a logo or a
+// share card matches nothing and is skipped, rather than putting the same
+// generic picture on every capture -- the failure this module keeps designing
+// around.
+// Ordered P2-first deliberately: adopting the logo, and correctly ignoring it,
+// give different answers only when the fall-through result is NOT the same as
+// the og match would have been.
+eq('a generic og:image is ignored, not adopted',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     meta: { 'og:image': 'https://neokyo.com/static/logo-share.png' },
+     images: [[P2, 600, 800], [P1, 600, 800]],
+   }).detailPhoto(), P2);
+eq('and with no og at all the old rules stand',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     images: [[P2, 600, 800], [P1, 600, 800]],
+   }).detailPhoto(), P2);
 
 
 console.log('--- a photo URL is not always in src ---');

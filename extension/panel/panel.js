@@ -93,6 +93,9 @@ function row(rec) {
   // must not look alike. Also covers a URL that 404s later, which is the same
   // situation arriving a different way.
   setThumb(img, rec.thumbnailUrl);
+  // After setThumb, which writes its own title: the "image N of M" hint has to
+  // survive, and it is the only thing saying the pick can be changed.
+  makePickable(img, rec);
   img.alt = '';
   img.loading = 'lazy';
 
@@ -422,6 +425,29 @@ function setThumb(img, url) {
   };
 }
 
+// Click the thumbnail to step through the other images the page offered.
+//
+// Automatic selection cannot be made reliable across four marketplaces and
+// whatever carousel plugin each one ships: a looping gallery clones its slides,
+// so the first <img> in the document is routinely a copy of the LAST photo. One
+// click beats another round of guessing at plugin internals -- and it works on
+// the next marketplace too, which no amount of guessing does.
+function makePickable(img, rec) {
+  const photos = rec.photos || [];
+  if (photos.length < 2) return;
+  const at = photos.indexOf(rec.thumbnailUrl);
+  img.classList.add('thumb-pick');
+  img.title =
+    `Image ${at < 0 ? '?' : at + 1} of ${photos.length} — click for the next one`;
+  img.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const next = photos[(at + 1) % photos.length];
+    await send({ type: 'SET_THUMB', key: rec.key, url: next });
+    // No local re-render: SET_THUMB broadcasts STORE_CHANGED, and letting the
+    // list redraw from the store keeps the row and the record from disagreeing.
+  });
+}
+
 function renderLines() {
   const lines = current.lines || [];
   const wrap = $('assoc-lines');
@@ -542,6 +568,7 @@ function openAssociate(rec) {
   $('assoc-lot').closest('.assoc-actions').hidden = false;
 
   setThumb($('assoc-img'), rec.thumbnailUrl);
+  makePickable($('assoc-img'), rec);
   $('assoc-name').textContent = rec.name || '(untitled)';
   $('assoc-open').href = rec.listingUrl;
   $('assoc-lot').checked = !!rec.isLot;

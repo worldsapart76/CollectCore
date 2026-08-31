@@ -437,9 +437,28 @@ was decided by whichever decoded to a pixel more and regularly landed on the
 **back of the card**. Size still filters, so a 40px site logo cannot win on
 position; DOM order decides among the real photos.
 
+**DOM order cannot settle it on its own.** A looping carousel clones its
+slides, so the first `<img>` in the document is routinely a copy of the *last*
+photo — which is why a two-image Neokyo gallery captured photo 2. Two answers to
+that, one automatic and one not:
+
+- **`ogAmong`** — `og:image`, but only when it is one of the images the page is
+  actually showing, matched by *filename* since the same image carries different
+  cache-busters in the two places. The match requirement is what makes it safe
+  to try first: a site whose `og:image` is a logo or a share card matches
+  nothing and is skipped, rather than putting the same generic picture on every
+  capture.
+- **Click the thumbnail in the panel** to step through the other images the page
+  offered. Automatic selection cannot be made reliable across four marketplaces
+  and whatever gallery plugin each one ships, and one click beats another round
+  of guessing at plugin internals — it also works on the next marketplace, which
+  no amount of guessing does. A thumbnail with alternates behind it is drawn
+  stacked; its tooltip says *image 2 of 4*. Only rows captured since this
+  shipped carry the alternates — re-capture (**↻**) to collect them.
+
 Per-site `photoOrder` picks the strategy: `og` (the page's own declaration),
 `portrait` (largest image taller than wide — a photocard is 55×85mm), and
-`largest`. Neokyo runs `['largest', 'portrait']` because it fronts several
+`largest`. Neokyo runs `['ogAmong', 'largest', 'portrait']` because it fronts several
 Japanese marketplaces and each brings its own image host, so its `photoHost`
 list is the hosts *seen* rather than a rule; `portrait` falls back to every
 image on the page when none of them match.

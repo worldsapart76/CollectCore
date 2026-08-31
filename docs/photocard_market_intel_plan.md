@@ -2261,6 +2261,32 @@ No backup changes needed.
     `tools/test_thumb_urls.mjs`, 12 cases. `bigThumb` had no coverage at all,
     which is how a 403 shipped looking entirely ordinary.
 
+25. **Which photo is the primary one — BUILT 2026-08-30.** With the 403 fixed
+    the image loaded, and it was the **second** photo of a two-image gallery.
+
+    DOM order cannot settle this. A looping carousel clones its slides, so the
+    first `<img>` in the document is routinely a copy of the *last* photo, and
+    no amount of reasoning about one site's plugin generalises to the next.
+    Two answers, one automatic and one not:
+
+    - **`ogAmong`** — `og:image`, but only when it is one of the images the page
+      is actually showing, matched by filename since the same image carries
+      different cache-busters in the two places. The match requirement is what
+      makes it safe to try first: a site whose `og:image` is a logo matches
+      nothing and is skipped, rather than putting the same generic picture on
+      every capture — the exact failure this module keeps designing around.
+    - **The panel thumbnail is clickable**, stepping through every image the
+      page offered. The candidates are collected at capture and stored on the
+      record. One click beats another round of guessing at gallery plugins, and
+      it works on the next marketplace too, which guessing does not.
+
+    Neokyo's order is now `['ogAmong', 'largest', 'portrait']`.
+
+    This was the fifth round on photo selection. The first four each replaced
+    one heuristic with a better one; this is the first to admit the problem is
+    not reliably solvable from markup and to put a one-click override in front
+    of it. That should have been round two.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

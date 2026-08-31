@@ -359,6 +359,8 @@ async function capture({
       if (item.description) existing.description = item.description;
       if (item.sellerId != null) existing.sellerId = item.sellerId;
       if (item.photos?.length) existing.photos = item.photos;
+    // Also outside the detail branch: a DOM read collects candidates on every
+    // capture, and a refresh is the moment someone is trying to fix a photo.
       // A detail read is the best name available, so on this path it wins
       // outright rather than only filling a blank. Filling-only cannot repair
       // a name that is present but WRONG -- every Neokyo capture came in as
@@ -384,6 +386,7 @@ async function capture({
     //
     // Guarded so a search sweep cannot downgrade a listing page's photo: the
     // detail read sees the full gallery, a tile sees one small crop.
+    if (item.photos?.length) existing.photos = item.photos;
     if (item.thumbnail && !(wasDetail && !incomingIsDetail)) {
       existing.thumbnailUrl = bigThumb(item.thumbnail);
       await cacheImage(key, item.thumbnail);
@@ -556,6 +559,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           rec.lines.splice(msg.index, 1);
           rec.syncedAt = null;
           await putObservation(rec);
+          broadcastStoreChanged();
+        }
+        sendResponse({ ok: !!rec });
+        break;
+      }
+      // Pick a different one of the images the page offered.
+      //
+      // Automatic selection cannot be made reliable across four marketplaces
+      // and their carousel plugins -- a looping gallery clones its slides, so
+      // the first <img> in the document is routinely a copy of the last photo.
+      // One click beats another round of guessing at plugin internals.
+      case 'SET_THUMB': {
+        const rec = await getObservation(msg.key);
+        if (rec) {
+          rec.thumbnailUrl = bigThumb(msg.url);
+          rec.syncedAt = null;
+          await putObservation(rec);
+          await cacheImage(msg.key, msg.url);
           broadcastStoreChanged();
         }
         sendResponse({ ok: !!rec });

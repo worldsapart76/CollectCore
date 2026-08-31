@@ -132,7 +132,9 @@
       // a rule. `portrait` is the safety net: it falls back to every image on
       // the page when nothing on a known host qualifies, and a photocard is
       // portrait where Neokyo's promo banners and logo are not.
-      photoOrder: ['largest', 'portrait'],
+      // ogAmong first: Neokyo's gallery is a plugin-driven carousel, and DOM
+      // order in one of those is not photo order.
+      photoOrder: ['ogAmong', 'largest', 'portrait'],
     },
 
     // Server-rendered, so no fiber and content/fiber.js is not injected here.
@@ -890,6 +892,34 @@
   // frame with the marketing landing page still beside it, and its hero -- two
   // tilted cards, set large -- beat every listing photo on the site. That
   // failure is the invisible kind: the same plausible image on every capture.
+  // Every image the page could plausibly be offering as the listing's, in DOM
+  // order and deduped.
+  //
+  // Kept because automatic selection cannot be made reliable across four
+  // marketplaces and whatever carousel plugin each one ships: a looping gallery
+  // clones its slides, so the first <img> in the document is routinely a copy
+  // of the LAST photo. Rather than keep guessing at plugin behaviour, the panel
+  // lets the thumbnail be clicked through this list.
+  function photoCandidates() {
+    const seen = new Set();
+    const out = [];
+    for (const img of document.querySelectorAll('img')) {
+      const src = imgSrc(img);
+      if (!src || src.startsWith('data:') || seen.has(src)) continue;
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      // The site's own CDN, or portrait, or undecoded -- the same three tests
+      // the strategies below use, unioned. A 40px landscape logo passes none.
+      if (!SITE.photoHost.test(src) && !(h > w && w > 0) && !(w === 0 && h === 0)) {
+        continue;
+      }
+      seen.add(src);
+      out.push(src);
+      if (out.length >= 12) break;
+    }
+    return out;
+  }
+
   const PHOTO_SOURCES = {
     // The page's own declaration about itself, which beats any inference drawn
     // from how the page looks -- the same reason the title chain prefers a
@@ -917,6 +947,32 @@
       largestPhoto((img, w, h) => w === 0 && h === 0),
 
     largest: () => largestPhoto((img) => SITE.photoHost.test(img)),
+
+    // og:image, but ONLY when it is one of the images the page is actually
+    // showing. Where a site publishes its primary photo there this settles the
+    // question outright -- DOM order cannot, because a looping carousel clones
+    // its slides and puts a copy of the last photo first.
+    //
+    // The match requirement is what makes it safe to try first: a site whose
+    // og:image is a logo or a share card matches nothing and is skipped, rather
+    // than putting the same generic picture on every capture. That is the
+    // failure mode this module keeps having to design around.
+    ogAmong: () => {
+      const og = PHOTO_SOURCES.og();
+      if (!og) return null;
+      const file = (u) => {
+        try {
+          return new URL(u, location.origin).pathname.split('/').pop();
+        } catch {
+          return null;
+        }
+      };
+      const want = file(og);
+      if (!want) return null;
+      // Compared by filename, not by whole URL: the same image is served with
+      // different cache-busters and size parameters in the two places.
+      return photoCandidates().find((c) => file(c) === want) || null;
+    },
   };
 
   // Where an <img>'s URL actually is, which is not always `src`.
@@ -1108,7 +1164,9 @@
       shippingPayerCode: null,
       description: null,
       sellerId: null,
-      photos: null,
+      // Not the fiber's photo array -- the page's, read the same way. Both
+      // answer "what else could this be", which is what the panel needs.
+      photos: photoCandidates(),
       dates: null,
       // On a site with a fiber, having to read the page IS the fallback. On a
       // server-rendered one it is simply how the page is read, and flagging it
