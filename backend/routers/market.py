@@ -1581,8 +1581,14 @@ def _photocard_type_id(db) -> Optional[int]:
     return row[0] if row else None
 
 
-def _labels_for(db, item_ids: List[int]) -> Dict[int, str]:
-    """`Hyunjin · Rock Star · KM Station`, the same shape the picker uses.
+def _labels_for(db, item_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """A card's name, both composed and in parts.
+
+    `label` is `Hyunjin · Rock Star · KM Station`, the shape the picker uses.
+    The three pieces come back separately as well, because the grid sorts on
+    them individually: "everything from Rock Star" and "every POB" are the two
+    questions a browsable list has to answer, and neither is expressible over a
+    single composed string.
 
     Built here rather than read off mkt_listing_line.label: that column holds
     whatever the label was WHEN CAPTURED, so a card renamed since would show
@@ -1602,7 +1608,7 @@ def _labels_for(db, item_ids: List[int]) -> Dict[int, str]:
     )):
         members.setdefault(item_id, []).append(name)
 
-    out: Dict[int, str] = {}
+    out: Dict[int, Dict[str, Any]] = {}
     # source_origin_id is nullable -- LEFT JOIN it, always.
     for item_id, origin, version in db.execute(text(
         "SELECT d.item_id, so.source_origin_name, d.version "
@@ -1611,12 +1617,21 @@ def _labels_for(db, item_ids: List[int]) -> Dict[int, str]:
         "       ON so.source_origin_id = d.source_origin_id "
         f"WHERE d.item_id IN ({ids})"
     )):
-        parts = [" + ".join(members.get(item_id, [])) or "—"]
+        named = members.get(item_id, [])
+        who = " + ".join(named)
+        parts = [who or "—"]
         if origin:
             parts.append(origin)
         if version:
             parts.append(version)
-        out[item_id] = " · ".join(parts)
+        out[item_id] = {
+            "label": " · ".join(parts),
+            # Null rather than "—" in all three parts: the grid sorts on these,
+            # and a placeholder would sort among the real names instead of last.
+            "members": who or None,
+            "origin": origin,
+            "version": version,
+        }
     return out
 
 
@@ -1849,9 +1864,20 @@ def market_grid(db=Depends(get_db)):
         routes = [o for o in (single, lot) if o]
         cheapest = min(routes, key=lambda o: o["per_card_cents"]) if routes else None
 
+        seen = comps.get(item_id, [])
+        parts = labels.get(item_id) or {}
         cards.append({
             "item_id": item_id,
-            "label": labels.get(item_id) or f"item {item_id}",
+            "label": parts.get("label") or f"item {item_id}",
+            # The same name in pieces, so each is its own sortable column.
+            "members": parts.get("members"),
+            "origin": parts.get("origin"),
+            "version": parts.get("version"),
+            # The newest observation of this card from ANY source. Nothing to
+            # backfill: mkt_sighting.observed_at is NOT NULL, so every sighting
+            # ever recorded already carries the date it was seen.
+            "last_seen": max((x["last_seen"] for x in seen if x["last_seen"]),
+                             default=None),
             "held": held.get(item_id, 0),
             "wanted": item_id in wanted,
             "paid": paid,
@@ -2182,7 +2208,8 @@ def _analyze_lot(db, listing, ladder, wanted, buy_fees,
             "line_id": r["line_id"],
             "line_type": r["line_type"],
             "item_id": item_id,
-            "label": (labels.get(item_id) if item_id else None) or r["label"]
+            "label": ((labels.get(item_id) or {}).get("label") if item_id else None)
+                     or r["label"]
                      or ("unidentified" if r["line_type"] == "unidentified" else "—"),
             "qty": qty,
             "wanted": item_id in wanted,

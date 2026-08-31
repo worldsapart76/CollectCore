@@ -127,6 +127,19 @@ function CompCell({ comps }) {
   );
 }
 
+// How long ago this card was last seen anywhere. The number that says whether
+// the rest of the row can be trusted: a margin computed off a three-week-old
+// ask is arithmetic about a listing that may well be gone.
+function Seen({ iso }) {
+  const d = ageDays(iso);
+  if (d == null) return <span style={{ color: "#bbb" }}>—</span>;
+  return (
+    <span title={iso} style={{ color: d > 14 ? "#b45309" : "#666" }}>
+      {d === 0 ? "today" : `${d}d`}
+    </span>
+  );
+}
+
 function Margin({ cents }) {
   if (cents == null) return <span style={{ color: "#bbb" }}>—</span>;
   const good = cents >= 0;
@@ -151,8 +164,15 @@ function compare(a, b, key, dir) {
   return dir * (av - bv);
 }
 
+// The card's name arrives in three pieces as well as composed, because each is
+// a question the grid has to be able to answer on its own: "everything from
+// Rock Star", "every POB", "everything of Hyunjin's". None of those is
+// expressible by sorting one composed string.
 const COLUMNS = [
-  { key: "label", label: "card", align: "left" },
+  { key: "wanted", label: "★", title: "on your wanted list", align: "center" },
+  { key: "members", label: "member", align: "left" },
+  { key: "origin", label: "origin", align: "left" },
+  { key: "version", label: "version", align: "left" },
   { key: "held", label: "own", title: "copies held — owned, trade or pending outgoing" },
   { key: "paid_cents", label: "paid", title: "cost basis (card-level estimate)" },
   { key: "buy_single_cents", label: "buy", title: "cheapest landed, single-card listing" },
@@ -160,8 +180,11 @@ const COLUMNS = [
   { key: "sell_net_cents", label: "sell", title: "median sold, net of selling fees" },
   { key: "flip_cents", label: "flip", title: "sell − paid: margin on what you already hold" },
   { key: "arb_cents", label: "arb", title: "sell − cheapest buy: margin on what you could source" },
-  { key: "comps", label: "comps", sortable: false },
+  { key: "last_seen", label: "seen", title: "the newest observation of this card, from any source" },
+  { key: "comps", label: "comps", sortable: false, align: "left" },
 ];
+
+const TEXT_COLUMNS = new Set(["members", "origin", "version", "label"]);
 
 function MarketGrid({ cards, selected, onSelect }) {
   const [q, setQ] = useState("");
@@ -199,7 +222,11 @@ function MarketGrid({ cards, selected, onSelect }) {
 
   function sortBy(key) {
     setSort((s) =>
-      s.key === key ? { key, dir: -s.dir } : { key, dir: key === "label" ? 1 : -1 }
+      s.key === key
+        ? { key, dir: -s.dir }
+        // Names read A-Z on first click; every other column is "best first",
+        // which for a margin, a count or a date means largest.
+        : { key, dir: TEXT_COLUMNS.has(key) ? 1 : -1 }
     );
   }
 
@@ -292,11 +319,19 @@ function MarketGrid({ cards, selected, onSelect }) {
                   background: selected === c.item_id ? "#eef6ff" : "transparent",
                 }}
               >
+                <td style={{ ...td, textAlign: "center" }}>
+                  {c.wanted
+                    ? <span title="on your wanted list" style={{ color: "#b45309" }}>★</span>
+                    : <span style={{ color: "#eee" }}>·</span>}
+                </td>
                 <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
-                  {c.wanted && (
-                    <span title="on your wanted list" style={{ color: "#b45309" }}>★ </span>
-                  )}
-                  {c.label}
+                  {c.members || <span style={{ color: "#bbb" }}>—</span>}
+                </td>
+                <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                  {c.origin || <span style={{ color: "#bbb" }}>—</span>}
+                </td>
+                <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
+                  {c.version || <span style={{ color: "#bbb" }}>—</span>}
                 </td>
                 <td style={td}>{c.held || <span style={{ color: "#bbb" }}>—</span>}</td>
                 <td style={td}>
@@ -340,6 +375,7 @@ function MarketGrid({ cards, selected, onSelect }) {
                     <span title="cheapest route is inside a lot" style={{ color: "#999" }}> ᴸ</span>
                   )}
                 </td>
+                <td style={td}><Seen iso={c.last_seen} /></td>
                 <td style={{ ...td, textAlign: "left" }}><CompCell comps={c.comps} /></td>
               </tr>
             ))}

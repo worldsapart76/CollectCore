@@ -122,6 +122,28 @@ check("and it has no comps", grid[102]["comps"], [])
 check("labels come from the library, not the capture",
       grid[101]["label"], "Hyunjin · Rock Star · KM Station")
 
+print("\n--- the name in pieces, each its own sortable column ---")
+# "Everything from Rock Star" and "every POB" are the two questions a browsable
+# list has to answer, and neither is expressible by sorting one composed string.
+check("member", grid[101]["members"], "Hyunjin")
+check("origin", grid[101]["origin"], "Rock Star")
+check("version", grid[101]["version"], "KM Station")
+check("and the composed label still comes along",
+      grid[101]["label"], "Hyunjin · Rock Star · KM Station")
+check("wanted is its own field, not a prefix on the name",
+      grid[102]["wanted"], True)
+
+print("\n--- when it was last seen ---")
+# Nothing to backfill: mkt_sighting.observed_at is NOT NULL, so every sighting
+# ever recorded already carries the date it was seen.
+check("the newest observation from ANY source, not the newest per source",
+      grid[101]["last_seen"][:10], "2026-08-30")
+check("a card with no market data has no date", grid[102]["last_seen"], None)
+# 103 is only ever inside the neokyo lot, so its date comes from that sighting
+# rather than from a comp of its own.
+check("a lot-only card is dated by the lot",
+      grid[103]["last_seen"][:10], "2026-08-30")
+
 print("\n--- what I hold ---")
 check("owned + trade both count as held", grid[101]["held"], 2)
 check("a wanted card is not held", grid[102]["held"], 0)

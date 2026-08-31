@@ -2315,6 +2315,27 @@ No backup changes needed.
     shows `×2` with a `−` beside it, so a mis-click walks back without hunting
     for the card again.
 
+27. **Grid columns split, and a last-seen date — BUILT 2026-08-30.** The card's
+    name arrives in three pieces as well as composed — **member**, **origin**,
+    **version** — each its own sortable column, and **wanted** moved out of a
+    star prefix into a column of its own. "Everything from Rock Star", "every
+    POB", "everything of Hyunjin's" are the questions a browsable list has to
+    answer, and none of them is expressible by sorting one composed string. The
+    composed `label` stays in the payload: the filter box searches it, so
+    typing across the pieces still works.
+
+    Empty parts come back **null rather than "—"**, so they sort last with every
+    other unknown instead of among the real names.
+
+    **`last_seen`** is the newest observation of a card from any source — the
+    number that says whether the rest of the row can be trusted, since a margin
+    computed off a three-week-old ask is arithmetic about a listing that may
+    well be gone. Amber past a fortnight, matching the per-source ages beside it.
+
+    **No backfill was needed.** `mkt_sighting.observed_at` is `NOT NULL`, so
+    every sighting ever recorded already carries the date it was seen; the date
+    was in the data and only missing from the view.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not

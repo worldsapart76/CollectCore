@@ -196,6 +196,14 @@ lot's cost split across one fewer card than it held. It now counts the line up
 — `qty` on the existing line, which is what units, per-card cost and line value
 all already sum — with a `−` on the chip to walk it back.
 
+**Grid columns split, plus a last-seen date (entry 27).** Member, origin and
+version are now separate sortable columns and wanted is its own column rather
+than a star prefix — none of "everything from Rock Star" / "every POB" is
+expressible by sorting one composed string. Empty parts return null rather than
+"—" so they sort last. `last_seen` is the newest observation from any source,
+amber past a fortnight. **No backfill needed**: `observed_at` is NOT NULL, so
+the date was already in every sighting and only missing from the view.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the
