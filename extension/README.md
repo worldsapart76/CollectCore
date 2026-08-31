@@ -397,6 +397,37 @@ whenever any single field came off the page rather than out of Mercari's
 internal object — including the photo, which is the same photo either way. It
 warned about nothing and was removed.
 
+### Only rewrite a dimension the URL already declares
+
+`bigThumb` asks a CDN for a bigger rendition of an image it already has. It was
+scoped to the *host* and not to the *URL shape*, and that shipped a silent 403:
+
+```
+Mercari US thumbnail   …_1.jpg?1787769379&width=200&height=200   → width=640 ✔
+Neokyo / Mercari JP    …_1.jpg?1787925462                        → 403 ✘
+```
+
+Same host. The second is `/item/detail/orig/` — it carries no dimensions
+*because it already is the full-size image* — so `URLSearchParams.set` turned
+the bare cache-buster into `?1787925462=&width=640`, which the CDN refuses.
+**Every Mercari-JP capture stored a thumbnail URL that could not load**, while
+Rakuma's `img.fril.jp` images were left alone and worked fine. That was the
+whole of the Rakuma-works/Mercari-doesn't split.
+
+Adding a parameter a URL never had is inventing an API contract; rewriting one
+it already declares is reading the contract it published. The edit is also done
+as a **string**, never re-serialised, because Mercari's query begins with a bare
+cache-buster token that `URLSearchParams` would rewrite to `1787769379=` — a
+different URL, on a CDN already shown to be strict about exactly this.
+
+`tools/test_thumb_urls.mjs` covers it. It had none, which is how a 403 shipped
+looking entirely ordinary.
+
+**A re-capture now replaces a thumbnail rather than only filling an empty one.**
+A wrong image used to be permanent — fixable only by deleting the row — which
+made the refresh button useless for the case it most obviously applies to. A
+search sweep still cannot downgrade a listing page's photo.
+
 ### The primary photo, not the biggest one
 
 `detailPhoto` takes the **earliest** image in DOM order within half the area of
@@ -511,7 +542,8 @@ price, where Mercari gives only a sold flag.
 - **Bigger thumbnails are free, differently.** eBay sizes in the *filename* —
   `s-l225.jpg` → `s-l500.jpg` — where Mercari sizes in the query string.
   Separate branches in `bigThumb`, since one mechanism applied to the other
-  host produces a 404 rather than a bigger image.
+  host produces a 404 rather than a bigger image. **Both branches only rewrite
+  a dimension the URL already declares** — see below.
 
 ## What differs on Pocamarket
 

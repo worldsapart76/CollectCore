@@ -158,6 +158,21 @@ dimensions and which strategy won — whenever a row has no photo. Three rounds
 went into guessing this from screenshots; the title diagnostic already showed
 that answering it in the panel ends it in one.
 
+**The Mercari-JP image bug, actually found (entry 24).** Not the host pattern
+and not lazy loading — `bigThumb` was mangling the URL after a correct read. A
+Mercari US thumbnail carries `?…&width=200&height=200` and asking it for 640 is
+free; Neokyo's Mercari-JP `/item/detail/orig/` URL carries a bare cache-buster
+and no dimensions, because it already IS the full-size image. `URLSearchParams`
+turned it into `?1787925462=&width=640` and the CDN answers **403**. Confirmed
+by request rather than reasoning: original 200, rewritten 403. Rakuma's
+`img.fril.jp` was never touched, which was the whole of the split.
+
+Both branches now rewrite only a dimension the URL already declares, as a
+string. And a re-capture **replaces** a thumbnail instead of only filling an
+empty one — a wrong image was otherwise permanent, which made the refresh
+button useless for the case it most obviously applies to.
+`tools/test_thumb_urls.mjs`, 13 cases; it had none.
+
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
 captured shipping and every margin in the grid is optimistic. v2 step 3, the

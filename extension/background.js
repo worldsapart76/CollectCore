@@ -193,11 +193,22 @@ async function setArmed(card) {
 
 // --- Capture ---------------------------------------------------------------
 
-// Mercari sizes its thumbnails from the query string, so a bigger one is free.
-// That is a Mercari CDN behaviour, not a general one -- Rakuma's img.fril.jp
-// serves Neokyo's images and an unknown `width` param there is at best ignored
-// and at worst a cache miss or a 404. So the rewrite is scoped to the CDN it
-// was learned from and every other host is left exactly as found.
+// A bigger rendition of the same image, where the URL itself offers one.
+//
+// Scoped twice over, and the second scope was learned the hard way. It is not
+// enough that the HOST is one that sizes from the query string: the URL must
+// already carry the parameter being changed.
+//
+// A Mercari US thumbnail arrives as `...jpg?1787769379&width=200&height=200`,
+// and asking that for 640 is free. A Neokyo-served Mercari JP ORIGINAL arrives
+// as `...jpg?1787925462` -- same host, no dimensions, because it already IS the
+// full-size image. Adding `width` to it produced
+// `...jpg?1787925462=&width=640`, which the CDN answers with **403** -- so
+// every Mercari-JP capture stored a thumbnail URL that could not load, while
+// Rakuma's img.fril.jp images were left alone and worked fine.
+//
+// Adding a parameter a URL never had is inventing an API contract. Rewriting
+// one it already declares is reading the contract it published.
 function bigThumb(url) {
   if (!url) return null;
   try {
@@ -205,18 +216,31 @@ function bigThumb(url) {
     // eBay sizes in the FILENAME, not the query string: s-l225.jpg is the
     // search thumbnail and s-l500.jpg the same image larger. Same idea as
     // Mercari's `width`, a different mechanism, so it gets its own branch
-    // rather than a shared one that would be wrong on both.
+    // rather than a shared one that would be wrong on both. Conditional for
+    // the same reason: no `s-l` segment, no rewrite.
     if (/(^|\.)ebayimg\.com$/.test(u.hostname)) {
+      if (!/\/s-l\d+\.\w+$/.test(u.pathname)) return url;
       u.pathname = u.pathname.replace(/\/s-l\d+(\.\w+)$/, '/s-l500$1');
       return u.toString();
     }
     if (!/mercdn\.net$/.test(u.hostname)) return url;
-    u.searchParams.set('width', String(IMAGE_WIDTH));
-    u.searchParams.delete('height');
-    return u.toString();
+    if (!/[?&]width=\d+/.test(url)) return url;
   } catch {
     return url;
   }
+  // Edited as a STRING, not through URLSearchParams. Mercari's query begins
+  // with a bare cache-buster token (`?1787769379&width=200`), and re-serialising
+  // it turns that into `1787769379=` -- a different URL, on a CDN already shown
+  // to be strict about exactly this.
+  return url
+    .replace(/([?&])width=\d+/, `$1width=${IMAGE_WIDTH}`)
+    // Keeps the SEPARATOR, so removing a leading `?height=…` does not orphan
+    // the `?` and leave the next parameter reading as part of the path. The
+    // tidy-ups below collapse whatever that leaves behind.
+    .replace(/([?&])height=\d+/g, '$1')
+    .replace(/\?&/, '?')
+    .replace(/&&+/g, '&')
+    .replace(/[?&]$/, '');
 }
 
 // Capture is a one-shot opportunity: the CDN URL is dead once the listing
@@ -319,11 +343,17 @@ async function capture({
     existing.listingState = sighting.listingState;
     existing.rawStatus = item.status;
 
+    // Read BEFORE the tier is upgraded below, because the comparison that
+    // matters is what this record was against what is arriving -- and the
+    // upgrade would have made every incoming capture look like a match.
+    const wasDetail = existing.captureTier === 'detail';
+    const incomingIsDetail = item.shippingPayerCode !== undefined;
+
     // A detail capture following a tile capture is the common path -- sweep a
     // page, then open the interesting ones. Without this the richer fields
     // would be silently dropped on exactly that path, which is the one that
     // matters. Upgrade-only: never let a later sweep null out detail data.
-    if (item.shippingPayerCode !== undefined) {
+    if (incomingIsDetail) {
       existing.captureTier = 'detail';
       existing.shippingPayerCode = item.shippingPayerCode ?? null;
       if (item.description) existing.description = item.description;
@@ -346,7 +376,15 @@ async function capture({
     // and the only fix was deleting it by hand. Fill anything missing, and
     // let a real name replace a placeholder.
     if (item.name && !existing.name) existing.name = item.name;
-    if (item.thumbnail && !existing.thumbnailUrl) {
+    // Replace, not just fill. `!existing.thumbnailUrl` meant a WRONG image was
+    // permanent: a URL stored while bigThumb was mangling it, or the back of
+    // the card picked before DOM order decided, survived every re-capture and
+    // could only be fixed by deleting the row. Refreshing is the obvious way to
+    // fix a bad photo and it should actually fix it.
+    //
+    // Guarded so a search sweep cannot downgrade a listing page's photo: the
+    // detail read sees the full gallery, a tile sees one small crop.
+    if (item.thumbnail && !(wasDetail && !incomingIsDetail)) {
       existing.thumbnailUrl = bigThumb(item.thumbnail);
       await cacheImage(key, item.thumbnail);
     }

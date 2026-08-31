@@ -2226,6 +2226,41 @@ No backup changes needed.
     same question, *which element did it read*, and the title diagnostic already
     proved that answering it in the panel ends the guessing in one round.
 
+24. **The Mercari-JP image bug, actually found — FIXED 2026-08-30.** Not the
+    host pattern, not lazy loading. `bigThumb` was mangling the URL after a
+    correct read:
+
+    ```
+    Mercari US thumbnail   …_1.jpg?1787769379&width=200&height=200  → width=640 ✔
+    Neokyo / Mercari JP    …_1.jpg?1787925462                       → 403 ✘
+    ```
+
+    Same host, so the host scope passed. The second is `/item/detail/orig/` and
+    carries no dimensions *because it already is the full-size image*, so
+    `URLSearchParams.set` produced `?1787925462=&width=640` — which the CDN
+    answers **403**. Every Mercari-JP capture stored a thumbnail URL that could
+    not load; Rakuma's `img.fril.jp` was left alone and worked. That was the
+    whole of the split.
+
+    Confirmed by request, not by reasoning: the original URL returns 200 and the
+    rewritten one 403. Three earlier rounds were spent on plausible theories
+    about the *read*, and the read had been right all along.
+
+    **Adding a parameter a URL never had is inventing an API contract.** Both
+    branches now rewrite only a dimension the URL already declares, and edit it
+    as a string rather than re-serialising — Mercari's query opens with a bare
+    cache-buster that `URLSearchParams` rewrites to `1787769379=`, a different
+    URL on a CDN already shown to be strict about this.
+
+    Also: **a re-capture now replaces a thumbnail** rather than only filling an
+    empty one. A wrong image was otherwise permanent — fixable only by deleting
+    the row — which made the refresh button useless for exactly the case it most
+    obviously applies to. Guarded so a search sweep cannot downgrade a listing
+    page's photo.
+
+    `tools/test_thumb_urls.mjs`, 13 cases. `bigThumb` had no coverage at all,
+    which is how a 403 shipped looking entirely ordinary.
+
 ### Next
 
 **The build is paused deliberately, and the next step is data collection, not
