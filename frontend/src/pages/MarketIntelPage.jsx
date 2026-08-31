@@ -3,7 +3,7 @@ import { Button, Alert } from "../components/primitives";
 import {
   getMarketGrid, getMarketComps, setListingOutcome,
   listMarketLots, getMarketLot, addLotLine, updateLotLine, deleteLotLine,
-  deleteMarketListing, setMarketSettings,
+  deleteMarketListing, getMarketSettings, setMarketSettings,
   listFxRates, setFxRate, backfillFxUsd,
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
@@ -889,6 +889,44 @@ const th = {
 };
 const td = { padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" };
 
+// The profit a flip has to clear to be worth doing.
+//
+// ONE number for every card, everywhere. It reads as per-card in the resell tab
+// purely because that tab is inside a card, so the label says otherwise — a
+// global setting reached through a card-shaped door is exactly the kind of
+// thing that gets changed twice and trusted once. It also has a home in Fees &
+// shipping, where module-wide numbers live.
+function TargetProfit({ cents, onChanged, onError }) {
+  async function edit() {
+    const entered = prompt(
+      "What does a flip have to clear to be worth doing, in dollars?\n\n" +
+      "This is ONE figure for every card, not a setting on this one. It " +
+      "decides two things: the price a card with no sold comps would have to " +
+      "fetch, and whether an unwanted card earns its place in a lot.",
+      (cents / 100).toFixed(2)
+    );
+    if (entered === null) return;
+    const n = Number(entered);
+    if (!Number.isFinite(n) || n < 0) return onError("Enter a positive number.");
+    try {
+      await setMarketSettings({ target_profit_cents: Math.round(n * 100) });
+      await onChanged();
+    } catch (e) {
+      onError(e.message || "Failed to save the target");
+    }
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <Stat
+        label="target profit"
+        value={usd(cents)}
+        hint="one figure for every card, everywhere"
+      />
+      <Button size="sm" onClick={edit}>Set target</Button>
+    </div>
+  );
+}
+
 // ───────────────────────── Buy to Keep ──────────────────────────────────────
 
 function BuyToKeep({ detail, onChanged, onOpenLot, onError }) {
@@ -999,20 +1037,6 @@ function BuyToKeep({ detail, onChanged, onOpenLot, onError }) {
 
 function BuyToResell({ detail, onChanged, onOpenLot, onError, onTargetChanged }) {
   const r = detail.resell;
-
-  async function editTarget() {
-    const now = (r.target_profit_cents / 100).toFixed(2);
-    const entered = prompt(
-      "What does a flip have to clear to be worth doing, in dollars?\n\n" +
-      "Used in two places: the price a card with no sold comps would have to " +
-      "fetch, and whether an unwanted card earns its place in a lot.", now);
-    if (entered === null) return;
-    const n = Number(entered);
-    if (!Number.isFinite(n) || n < 0) return onError("Enter a positive number.");
-    await setMarketSettings({ target_profit_cents: Math.round(n * 100) });
-    await onTargetChanged();
-  }
-
   return (
     <div>
       <div style={statRow}>
@@ -1020,26 +1044,24 @@ function BuyToResell({ detail, onChanged, onOpenLot, onError, onTargetChanged })
           label="est. sale, net"
           value={usd(r.sell_net_cents)}
           hint={r.n_sold
-            ? `median of ${r.n_sold} sold on ${r.sell_marketplace}, after fees`
+            ? `median of ${r.n_sold} sold on ${r.sell_marketplace_name || r.sell_marketplace}, after fees`
             : "no sold comps — see below"}
           tone={r.n_sold && r.n_sold < 3 ? "#b45309" : undefined}
         />
-        <Stat
-          label="target profit"
-          value={usd(r.target_profit_cents)}
-          hint="click to change · also used by the lot verdict"
+        <TargetProfit
+          cents={r.target_profit_cents}
+          onChanged={onTargetChanged}
+          onError={onError}
         />
-        <div style={{ alignSelf: "center" }}>
-          <Button size="sm" onClick={editTarget}>Set target</Button>
-        </div>
       </div>
 
       {r.rows.length === 0 && (
         <Alert tone="info">
-          Nothing on {r.sources.join(", ")} for this card right now. This tab
-          compares what a proxy would cost against what the card sells for on{" "}
-          {r.sell_marketplace}, so it stays empty until there is something to
-          buy there.
+          Nothing on {r.source_names?.join(", ") || r.sources.join(", ")} for
+          this card right now. This tab compares what a proxy would cost against
+          what the card sells for on{" "}
+          {r.sell_marketplace_name || r.sell_marketplace}, so it stays empty
+          until there is something to buy there.
         </Alert>
       )}
 
@@ -1217,6 +1239,10 @@ export default function MarketIntelPage() {
   const [lotId, setLotId] = useState(null);
   const [lot, setLot] = useState(null);
   const [fx, setFx] = useState(null);
+  // Loaded for the Fees tab, which has no card to read it off. The card overlay
+  // gets the same figure back inside its own payload, so the two can never show
+  // different numbers for the one setting they share.
+  const [settings, setSettings] = useState(null);
   const [error, setError] = useState("");
 
   const [busy, setBusy] = useState(false);
@@ -1226,6 +1252,7 @@ export default function MarketIntelPage() {
       .then((d) => setCards(d.cards || []))
       .catch((e) => setError(e.message || "Failed to load the grid"));
     listFxRates().then(setFx).catch(() => {});
+    getMarketSettings().then(setSettings).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1347,14 +1374,37 @@ export default function MarketIntelPage() {
       />
 
       {view === "fees" && (
-        <FeesPanel
-          alwaysOpen
-          onError={setError}
-          onChanged={async () => {
-            setCards((await getMarketGrid()).cards || []);
-            if (selected) setDetail(await getMarketComps(selected));
-          }}
-        />
+        <>
+          {/* Module-wide, so it belongs beside the other module-wide numbers
+              rather than only behind a card overlay. Same setting, same value,
+              two doors — a global figure reachable only through one card is
+              how it ends up believed to be per-card. */}
+          {settings && (
+            <div style={{ ...statRow, alignItems: "center" }}>
+              <TargetProfit
+                cents={settings.target_profit_cents}
+                onChanged={async () => {
+                  setSettings(await getMarketSettings());
+                  if (selected) setDetail(await getMarketComps(selected));
+                }}
+                onError={setError}
+              />
+              <span style={{ fontSize: 11, color: "#666", maxWidth: 460 }}>
+                Decides the price a card with no sold comps would have to fetch,
+                and whether an unwanted card earns its place in a lot. Not a
+                setting on any one card.
+              </span>
+            </div>
+          )}
+          <FeesPanel
+            alwaysOpen
+            onError={setError}
+            onChanged={async () => {
+              setCards((await getMarketGrid()).cards || []);
+              if (selected) setDetail(await getMarketComps(selected));
+            }}
+          />
+        </>
       )}
       {view === "basis" && <CostBasisPanel alwaysOpen onError={setError} />}
 
@@ -1460,7 +1510,12 @@ export default function MarketIntelPage() {
                   onChanged={refreshCard}
                   onOpenLot={openLotOverlay}
                   onError={setError}
-                  onTargetChanged={refreshCard}
+                  onTargetChanged={async () => {
+                    // Both copies, or the Fees tab keeps showing the old
+                    // number until a reload and the one setting looks like two.
+                    setSettings(await getMarketSettings());
+                    await refreshCard();
+                  }}
                 />
               )}
               {cardTab === "history" && (

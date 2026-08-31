@@ -1063,9 +1063,16 @@ def _buy_to_resell(db, item_id: int, sell_marketplace: str):
 
     out.sort(key=lambda o: (o["profit_cents"] is None,
                             -(o["profit_cents"] or 0)))
+    # Display names alongside the codes. `mercari_us` is the key everything
+    # joins on and reads like a database row on screen; the name is what the
+    # marketplace table exists to provide.
+    names = {r[0]: r[1] for r in db.execute(text(
+        "SELECT marketplace_code, marketplace_name FROM lkup_mkt_marketplaces"))}
     return {
         "sources": list(RESELL_SOURCES),
+        "source_names": [names.get(m, m) for m in RESELL_SOURCES],
         "sell_marketplace": sell_marketplace,
+        "sell_marketplace_name": names.get(sell_marketplace, sell_marketplace),
         "sell_net_cents": net,
         "n_sold": (sold.get(item_id) or {}).get("n", 0),
         "target_profit_cents": target,

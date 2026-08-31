@@ -221,6 +221,18 @@ check("the lot verdict sees the same",
       c.get(f"/market/lots/{lot_id}").json()["useful"]["target_profit_cents"], 5000)
 check("a negative target is refused",
       c.put("/market/settings", json={"target_profit_cents": -1}).status_code, 400)
+# It is ONE setting, not a per-card one. Reading it through a different card
+# has to give the same answer, or the number is per-card in fact whatever the
+# label says.
+check("another card sees the same target",
+      c.get("/market/comps/303").json()["resell"]["target_profit_cents"], 5000)
+check("and so does the standalone endpoint",
+      c.get("/market/settings").json()["target_profit_cents"], 5000)
+
+print("\n--- marketplaces read as names, not as join keys ---")
+r = c.get("/market/comps/301").json()["resell"]
+check("the sell side has a name", r["sell_marketplace_name"], "Mercari US")
+check("and so do the buy sources", r["source_names"], ["Neokyo"])
 
 print("\n" + (f"{len(fails)} FAILED: {fails}" if fails else "all passed"))
 sys.exit(1 if fails else 0)

@@ -1498,11 +1498,14 @@ export async function deleteMarketListing(listingId) {
   return handleJsonResponse(res, 'Failed to delete the listing');
 }
 
-// The profit a flip has to clear to be worth doing. One number, read by both
-// the resell view and the lot verdict — two thresholds that could drift apart
-// would let one screen recommend what the other rejects. Read back through the
-// card endpoint rather than fetched on its own: every screen that needs it is
-// already loading one.
+// The profit a flip has to clear to be worth doing. ONE number for every card,
+// read by both the resell view and the lot verdict — two thresholds that could
+// drift apart would let one screen recommend what the other rejects.
+export async function getMarketSettings() {
+  const res = await fetch(`${API}/market/settings`);
+  return handleJsonResponse(res, 'Failed to load settings');
+}
+
 export async function setMarketSettings(body) {
   const res = await fetch(`${API}/market/settings`, {
     method: 'PUT',
