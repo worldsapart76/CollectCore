@@ -2258,7 +2258,7 @@ No backup changes needed.
     obviously applies to. Guarded so a search sweep cannot downgrade a listing
     page's photo.
 
-    `tools/test_thumb_urls.mjs`, 13 cases. `bigThumb` had no coverage at all,
+    `tools/test_thumb_urls.mjs`, 12 cases. `bigThumb` had no coverage at all,
     which is how a 403 shipped looking entirely ordinary.
 
 ### Next

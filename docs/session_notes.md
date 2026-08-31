@@ -171,7 +171,7 @@ Both branches now rewrite only a dimension the URL already declares, as a
 string. And a re-capture **replaces** a thumbnail instead of only filling an
 empty one — a wrong image was otherwise permanent, which made the refresh
 button useless for the case it most obviously applies to.
-`tools/test_thumb_urls.mjs`, 13 cases; it had none.
+`tools/test_thumb_urls.mjs`, 12 cases; it had none.
 
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus
