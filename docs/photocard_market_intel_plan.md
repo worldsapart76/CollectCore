@@ -2282,10 +2282,27 @@ No backup changes needed.
 
     Neokyo's order is now `['ogAmong', 'largest', 'portrait']`.
 
-    This was the fifth round on photo selection. The first four each replaced
-    one heuristic with a better one; this is the first to admit the problem is
-    not reliably solvable from markup and to put a one-click override in front
-    of it. That should have been round two.
+    **And then the actual answer, which was in the URL all along:**
+
+    ```
+    .../photos/m47235147985_1.jpg?1787925462   <- the listing's first photo
+    .../photos/m47235147985_2.jpg?1787925462
+    ```
+
+    Mercari NUMBERS its photos. `_1` is the primary, stated by the site, and it
+    survives everything the markup does to confuse the issue — carousel clones,
+    lazy loading, a hidden gallery, DOM order. `photoPrimary` declares the
+    pattern per site and `numbered` runs first; Neokyo carries the same one
+    because those *are* Mercari's images, served straight off
+    `static.mercdn.net`. Everything after it in the order is an inference about
+    how the page looks.
+
+    Five rounds went into inferring an answer the URL was stating. The module
+    had already learned this twice — Neokyo's title comes from an element the
+    site marks itself, Pocamarket's from `<title>` — and **look for the fact the
+    site publishes before reasoning about how the page renders** should have
+    been the first move here, not the sixth. The click-to-cycle override stays:
+    it is what makes the next unnumbered marketplace a click rather than a round.
 
 ### Next
 

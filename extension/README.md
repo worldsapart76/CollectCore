@@ -437,6 +437,24 @@ was decided by whichever decoded to a pixel more and regularly landed on the
 **back of the card**. Size still filters, so a 40px site logo cannot win on
 position; DOM order decides among the real photos.
 
+**A CDN that numbers its photos has already answered the question.**
+
+```
+.../photos/m47235147985_1.jpg?1787925462   <- the listing's first photo
+.../photos/m47235147985_2.jpg?1787925462
+```
+
+Mercari's own convention, stated in the URL, and it survives everything the
+markup does to confuse the issue: carousel clones, lazy loading, a hidden
+gallery, DOM order. Every other strategy is an inference about how the page
+*looks*; this is a fact the site published, which is the same reason Neokyo's
+title comes from an element the site marks itself and Pocamarket's comes from
+`<title>`. Declared per site as `photoPrimary` — Neokyo carries the same pattern
+because those *are* Mercari's images, served straight off `static.mercdn.net`.
+
+`_1.` requires the dot, so a ten-photo listing's `_10.jpg` cannot be mistaken
+for the first.
+
 **DOM order cannot settle it on its own.** A looping carousel clones its
 slides, so the first `<img>` in the document is routinely a copy of the *last*
 photo — which is why a two-image Neokyo gallery captured photo 2. Two answers to
@@ -456,9 +474,10 @@ that, one automatic and one not:
   stacked; its tooltip says *image 2 of 4*. Only rows captured since this
   shipped carry the alternates — re-capture (**↻**) to collect them.
 
-Per-site `photoOrder` picks the strategy: `og` (the page's own declaration),
+Per-site `photoOrder` picks the strategy: `numbered` (the CDN's own index),
+`ogAmong`, `og` (the page's own declaration),
 `portrait` (largest image taller than wide — a photocard is 55×85mm), and
-`largest`. Neokyo runs `['ogAmong', 'largest', 'portrait']` because it fronts several
+`largest`. Neokyo runs `['numbered', 'ogAmong', 'largest', 'portrait']` because it fronts several
 Japanese marketplaces and each brings its own image host, so its `photoHost`
 list is the hosts *seen* rather than a rule; `portrait` falls back to every
 image on the page when none of them match.

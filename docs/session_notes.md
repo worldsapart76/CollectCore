@@ -178,10 +178,17 @@ it was the *second* of two. DOM order cannot settle it — a looping carousel
 clones its slides, so the first `<img>` is routinely a copy of the last photo.
 Added `ogAmong` (og:image, but only when it matches an image the page is
 actually showing, by filename) and made **the panel thumbnail clickable** to
-step through every candidate the page offered. Fifth round on photo selection;
-the first four each swapped one heuristic for a better one, and this is the
-first to admit it is not reliably solvable from markup and put a one-click
-override in front of it.
+step through every candidate the page offered. Then the actual answer, which was in the URL
+all along: **Mercari numbers its photos** — `m47235147985_1.jpg` is the primary
+— so `photoPrimary` declares the pattern and `numbered` runs first. It survives
+carousel clones, lazy loading, hidden galleries and DOM order, because it is a
+fact the site publishes rather than an inference about how the page looks.
+
+Five rounds went into inferring what the URL was stating. The module had already
+learned this twice (Neokyo's title from an element the site marks itself,
+Pocamarket's from `<title>`): **look for the fact the site publishes before
+reasoning about how the page renders.** The click-to-cycle override stays — it
+is what makes the next unnumbered marketplace a click rather than a round.
 
 **Next: data collection, not code.** The remaining outstanding item is filling
 in the fee components — until they carry real numbers, "landed" is price plus

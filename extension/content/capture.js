@@ -48,6 +48,11 @@
       soldFrom: (text) =>
         /\bitem sold\b|\bsold\s+\d+\s*(h|m|d|hour|min|day)/i.test(text),
       photoHost: /mercdn\.net\/photos\//,
+      // Mercari numbers a listing's photos in the filename and `_1` is the one
+      // it shows first. Belongs to the CDN rather than to the site, which is
+      // why Neokyo declares the same pattern for the Mercari items it fronts.
+      photoPrimary: /_1\.\w+(\?|$)/,
+      photoOrder: ['numbered', 'largest'],
     },
 
     // Proxy for Mercari JP and Rakuma. Server-rendered, so there is no fiber to
@@ -132,9 +137,13 @@
       // a rule. `portrait` is the safety net: it falls back to every image on
       // the page when nothing on a known host qualifies, and a photocard is
       // portrait where Neokyo's promo banners and logo are not.
-      // ogAmong first: Neokyo's gallery is a plugin-driven carousel, and DOM
-      // order in one of those is not photo order.
-      photoOrder: ['ogAmong', 'largest', 'portrait'],
+      // Same numbering, because these ARE Mercari's images -- Neokyo fronts
+      // the listing and serves the photos straight off static.mercdn.net.
+      photoPrimary: /_1\.\w+(\?|$)/,
+      // `numbered` first: it is the site's own answer, where everything after
+      // it is an inference about how the page looks. Then ogAmong, then the
+      // shape rules, for the marketplaces Neokyo fronts that do not number.
+      photoOrder: ['numbered', 'ogAmong', 'largest', 'portrait'],
     },
 
     // Server-rendered, so no fiber and content/fiber.js is not injected here.
@@ -947,6 +956,23 @@
       largestPhoto((img, w, h) => w === 0 && h === 0),
 
     largest: () => largestPhoto((img) => SITE.photoHost.test(img)),
+
+    // A CDN that NUMBERS its photos has already answered the question.
+    //
+    //   .../photos/m47235147985_1.jpg?1787925462   <- the listing's first photo
+    //   .../photos/m47235147985_2.jpg?1787925462
+    //
+    // Mercari's own convention, stated in the URL, and it survives everything
+    // the markup does to confuse the issue: carousel clones, lazy loading, a
+    // hidden gallery, DOM order. Every strategy below is an inference about how
+    // the page LOOKS; this is a fact the site published.
+    //
+    // `_1.` requires the dot, so a ten-photo listing's `_10.jpg` cannot be
+    // mistaken for the first.
+    numbered: () =>
+      (SITE.photoPrimary
+        ? photoCandidates().find((c) => SITE.photoPrimary.test(c))
+        : null) || null,
 
     // og:image, but ONLY when it is one of the images the page is actually
     // showing. Where a site publishes its primary photo there this settles the

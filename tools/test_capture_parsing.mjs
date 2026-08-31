@@ -624,24 +624,60 @@ eq('and a landscape-only page yields nothing rather than a banner',
      images: [['https://neokyo.com/img/banner.png', 1200, 300]],
    }).detailPhoto(), null);
 eq('that is the declared order', nk.photoOrder.join(),
-   'ogAmong,largest,portrait');
+   'numbered,ogAmong,largest,portrait');
+
+console.log('--- the CDN numbers its photos, so it already said which is first ---');
+// The answer the previous four rounds went looking for in the markup was in the
+// URL the whole time. It survives carousel clones, lazy loading, a hidden
+// gallery and DOM order, because it is a fact the site published rather than an
+// inference about how the page looks.
+const N1 = 'https://static.mercdn.net/item/detail/orig/photos/m472_1.jpg?178';
+const N2 = 'https://static.mercdn.net/item/detail/orig/photos/m472_2.jpg?178';
+const N10 = 'https://static.mercdn.net/item/detail/orig/photos/m472_10.jpg?178';
+eq('a clone of the last photo in front cannot win',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     images: [[N2, 600, 800], [N1, 600, 800], [N2, 600, 800]],
+   }).detailPhoto(), N1);
+eq('nor a bigger later photo',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     images: [[N2, 2000, 3000], [N1, 400, 600]],
+   }).detailPhoto(), N1);
+// The dot is load-bearing: _10 must not read as the first of ten.
+eq('the tenth photo is not the first',
+   loadFor('neokyo.com', '/en/product/mercari/m472', [], {
+     images: [[N10, 600, 800], [N1, 600, 800]],
+   }).detailPhoto(), N1);
+eq('mercari US uses the same numbering',
+   loadFor('www.mercari.com', '/us/item/m123/', [], {
+     images: [['https://static.mercdn.net/photos/m123_3.jpg', 600, 800],
+              ['https://static.mercdn.net/photos/m123_1.jpg', 600, 800]],
+   }).detailPhoto(), 'https://static.mercdn.net/photos/m123_1.jpg');
+// A marketplace Neokyo fronts that does not number falls through to the rules
+// underneath, unchanged.
+eq('an unnumbered CDN still falls through to shape',
+   loadFor('neokyo.com', '/en/product/rakuma/abc', [], {
+     images: [['https://neokyo.com/img/banner.png', 1200, 300],
+              ['https://img.fril.jp/x/photo.jpg', 600, 800]],
+   }).detailPhoto(), 'https://img.fril.jp/x/photo.jpg');
 
 console.log('--- og:image, but only when the page is actually showing it ---');
 // DOM order cannot settle which photo is primary: a looping carousel clones its
 // slides, so the first <img> in the document is routinely a copy of the LAST
 // photo. That is why Neokyo captured photo _2 of a two-image gallery.
-const P1 = 'https://static.mercdn.net/item/detail/orig/photos/m472_1.jpg?178';
-const P2 = 'https://static.mercdn.net/item/detail/orig/photos/m472_2.jpg?178';
+// Deliberately UNNUMBERED, so these exercise ogAmong rather than being settled
+// by the `numbered` strategy ahead of it.
+const P1 = 'https://static.mercdn.net/item/detail/orig/photos/m472_a.jpg?178';
+const P2 = 'https://static.mercdn.net/item/detail/orig/photos/m472_b.jpg?178';
 eq('og names the primary, so the clone in front of it loses',
    loadFor('neokyo.com', '/en/product/mercari/m472', [], {
-     meta: { 'og:image': 'https://static.mercdn.net/item/detail/orig/photos/m472_1.jpg' },
+     meta: { 'og:image': 'https://static.mercdn.net/item/detail/orig/photos/m472_a.jpg' },
      images: [[P2, 600, 800], [P1, 600, 800], [P2, 600, 800]],
    }).detailPhoto(), P1);
 // Matched by FILENAME: the same image is served with different cache-busters
 // and size parameters in the two places, so whole-URL equality finds nothing.
 eq('a different cache-buster still matches',
    loadFor('neokyo.com', '/en/product/mercari/m472', [], {
-     meta: { 'og:image': 'https://static.mercdn.net/x/m472_1.jpg?999&width=200' },
+     meta: { 'og:image': 'https://static.mercdn.net/x/m472_a.jpg?999&width=200' },
      images: [[P2, 600, 800], [P1, 600, 800]],
    }).detailPhoto(), P1);
 // The safety that makes it usable FIRST: a site whose og:image is a logo or a
