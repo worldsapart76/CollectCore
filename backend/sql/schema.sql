@@ -2256,6 +2256,20 @@ CREATE INDEX IF NOT EXISTS idx_mkt_line_listing ON mkt_listing_line(listing_id);
 CREATE INDEX IF NOT EXISTS idx_mkt_line_item    ON mkt_listing_line(item_id);
 CREATE INDEX IF NOT EXISTS idx_mkt_sighting_lst ON mkt_sighting(listing_id, observed_at);
 
+-- Module-level settings that are a JUDGEMENT rather than a fact about a
+-- marketplace: the profit a flip has to clear to be worth doing, and anything
+-- else of that shape later. A key/value table because these are few, unrelated,
+-- and read one at a time -- a column per setting would mean a migration each
+-- time a threshold is added.
+--
+-- Deliberately NOT on lkup_mkt_marketplaces: the target is about you, not about
+-- where the trade happens, and putting it there would invite four copies that
+-- can silently disagree.
+CREATE TABLE IF NOT EXISTS mkt_setting (
+    setting_key TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
+
 -- ── Photocard cost basis (admin-only, market intel) ──────────────────────────
 -- What a card COST, as opposed to tbl_photocard_pricing which is what it is
 -- offered at. Deliberately separate from the price tiers: a price tier is a

@@ -931,8 +931,145 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         "unconverted": unconverted,
         "active": stats(active),
         "sold": stats(sold),
+        # The two questions actually being asked of a card, each with its own
+        # summary. Everything above is the evidence; these are the readings.
+        "keep": _buy_to_keep(db, item_id, buy_options),
+        "resell": _buy_to_resell(db, item_id, mkt),
         "series": [dict(r) for r in series],
         "excluded_lots": [dict(r) for r in lots],
+    }
+
+
+# ─────────────────────── The two buying questions ────────────────────────────
+
+
+def _buy_to_keep(db, item_id: int, buy_options: List[Dict[str, Any]]):
+    """"Should I buy this now, and where?" -- for a card you want to own.
+
+    Every route in one list, singles and lots together, because both are ways of
+    getting the card and separating them into two tables buries whichever one
+    happens to be cheaper today. The card COUNT is a column instead, so the
+    commitment travels with the price.
+    """
+    singles = [o for o in buy_options
+               if o["line_count"] == 1 and o["landed_cents"] is not None]
+    lots = [o for o in buy_options
+            if o["line_count"] > 1 and o["landed_per_card_cents"] is not None]
+    per_card = [o["landed_per_card_cents"] for o in buy_options
+                if o["landed_per_card_cents"] is not None]
+
+    cheapest_single = min(singles, key=lambda o: o["landed_cents"], default=None)
+    cheapest_lot = min(lots, key=lambda o: o["landed_per_card_cents"], default=None)
+
+    wanted_n = _wanted_per_listing(db, [o["listing_id"] for o in buy_options])
+    for o in buy_options:
+        # How much of this listing you actually want. On a single that is 0 or
+        # 1; on an eight-card lot it is the difference between a purchase and a
+        # pile of cards to resell.
+        o["wanted_count"] = wanted_n.get(o["listing_id"], 0)
+
+    return {
+        "cheapest_single": cheapest_single,
+        "cheapest_lot": cheapest_lot,
+        # TWO medians, side by side. The singles median is a median over things
+        # you can buy one of; the all-routes one includes each lot's per-card
+        # allocation, which is real but only reachable by buying the whole box.
+        # Shown together because the gap between them IS how much the lots are
+        # moving this card's market.
+        "median_single_cents": _median([o["landed_cents"] for o in singles]),
+        "n_single": len(singles),
+        "median_all_per_card_cents": _median(per_card),
+        "n_all": len(per_card),
+        # What buyers actually paid, landed, so it compares like with like
+        # against the asks above.
+        "sold": _sold_landed(db, item_id),
+    }
+
+
+def _buy_to_resell(db, item_id: int, sell_marketplace: str):
+    """"Could I buy this abroad and sell it here at a profit?"
+
+    Scoped to Neokyo on the buy side by decision: it is the proxy purchases
+    actually go through, and the comparison is against Mercari US sold comps.
+    Widening it is a one-line change to RESELL_SOURCES if Pocamarket ever
+    becomes a resale source rather than a place to buy keepers.
+    """
+    RESELL_SOURCES = ("neokyo",)
+    target = target_profit(db)
+
+    sold = _net_sold_by_item(db, str(int(item_id)))
+    net = (sold.get(item_id) or {}).get("net_cents")
+    sell_fm = fee_model(db, sell_marketplace, "sell")
+
+    marks = ", ".join(f"'{m}'" for m in RESELL_SOURCES)
+    rows = db.execute(text(
+        "SELECT l.listing_id, l.marketplace, l.title_raw, l.listing_url,"
+        " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+        " s.shipping_usd, s.observed_at,"
+        f" {UNITS_SQL} AS units "
+        "FROM mkt_listing l "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+        f"WHERE ln.item_id = :i AND l.marketplace IN ({marks}) "
+        "  AND s.listing_state = 'active' AND l.delisted_at IS NULL "
+        "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
+        "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
+        "GROUP BY l.listing_id"
+    ), {"i": item_id}).mappings().all()
+
+    # A lot's cost is split by VALUE, not evenly -- the same allocation the lot
+    # screen shows, computed the same way, because a resell figure that
+    # disagreed with the lot screen's would be two answers to one question.
+    ladder = _value_ladder(db) if any(r["units"] > 1 for r in rows) else None
+    wanted = _wanted_items(db) if ladder else set()
+    fees: Dict[str, Any] = {}
+    out = []
+    for r in rows:
+        code = r["marketplace"]
+        if code not in fees:
+            fees[code] = fee_model(db, code, "buy")
+        landed = landed_cost(r["price_usd"], fees[code], r["shipping_usd"])
+        if landed is None:
+            continue
+
+        if r["units"] > 1 and ladder:
+            lot = _analyze_lot(db, _lot_listings(db, r["listing_id"])[0],
+                               ladder, wanted, fees)
+            line = next((ln for ln in lot["lines"] if ln["item_id"] == item_id), None)
+            buy_cost = (int(round(line["alloc_cents"] / line["qty"]))
+                        if line and line["alloc_cents"] is not None else None)
+        else:
+            buy_cost = landed
+
+        profit = (net - buy_cost) if (net is not None and buy_cost is not None) else None
+        out.append({
+            **dict(r),
+            "is_lot": r["units"] > 1,
+            # For a lot this is this card's SHARE, not the price of the box.
+            "buy_cost_cents": buy_cost,
+            "landed_cents": landed,
+            "sell_net_cents": net,
+            "profit_cents": profit,
+            "meets_target": profit is not None and profit >= target,
+            # With no sold comps there is no estimate to compare against, so
+            # the question inverts: what would it have to fetch to be worth
+            # doing at all. Shown in place of the estimate, and marked, because
+            # it is a requirement rather than a measurement.
+            "required_list_cents": (
+                list_price_for(buy_cost + target, sell_fm)
+                if net is None and buy_cost is not None else None
+            ),
+        })
+
+    out.sort(key=lambda o: (o["profit_cents"] is None,
+                            -(o["profit_cents"] or 0)))
+    return {
+        "sources": list(RESELL_SOURCES),
+        "sell_marketplace": sell_marketplace,
+        "sell_net_cents": net,
+        "n_sold": (sold.get(item_id) or {}).get("n", 0),
+        "target_profit_cents": target,
+        "rows": out,
     }
 
 
@@ -1762,6 +1899,86 @@ def _buy_options(db, ids: str):
     return best_single, best_lot
 
 
+def _wanted_items(db) -> set:
+    """Cards carrying the standing `wanted` decision.
+
+    A decision about the card, not a possession fact about a copy -- see
+    CLAUDE.md on the two orthogonal things ownership_status_id holds.
+    """
+    return {r[0] for r in db.execute(text(
+        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        "WHERE s.status_code = 'wanted'"))}
+
+
+def _wanted_per_listing(db, listing_ids: List[int]) -> Dict[int, int]:
+    """How many of a listing's cards are on the wanted list.
+
+    Counted in UNITS, so a lot holding two copies of one wanted card reports 2 --
+    the question being answered is "how much of this box do I actually want",
+    and two copies of a wanted card is twice as much of it as one.
+    """
+    if not listing_ids:
+        return {}
+    ids = ",".join(str(int(i)) for i in listing_ids)
+    out: Dict[int, int] = {}
+    for listing_id, n in db.execute(text(
+        "SELECT ln.listing_id, COALESCE(SUM(ln.qty), 0) "
+        "FROM mkt_listing_line ln "
+        "JOIN tbl_photocard_copies c ON c.item_id = ln.item_id "
+        "JOIN lkup_ownership_statuses st"
+        "  ON st.ownership_status_id = c.ownership_status_id "
+        f"WHERE ln.listing_id IN ({ids}) AND st.status_code = 'wanted' "
+        "GROUP BY ln.listing_id"
+    )):
+        out[listing_id] = n
+    return out
+
+
+def _sold_landed(db, item_id: int) -> Dict[str, Any]:
+    """What buyers actually paid for this card, ALL IN.
+
+    The asks it sits beside are landed -- item plus that marketplace's own
+    buying costs plus postage -- so a bare sold price would always look cheaper
+    than them and make every ask look worse than it is. Same treatment on both
+    sides or the comparison means nothing.
+
+    Sole-unit sold sightings only, and `is_lot = 0`: a bundle's price is not
+    this card's price however few of its lines were typed in.
+    """
+    rows = db.execute(text(
+        "SELECT l.marketplace, s.price_usd, s.shipping_usd "
+        "FROM mkt_sighting s "
+        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "WHERE ln.item_id = :i AND s.listing_state = 'sold' "
+        "  AND s.price_usd IS NOT NULL AND l.is_lot = 0 "
+        f"  AND {UNITS_SQL} = 1"
+    ), {"i": item_id}).mappings().all()
+
+    fees: Dict[str, Any] = {}
+    landed, known_shipping = [], 0
+    for r in rows:
+        code = r["marketplace"]
+        if code not in fees:
+            fees[code] = fee_model(db, code, "buy")
+        v = landed_cost(r["price_usd"], fees[code], r["shipping_usd"])
+        if v is None:
+            continue
+        landed.append(v)
+        if r["shipping_usd"] is not None:
+            known_shipping += 1
+    return {
+        "median_cents": _median(landed),
+        "n": len(landed),
+        # How many of them carried a real postage figure rather than the
+        # marketplace-wide estimate. A median built mostly on estimates is a
+        # weaker claim and the view says so.
+        "n_shipping_known": known_shipping,
+    }
+
+
 @router.get("/grid")
 def market_grid(db=Depends(get_db)):
     """Every card worth looking at, with its three values side by side.
@@ -1777,11 +1994,7 @@ def market_grid(db=Depends(get_db)):
     with_data = {r[0] for r in db.execute(text(
         "SELECT DISTINCT item_id FROM mkt_listing_line "
         "WHERE item_id IS NOT NULL"))}
-    wanted = {r[0] for r in db.execute(text(
-        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
-        "JOIN lkup_ownership_statuses s"
-        "  ON s.ownership_status_id = c.ownership_status_id "
-        "WHERE s.status_code = 'wanted'"))}
+    wanted = _wanted_items(db)
     item_ids = sorted(with_data | wanted)
     if not item_ids:
         return {"cards": [], "generated_at": datetime.utcnow().isoformat()}
@@ -2012,6 +2225,60 @@ def delete_listing(listing_id: int, db=Depends(get_db)):
         "sightings_deleted": sightings,
         "lines_deleted": lines,
     }
+
+
+# ───────────────────────── Settings ──────────────────────────────────────────
+
+# What a flip has to clear to be worth doing. A judgement, not a fact about a
+# marketplace, which is why it lives here rather than on a marketplace row.
+#
+# Used in two places that MUST agree: the resell view's "what would I have to
+# list this at", and the lot screen's verdict on whether an unwanted card earns
+# its place in the box. Two thresholds that could drift apart would make one
+# screen recommend what the other rejects.
+DEFAULT_TARGET_PROFIT_CENTS = 500
+
+
+def get_setting_int(db, key: str, default: int) -> int:
+    row = db.execute(text("SELECT value FROM mkt_setting WHERE setting_key = :k"),
+                     {"k": key}).fetchone()
+    if row is None:
+        return default
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return default
+
+
+def target_profit(db) -> int:
+    return get_setting_int(db, "target_profit_cents", DEFAULT_TARGET_PROFIT_CENTS)
+
+
+class SettingsIn(BaseModel):
+    target_profit_cents: Optional[int] = None
+
+
+@router.get("/settings")
+def read_settings(db=Depends(get_db)):
+    return {
+        "target_profit_cents": target_profit(db),
+        "default_target_profit_cents": DEFAULT_TARGET_PROFIT_CENTS,
+    }
+
+
+@router.put("/settings")
+def write_settings(body: SettingsIn, db=Depends(get_db)):
+    if body.target_profit_cents is not None:
+        if body.target_profit_cents < 0:
+            raise HTTPException(status_code=400,
+                                detail="A target profit cannot be negative.")
+        db.execute(text(
+            "INSERT INTO mkt_setting (setting_key, value) VALUES"
+            " ('target_profit_cents', :v) "
+            "ON CONFLICT(setting_key) DO UPDATE SET value = excluded.value"),
+            {"v": str(int(body.target_profit_cents))})
+        db.commit()
+    return read_settings(db)
 
 
 # ───────────────────────── The lot analyzer ──────────────────────────────────
@@ -2317,11 +2584,7 @@ def list_lots(db=Depends(get_db)):
         return {"lots": [], "generated_at": datetime.utcnow().isoformat()}
 
     ladder = _value_ladder(db)
-    wanted = {r[0] for r in db.execute(text(
-        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
-        "JOIN lkup_ownership_statuses s"
-        "  ON s.ownership_status_id = c.ownership_status_id "
-        "WHERE s.status_code = 'wanted'"))}
+    wanted = _wanted_items(db)
 
     # Labels and single-card routes for every card in every lot, fetched once.
     all_ids = [r[0] for r in db.execute(text(
@@ -2356,18 +2619,110 @@ def get_lot(listing_id: int, db=Depends(get_db)):
                     "That listing holds a single card. Add an unidentified or "
                     "non-card line to analyze it as a lot."))
     ladder = _value_ladder(db)
-    wanted = {r[0] for r in db.execute(text(
-        "SELECT DISTINCT c.item_id FROM tbl_photocard_copies c "
-        "JOIN lkup_ownership_statuses s"
-        "  ON s.ownership_status_id = c.ownership_status_id "
-        "WHERE s.status_code = 'wanted'"))}
+    wanted = _wanted_items(db)
     lot = _analyze_lot(db, rows[0], ladder, wanted, {})
     return {
         "lot": lot,
+        "useful": _lot_usefulness(db, lot, wanted, target_profit(db)),
         # Said out loud so a card priced off rung 2 is visibly an estimate.
         "ladder": {"era_median": ladder["era_median"], "era_n": ladder["era_n"],
                    "pooled_median": ladder["pooled_median"]},
         "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _lot_usefulness(db, lot, wanted: set, target: int) -> Dict[str, Any]:
+    """Is this box worth buying -- card by card, then as one number.
+
+    A card earns its place two ways, and EITHER is enough:
+
+      * you want it, and its share of the lot costs no more than the cheapest
+        single-card listing of it anywhere;
+      * or it can be resold for at least the target profit.
+
+    Both at once is common and is not a third case. The two are kept separate in
+    the response because "I wanted it and it was cheap" and "I did not want it
+    but it pays" are different reasons to say yes, and a lot that is all of the
+    second is a job rather than a purchase.
+
+    Non-card lines are listed and NOT judged: an album has no wanted status and
+    no comp series, and folding it into the percentage would move a number that
+    is supposed to be about cards.
+    """
+    card_ids = [ln["item_id"] for ln in lot["lines"] if ln["item_id"]]
+    singles = (_buy_options(db, ",".join(str(int(i)) for i in card_ids))[0]
+               if card_ids else {})
+
+    lines, judged, useful_units, estimated_units = [], 0, 0, 0
+    for ln in lot["lines"]:
+        if ln["line_type"] == "non_card":
+            lines.append({**ln, "judged": False, "useful": None,
+                          "reason": "not a card"})
+            continue
+
+        alloc = ln["alloc_cents"]
+        per_unit = (int(round(alloc / ln["qty"]))
+                    if alloc is not None and ln["qty"] else None)
+        route = singles.get(ln["item_id"]) if ln["item_id"] else None
+        best_single = route["per_card_cents"] if route else None
+        # The ladder's value IS a net sale value -- rung 1 is the card's own net
+        # sold median -- so the profit on flipping it is that less what this lot
+        # charges for it. No second estimate, and no chance of the two drifting.
+        profit = (ln["value_cents"] - per_unit
+                  if ln["value_cents"] is not None and per_unit is not None
+                  else None)
+
+        want_ok = bool(ln["wanted"] and per_unit is not None
+                       and best_single is not None and per_unit <= best_single)
+        flip_ok = profit is not None and profit >= target
+        # A wanted card with no single-card listing to compare against cannot
+        # pass the first test -- there is nothing to be cheaper than. It can
+        # still pass the second, and the reason says which happened.
+        reasons = []
+        if want_ok:
+            reasons.append("wanted, and cheaper than buying it alone")
+        elif ln["wanted"] and best_single is None:
+            reasons.append("wanted, but nothing to price it against")
+        elif ln["wanted"]:
+            reasons.append("wanted, but cheaper to buy alone")
+        if flip_ok:
+            reasons.append("resells above target")
+        elif profit is not None:
+            reasons.append("resale below target")
+        elif not ln["wanted"]:
+            reasons.append("no value to judge it by")
+
+        ok = want_ok or flip_ok
+        judged += ln["qty"]
+        if ok:
+            useful_units += ln["qty"]
+        if ln["value_source"] == "era":
+            estimated_units += ln["qty"]
+
+        lines.append({
+            **ln,
+            "judged": True,
+            "useful": ok,
+            "alloc_per_unit_cents": per_unit,
+            "best_single_cents": best_single,
+            "profit_cents": profit,
+            "wanted_ok": want_ok,
+            "flip_ok": flip_ok,
+            "reason": " · ".join(reasons) or "nothing to judge it by",
+        })
+
+    return {
+        "target_profit_cents": target,
+        "card_units": judged,
+        "useful_units": useful_units,
+        # None rather than 0% for a lot with nothing judgeable in it: no cards
+        # is not the same answer as no good cards.
+        "pct_useful": round(100 * useful_units / judged) if judged else None,
+        # How much of the verdict rests on a card's ERA median rather than its
+        # own comps. A 70% built mostly on estimates is a different claim from
+        # one built on real sold prices, and the number alone cannot say so.
+        "estimated_units": estimated_units,
+        "lines": lines,
     }
 
 
