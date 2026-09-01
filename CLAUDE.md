@@ -54,10 +54,14 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
   paths: `catalog.py` (`SELECT *`) and `seed_builder.py` (PRAGMA-driven copy)
   reflect that table, so a new column ships to the catalog delta and the guest
   seed with nothing in the diff to warn you. Admin-only facts belong in a side
-  table — that's why pricing is `tbl_photocard_pricing`.
-- Photocard price **tier and custom price are mutually exclusive**, enforced by
-  a CHECK; the effective price is derived on read and **never denormalized**, so
-  editing a tier reprices its cards. See the pricing plan doc.
+  table — that's why cost basis is `mkt_item_cost`.
+- Photocard **sell price tiers were removed 2026-08-31** — never used in
+  practice, superseded by observed comps. The trade CSV's price column is now
+  `list_price`, derived from sold data. `mkt_cost_tier` / `mkt_item_cost` are a
+  DIFFERENT thing (acquisition **cost**, not ask price) and are live; they share
+  the tier-XOR-custom shape and the `t1..t4` codes, which is what made the two
+  look related. Old databases keep the orphaned tables until
+  `backend/drop_photocard_pricing.py` is run by hand.
 - Intentional simplifications (no virtualization, inline styles, photocard-only
   export) are deliberate — **don't "fix" them unprompted**
 - **Binder Designer** SPA route is `/binder-designer`, never `/binders` — that
@@ -99,7 +103,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/photocard_triage_statuses_plan.md` | **Authoritative** — Undecided/Not Wanted triage statuses: decision-vs-possession split, co-occurrence rules, sweep semantics |
 | `docs/photocard_binder_designer_plan.md` | **Authoritative** — Binder Designer: layouts, spread/mirroring, one-binder-per-card rule, fit-to-space sizing, Wanted sweep |
 | `docs/photocard_market_library_integration_plan.md` | **Authoritative** — money vocabulary (cost / list price / sell price / net proceeds), library↔market integration, price-tier removal, open defects |
-| `docs/photocard_pricing_and_trade_export_plan.md` | **Superseded** by the integration plan above — price tiers are being removed (never used in practice). Still the reference for trade CSV export + Mercari title rules |
+| `docs/photocard_pricing_and_trade_export_plan.md` | **Superseded** — price tiers removed 2026-08-31. Still the reference for trade CSV export + Mercari title rules |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |

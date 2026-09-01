@@ -1,6 +1,8 @@
 # Photocard Market ↔ Library Integration — Design & Implementation Plan
 
-**Status:** designed 2026-08-31, **not built**.
+**Status:** **BUILT 2026-08-31** — phases 0-4 complete. One item stays open and
+deliberately deferred: the value ladder's era rung (defect 1), plus the
+`_sold_landed` question (defect 3) that surfaced during phase 0.
 **Scope:** photocards, admin only. No `/pcs/` behavior change, no catalog or
 guest-seed change, no new ownership statuses.
 
@@ -128,9 +130,24 @@ Verified before proposing removal:
 | `migrate_photocard_pricing.py` | `backend/` |
 | `photocard_pricing_and_trade_export_plan.md` → marked superseded | `docs/` |
 
-Table drops are the **one non-additive step in this plan**. They go in a
-dedicated migration that drops nothing else, so the blast radius is one file and
-the rollback is a re-seed of two empty tables.
+**The tables are NOT dropped automatically.** This was planned as a migration
+and changed during the build, because a `DROP TABLE` on boot is precisely the
+restart-alters-data behaviour this project forbids — it would fire on every
+environment the moment a deploy landed, including ones this repo cannot inspect.
+"It was empty in dev" is not evidence about prod.
+
+So the code removal simply **orphans** them: nothing reads or writes them any
+more, and `backend/drop_photocard_pricing.py` disposes of them as a deliberate
+manual act against a database you can see. It is dry-run by default and refuses
+to proceed if `tbl_photocard_pricing` holds rows unless forced — that guard
+ignores `lkup_photocard_price_tiers`, which carries four seeded rows in every
+database ever created, because a guard that trips every time just teaches you to
+force past it.
+
+Both delete paths in `photocards.py` had to drop their
+`DELETE FROM tbl_photocard_pricing` regardless: `schema.sql` no longer defines
+the table, so on any newly created database those statements would have raised
+*no such table* on every card deletion.
 
 ### What replaces it
 
@@ -442,7 +459,7 @@ sell price, and only for Pocamarket official rows.
 | 1 | ✅ **BUILT 2026-08-31** — vocabulary rename across `market.py`, `MarketIntelPage.jsx` and four test suites; sell price gains its own column beside net | frontend rebuild |
 | 2 | ✅ **BUILT 2026-08-31** — `GET /market/summary` + `getMarketSummary()` | — |
 | 3 | ✅ **BUILT 2026-08-31** — `$` badge (replacing `B`), Market filter section, caption value line, modal value block, deep link | rebuild of all three bundles |
-| 4 | Remove the price tier system; CSV `price` → `list_price` | the one table-drop migration |
+| 4 | ✅ **BUILT 2026-08-31** — price tier system removed; CSV `price` → comp-derived `list_price` | **no** drop migration — see below |
 | — | **Deferred:** era ladder rung (defect 1) | own pass, measured before/after |
 
 Phase 0 goes first because every further capture adds contaminated sell comps,

@@ -10,6 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from dependencies import get_db
+# The sell-side arithmetic lives in the market module and is reused rather than
+# restated -- a second implementation of "what should I list this at" would
+# drift from the one the market workspace shows.
+from routers.market import _net_sold_by_item, fee_model, list_price_for
 
 router = APIRouter(tags=["export"])
 
@@ -73,7 +77,9 @@ def put_setting(key: str, body: SettingUpdate, db=Depends(get_db)):
 # "search `for sale` -> export what I see". Same shape as the trade-page flow
 # (TradeCreateModal -> POST /trade with item_ids): the backend only formats.
 #
-# Design: docs/photocard_pricing_and_trade_export_plan.md
+# Title/description templates: docs/photocard_pricing_and_trade_export_plan.md
+# (still the reference for those; its price-tier half is retired --
+#  see docs/photocard_market_library_integration_plan.md)
 
 
 class TradeExportPayload(BaseModel):
@@ -116,6 +122,40 @@ def _format_price(price_cents) -> str:
     if price_cents is None:
         return ""
     return f"{price_cents // 100}.{price_cents % 100:02d}"
+
+
+def _list_prices(db, item_ids) -> dict:
+    """What to actually type into Mercari, per card, derived from its comps.
+
+    The vocabulary, in the order this walks it backwards:
+
+        list price  −offer discount→  sell price  −fees→  net proceeds
+
+    A sold comp observes the SELL PRICE. `list_price_for` grosses the net back
+    up through the fees and then pads for `offer_discount_pct`, so an accepted
+    offer still lands on what the market actually paid. Listing at the bare
+    observed price would clear less than that on every negotiated sale.
+
+    Cards with no sold comps are simply absent, and export blank — which is the
+    same "still needs pricing" worklist the price column has always been, now
+    meaning "no comp yet" instead of "no tier assigned".
+    """
+    if not item_ids:
+        return {}
+    ids = ",".join(str(int(i)) for i in item_ids)
+    fees = {}
+    out = {}
+    for item_id, row in _net_sold_by_item(db, ids).items():
+        net = row["net_proceeds_cents"]
+        if net is None:
+            continue
+        mkt = row["marketplace"]
+        if mkt not in fees:
+            fees[mkt] = fee_model(db, mkt, "sell")
+        listed = list_price_for(net, fees[mkt])
+        if listed is not None:
+            out[item_id] = listed
+    return out
 
 
 @router.post("/export/photocard-trades.csv")
@@ -175,8 +215,7 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
                 p.version,
                 p.is_special,
                 i.notes,
-                COUNT(pc.copy_id) AS trade_copies,
-                COALESCE(pr.price_cents, pt.price_cents) AS price_cents
+                COUNT(pc.copy_id) AS trade_copies
             FROM tbl_items i
             JOIN tbl_photocard_details p
                 ON p.item_id = i.item_id
@@ -187,15 +226,10 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
                AND pc.ownership_status_id = :trade_id
             LEFT JOIN lkup_photocard_source_origins so
                 ON so.source_origin_id = p.source_origin_id
-            LEFT JOIN tbl_photocard_pricing pr
-                ON pr.item_id = i.item_id
-            LEFT JOIN lkup_photocard_price_tiers pt
-                ON pt.tier_id = pr.price_tier_id
             WHERE i.item_id IN ({item_ph})
               AND i.collection_type_id = :ct_id
             GROUP BY i.item_id, g.group_name, so.source_origin_name,
-                     p.version, p.is_special, i.notes,
-                     pr.price_cents, pt.price_cents
+                     p.version, p.is_special, i.notes
         """),
         {"trade_id": trade_status_id, "ct_id": PHOTOCARDS_TYPE_ID},
     ).fetchall()
@@ -216,13 +250,14 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
         copy_notes.setdefault(item_id, []).append(note.strip())
 
     by_id = {r[0]: r for r in rows}
+    list_prices = _list_prices(db, payload.item_ids)
 
     buf = io.StringIO(newline="")
     # csv.writer, not manual joining — titles are full of commas, colons and
     # parens ("Cle: Levanter", "Photocard (Jewel Case Version)").
     writer = csv.writer(buf)
     writer.writerow([
-        "item_id", "title", "price", "group", "member", "source_origin",
+        "item_id", "title", "list_price", "group", "member", "source_origin",
         "version", "special", "copies", "notes", "description",
     ])
 
@@ -234,7 +269,7 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
         if row is None:
             continue  # not a photocard, or has no trade copy
         (_, group_name, members, source_origin, version,
-         is_special, card_notes, trade_copies, price_cents) = row
+         is_special, card_notes, trade_copies) = row
 
         title = _build_title(
             templates, group_name, members, source_origin or "", version or ""
@@ -248,9 +283,10 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
         writer.writerow([
             item_id,
             title,
-            # Unpriced cards export BLANK rather than being excluded, so the
-            # CSV doubles as a "what still needs pricing" worklist.
-            _format_price(price_cents),
+            # Cards with no sold comps export BLANK rather than being
+            # excluded, so the CSV keeps doubling as a "what still needs
+            # pricing" worklist.
+            _format_price(list_prices.get(item_id)),
             group_name,
             members,
             source_origin or "",

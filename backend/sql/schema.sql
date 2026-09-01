@@ -265,50 +265,21 @@ CREATE TABLE IF NOT EXISTS tbl_photocard_copies (
 
 
 -- ------------------------------------------------------------
--- Photocard pricing  (admin-only; design: docs/photocard_pricing_and_trade_export_plan.md)
+-- Photocard sell price tiers — REMOVED 2026-08-31
 -- ------------------------------------------------------------
--- Deliberately a SIDE TABLE rather than columns on tbl_photocard_details:
--- two guest-facing paths copy that table by reflection, not by an explicit
--- column list (catalog.py's `SELECT *` and seed_builder's PRAGMA-driven copy),
--- so anything added there ships to the catalog delta endpoint and the guest
--- seed automatically. A separate table is invisible to both by construction.
+-- Never used in practice (no card ever carried a tier or a custom price), and
+-- superseded by observed comps: the trade CSV's price column is now derived
+-- from sold data. See docs/photocard_market_library_integration_plan.md.
 --
--- NOTE the FOREIGN KEY clauses below are documentation only — `PRAGMA
--- foreign_keys = ON` is issued on init_db's connection alone (db.py), so
--- nothing cascades; every delete path cleans up explicitly.
-
-CREATE TABLE IF NOT EXISTS lkup_photocard_price_tiers (
-    tier_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    tier_code   TEXT NOT NULL UNIQUE,
-    tier_name   TEXT NOT NULL,
-    price_cents INTEGER NOT NULL,           -- money is INTEGER cents throughout
-    sort_order  INTEGER NOT NULL DEFAULT 0,
-    is_active   INTEGER NOT NULL DEFAULT 1
-);
-
--- Tier and custom price are mutually exclusive, not layered: editing a card's
--- price REMOVES it from its tier so a later tier sweep can't silently reset it.
--- The CHECK is what enforces the three legal states (no row = unpriced,
--- tier set = tiered, price_cents set = custom).
-CREATE TABLE IF NOT EXISTS tbl_photocard_pricing (
-    item_id       INTEGER PRIMARY KEY,
-    price_tier_id INTEGER,
-    price_cents   INTEGER,
-    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CHECK ((price_tier_id IS NULL) <> (price_cents IS NULL)),
-    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id),
-    FOREIGN KEY (price_tier_id) REFERENCES lkup_photocard_price_tiers(tier_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_photocard_pricing_tier
-    ON tbl_photocard_pricing (price_tier_id);
-
-INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t1', 'Tier 1',  400, 1);
-INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t2', 'Tier 2',  600, 2);
-INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t3', 'Tier 3',  900, 3);
-INSERT OR IGNORE INTO lkup_photocard_price_tiers (tier_code, tier_name, price_cents, sort_order) VALUES ('t4', 'Tier 4', 1200, 4);
-
+-- Existing databases keep the two now-orphaned tables until
+-- `backend/drop_photocard_pricing.py` is run BY HAND. Migrations in db.py stay
+-- additive; an automatic DROP on boot is exactly the restart-alters-data
+-- behaviour this project forbids, and it would destroy rows this file cannot
+-- prove are empty in every environment.
+--
+-- mkt_cost_tier / mkt_item_cost are a DIFFERENT thing — acquisition COST, not
+-- ask price — and are very much alive. They share the tier-XOR-custom shape and
+-- the t1..t4 code vocabulary, which is what made these two look related.
 
 -- ============================================================
 -- BOOKS LOOKUP TABLES
@@ -2275,10 +2246,13 @@ CREATE TABLE IF NOT EXISTS mkt_setting (
 );
 
 -- ── Photocard cost basis (admin-only, market intel) ──────────────────────────
--- What a card COST, as opposed to tbl_photocard_pricing which is what it is
--- offered at. Deliberately separate from the price tiers: a price tier is a
--- selling opinion that gets revised, and letting cost ride on it would silently
--- rewrite cost history. The two share a ranking shape and nothing else.
+-- What a card COST, as opposed to what it is offered at. It outlived the sell
+-- price tiers (removed 2026-08-31) because it answers a question comps cannot:
+-- comps say what a card fetches, never what YOU paid for the one in your hand.
+--
+-- The resemblance is why the two got confused: same tier-XOR-custom shape, same
+-- t1..t4 codes, entirely different rung of the money vocabulary. Cost is a fact
+-- about a purchase; a price tier was a selling opinion.
 --
 -- mkt_* prefix, not tbl_photocard_*, so these never drift into the catalog or
 -- guest paths -- cost is an admin fact and must not ship to /pcs/.
@@ -2291,9 +2265,9 @@ CREATE TABLE IF NOT EXISTS mkt_cost_tier (
     is_active    INTEGER NOT NULL DEFAULT 1
 );
 
--- Per-card basis. Tier XOR explicit amount, the same CHECK pattern used by
--- tbl_photocard_pricing -- the effective figure is derived on read and never
--- denormalized, so editing a tier reprices every card sitting on it.
+-- Per-card basis. Tier XOR explicit amount, enforced by CHECK -- the effective
+-- figure is derived on read and never denormalized, so editing a tier reprices
+-- every card sitting on it.
 -- A row here is an ESTIMATE for the backlog; a real logged purchase outranks it
 -- and is resolved at read time, never written back over this.
 CREATE TABLE IF NOT EXISTS mkt_item_cost (

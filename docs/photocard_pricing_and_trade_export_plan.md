@@ -1,6 +1,12 @@
 # Photocard Pricing Tiers & Trade CSV Export — Design & Implementation Plan
 
-**Status:** **built** 2026-08-17 — all six phases. Verification 1–15 below pass
+**Status:** **price tiers REMOVED 2026-08-31.** The trade CSV and its title
+rules are still built and still live; everything below about *price tiers* is
+history. See `photocard_market_library_integration_plan.md` for why they went
+(never used in practice, superseded by observed comps) and for what replaced the
+CSV's price column: a `list_price` derived from sold data.
+
+Originally **built** 2026-08-17 — all six phases. Verification 1–15 below passed
 against the dev DB; see the session notes entry for the run.
 **Scope:** photocards only (admin tier). No `/pcs/` behavior changes, no new
 ownership statuses.

@@ -4,8 +4,6 @@ import {
   fetchPhotocardMembers,
   fetchPhotocardSourceOrigins,
   fetchOwnershipStatuses,
-  fetchPriceTiers,
-  updatePhotocardPrice,
   createPhotocardSourceOrigin,
   updatePhotocard,
   deletePhotocard,
@@ -101,24 +99,6 @@ export default function PhotocardDetailModal({
   // the parent to reload until the user leaves the card so a change that
   // moves the card out of the active filter doesn't yank it from view.
   const [copiesChanged, setCopiesChanged] = useState(false);
-  // Same deferred-notify treatment for price: persisted immediately, but the
-  // parent isn't told until the user leaves the card.
-  const [priceChanged, setPriceChanged] = useState(false);
-
-  // Pricing — the tier list is only needed to name the card's tier ("Tier 3 ·
-  // $9.00"); tier ASSIGNMENT is a bulk operation, not a per-card one.
-  const [priceTiers, setPriceTiers] = useState([]);
-  const [price, setPrice] = useState({
-    tierId: currentCard.price_tier_id ?? null,
-    cents: currentCard.price_cents ?? null,
-    source: currentCard.price_source ?? null,
-  });
-  const [priceDraft, setPriceDraft] = useState(
-    currentCard.price_cents == null ? "" : (currentCard.price_cents / 100).toFixed(2)
-  );
-  const [priceSaving, setPriceSaving] = useState(false);
-  const [priceError, setPriceError] = useState("");
-
   // Image state
   const [frontImagePath, setFrontImagePath] = useState(currentCard.front_image_path || null);
   const [backImagePath, setBackImagePath] = useState(currentCard.back_image_path || null);
@@ -128,12 +108,11 @@ export default function PhotocardDetailModal({
   const frontFileRef = useRef(null);
   const backFileRef = useRef(null);
 
-  // Load ownership statuses + price tiers once on mount
+  // Load ownership statuses once on mount
   useEffect(() => {
     fetchOwnershipStatuses(COLLECTION_TYPE_IDS.photocards)
       .then(setOwnershipStatuses)
       .catch(() => {});
-    fetchPriceTiers().then(setPriceTiers).catch(() => {});
   }, []);
 
   // Reset form and reload per-card data whenever the current card changes
@@ -147,17 +126,6 @@ export default function PhotocardDetailModal({
     setBackImagePath(currentCard.back_image_path || null);
     setIsDirty(false);
     setCopiesChanged(false);
-    setPriceChanged(false);
-    setPrice({
-      tierId: currentCard.price_tier_id ?? null,
-      cents: currentCard.price_cents ?? null,
-      source: currentCard.price_source ?? null,
-    });
-    setPriceDraft(
-      currentCard.price_cents == null ? "" : (currentCard.price_cents / 100).toFixed(2)
-    );
-    setPriceSaving(false);
-    setPriceError("");
     setError("");
     setImageError("");
     setConfirmDelete(false);
@@ -237,54 +205,6 @@ export default function PhotocardDetailModal({
     }
   }
 
-  // Committing a price makes the card CUSTOM, dropping it out of its tier —
-  // so a later sweep over that tier can't silently reset it. An empty field
-  // unprices the card entirely.
-  async function commitPrice() {
-    const raw = priceDraft.trim().replace(/^\$/, "");
-    const currentText = price.cents == null ? "" : (price.cents / 100).toFixed(2);
-    if (raw === currentText) return;
-
-    let cents = null;
-    if (raw !== "") {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        setPriceError("Enter a dollar amount, or leave blank to unprice.");
-        return;
-      }
-      cents = Math.round(parsed * 100);
-    }
-
-    setPriceError("");
-    setPriceSaving(true);
-    try {
-      const result = await updatePhotocardPrice(currentCard.item_id, cents);
-      setPrice({
-        tierId: result.price_tier_id ?? null,
-        cents: result.price_cents ?? null,
-        source: result.price_source ?? null,
-      });
-      setPriceDraft(cents == null ? "" : (cents / 100).toFixed(2));
-      setPriceChanged(true);
-    } catch (err) {
-      setPriceError(err.message || "Failed to save price");
-      setPriceDraft(currentText);
-    } finally {
-      setPriceSaving(false);
-    }
-  }
-
-  function priceLabel() {
-    if (price.cents == null) return "—";
-    const amount = `$${(price.cents / 100).toFixed(2)}`;
-    if (price.source === "tier") {
-      const tierName =
-        priceTiers.find((t) => t.tier_id === price.tierId)?.tier_name || "Tier";
-      return `${tierName} · ${amount}`;
-    }
-    return `${amount} custom`;
-  }
-
   async function handleReplaceImage(side, file) {
     setImageError("");
     if (side === "front") {
@@ -344,7 +264,7 @@ export default function PhotocardDetailModal({
     if (isDirty) {
       const ok = await doSave();
       if (!ok) return; // save failed — keep modal open with error shown
-    } else if (copiesChanged || priceChanged) {
+    } else if (copiesChanged) {
       onSaved();
     }
     onClose();
@@ -355,7 +275,7 @@ export default function PhotocardDetailModal({
     if (isDirty) {
       const ok = await doSave();
       if (!ok) return;
-    } else if (copiesChanged || priceChanged) {
+    } else if (copiesChanged) {
       onSaved();
     }
     onClose();
@@ -365,7 +285,7 @@ export default function PhotocardDetailModal({
   // already persisted as the user made them, so we still notify the parent
   // to reload — otherwise the library view would show stale ownership.
   function handleCancel() {
-    if (copiesChanged || priceChanged) onSaved();
+    if (copiesChanged) onSaved();
     onClose();
   }
 
@@ -376,7 +296,7 @@ export default function PhotocardDetailModal({
     if (isDirty) {
       const ok = await doSave();
       if (!ok) return; // save failed — stay on current card
-    } else if (copiesChanged || priceChanged) {
+    } else if (copiesChanged) {
       onSaved();
     }
     setCurrentIndex(target);
@@ -573,28 +493,6 @@ export default function PhotocardDetailModal({
                 placeholder="e.g. Soundwave POB"
                 style={styles.input}
               />
-            </FormRow>
-
-            {/* Price — typing an amount makes it custom and drops the tier.
-                Tier assignment itself is a bulk operation (Bulk Edit). */}
-            <FormRow label="Price">
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ color: "var(--text-muted)", fontSize: "var(--text-base)" }}>$</span>
-                <input
-                  value={priceDraft}
-                  onChange={(e) => setPriceDraft(e.target.value)}
-                  onBlur={commitPrice}
-                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                  placeholder="—"
-                  inputMode="decimal"
-                  disabled={priceSaving}
-                  style={{ ...styles.input, width: 90 }}
-                />
-                <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-                  {priceSaving ? "Saving…" : priceLabel()}
-                </span>
-              </div>
-              {priceError && <div style={styles.fieldError}>{priceError}</div>}
             </FormRow>
 
             {/* Market — what the comps actually say, beside the price you would

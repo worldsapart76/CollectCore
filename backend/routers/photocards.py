@@ -9,10 +9,7 @@ from schemas.photocards import (
     PhotocardCopyCreate,
     PhotocardCopyUpdate,
     PhotocardCreate,
-    PhotocardPriceUpdate,
     PhotocardUpdate,
-    PriceTierCreate,
-    PriceTierUpdate,
     SourceOriginCreate,
 )
 
@@ -36,13 +33,6 @@ def _photocard_row_to_dict(row):
         "front_image_path": row[10],
         "back_image_path": row[11],
         "is_special": bool(row[12]),
-        # Pricing (admin-only; see docs/photocard_pricing_and_trade_export_plan.md).
-        # price_cents is the EFFECTIVE amount — custom when set, else the tier's,
-        # never denormalized — so editing a tier reprices its cards on next read.
-        # price_source saves the UI re-deriving the state from two nullables.
-        "price_tier_id": row[13],
-        "price_cents": row[14],
-        "price_source": row[15],
         "copies": [],  # populated by caller
     }
 
@@ -100,13 +90,7 @@ _PHOTOCARD_SELECT = """
         ) AS members,
         MAX(CASE WHEN a.attachment_type = 'front' THEN a.file_path END) AS front_image_path,
         MAX(CASE WHEN a.attachment_type = 'back' THEN a.file_path END) AS back_image_path,
-        p.is_special,
-        pr.price_tier_id,
-        COALESCE(pr.price_cents, pt.price_cents) AS price_cents,
-        CASE
-            WHEN pr.price_cents IS NOT NULL THEN 'custom'
-            WHEN pt.tier_id IS NOT NULL THEN 'tier'
-        END AS price_source
+        p.is_special
     FROM tbl_items i
     JOIN tbl_photocard_details p
         ON i.item_id = p.item_id
@@ -118,10 +102,6 @@ _PHOTOCARD_SELECT = """
         ON p.source_origin_id = so.source_origin_id
     LEFT JOIN tbl_attachments a
         ON i.item_id = a.item_id
-    LEFT JOIN tbl_photocard_pricing pr
-        ON pr.item_id = i.item_id
-    LEFT JOIN lkup_photocard_price_tiers pt
-        ON pt.tier_id = pr.price_tier_id
     WHERE i.collection_type_id = 1
 """
 
@@ -136,11 +116,7 @@ _PHOTOCARD_GROUP_BY = """
         p.source_origin_id,
         so.source_origin_name,
         p.version,
-        p.is_special,
-        pr.price_tier_id,
-        pr.price_cents,
-        pt.tier_id,
-        pt.price_cents
+        p.is_special
 """
 
 
@@ -331,212 +307,6 @@ def create_source_origin(payload: SourceOriginCreate, db=Depends(get_db)):
     }
 
 
-# ---------- Price tiers CRUD ----------
-#
-# Declared ahead of the /{item_id} routes: FastAPI matches in declaration
-# order, and "price-tiers" would otherwise hit the int path param and 422.
-#
-# Editing a tier's amount is a first-class, routine operation, not a one-time
-# seed. The effective price is derived on read and never denormalized, so a
-# PUT here reprices every card on that tier with no sweep and no migration —
-# which is the whole point of tiers, and why the amount must stay derived.
-
-def _slugify_tier_code(name: str) -> str:
-    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned or "tier"
-
-
-@router.get("/price-tiers")
-def list_price_tiers(db=Depends(get_db)):
-    """All tiers with a live card count — inactive included.
-
-    The caller filters: the bulk-edit dropdown wants active tiers only, while
-    the Admin editor has to show retired ones (their cards still resolve).
-    """
-    rows = db.execute(
-        text("""
-            SELECT t.tier_id, t.tier_code, t.tier_name, t.price_cents,
-                   t.sort_order, t.is_active,
-                   COUNT(pr.item_id) AS card_count
-            FROM lkup_photocard_price_tiers t
-            LEFT JOIN tbl_photocard_pricing pr
-                ON pr.price_tier_id = t.tier_id
-            GROUP BY t.tier_id, t.tier_code, t.tier_name, t.price_cents,
-                     t.sort_order, t.is_active
-            ORDER BY t.sort_order, t.tier_id
-        """)
-    ).fetchall()
-    return [
-        {
-            "tier_id": r[0],
-            "tier_code": r[1],
-            "tier_name": r[2],
-            "price_cents": r[3],
-            "sort_order": r[4],
-            "is_active": bool(r[5]),
-            "card_count": r[6],
-        }
-        for r in rows
-    ]
-
-
-@router.post("/price-tiers")
-def create_price_tier(payload: PriceTierCreate, db=Depends(get_db)):
-    clean_name = (payload.tier_name or "").strip()
-    if not clean_name:
-        raise HTTPException(status_code=400, detail="Tier name cannot be blank.")
-    if payload.price_cents is None or payload.price_cents < 0:
-        raise HTTPException(status_code=400, detail="Price must be zero or more.")
-
-    base_code = _slugify_tier_code(payload.tier_code or clean_name)
-    existing_codes = {
-        r[0] for r in db.execute(
-            text("SELECT tier_code FROM lkup_photocard_price_tiers")
-        ).fetchall()
-    }
-    if payload.tier_code and base_code in existing_codes:
-        raise HTTPException(status_code=409, detail="That tier code already exists.")
-    code = base_code
-    suffix = 2
-    while code in existing_codes:
-        code = f"{base_code}_{suffix}"
-        suffix += 1
-
-    if payload.sort_order is not None:
-        sort_order = payload.sort_order
-    else:
-        row = db.execute(
-            text("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM lkup_photocard_price_tiers")
-        ).fetchone()
-        sort_order = row[0]
-
-    result = db.execute(
-        text("""
-            INSERT INTO lkup_photocard_price_tiers
-                (tier_code, tier_name, price_cents, sort_order)
-            VALUES (:code, :name, :cents, :sort_order)
-            RETURNING tier_id
-        """),
-        {"code": code, "name": clean_name, "cents": payload.price_cents,
-         "sort_order": sort_order},
-    ).fetchone()
-    db.commit()
-
-    return {
-        "tier_id": result[0],
-        "tier_code": code,
-        "tier_name": clean_name,
-        "price_cents": payload.price_cents,
-        "sort_order": sort_order,
-        "is_active": True,
-        "card_count": 0,
-        "status": "created",
-    }
-
-
-@router.put("/price-tiers/{tier_id}")
-def update_price_tier(tier_id: int, payload: PriceTierUpdate, db=Depends(get_db)):
-    existing = db.execute(
-        text("SELECT tier_id FROM lkup_photocard_price_tiers WHERE tier_id = :id"),
-        {"id": tier_id},
-    ).fetchone()
-    if not existing:
-        raise HTTPException(status_code=404, detail="Price tier not found.")
-
-    updates = []
-    params = {"id": tier_id}
-
-    if payload.tier_name is not None:
-        clean_name = payload.tier_name.strip()
-        if not clean_name:
-            raise HTTPException(status_code=400, detail="Tier name cannot be blank.")
-        updates.append("tier_name = :name")
-        params["name"] = clean_name
-
-    if payload.price_cents is not None:
-        if payload.price_cents < 0:
-            raise HTTPException(status_code=400, detail="Price must be zero or more.")
-        updates.append("price_cents = :cents")
-        params["cents"] = payload.price_cents
-
-    if payload.sort_order is not None:
-        updates.append("sort_order = :sort_order")
-        params["sort_order"] = payload.sort_order
-
-    if payload.is_active is not None:
-        updates.append("is_active = :is_active")
-        params["is_active"] = 1 if payload.is_active else 0
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update.")
-
-    db.execute(
-        text(f"UPDATE lkup_photocard_price_tiers SET {', '.join(updates)} WHERE tier_id = :id"),
-        params,
-    )
-    db.commit()
-
-    (card_count,) = db.execute(
-        text("SELECT COUNT(*) FROM tbl_photocard_pricing WHERE price_tier_id = :id"),
-        {"id": tier_id},
-    ).fetchone()
-    row = db.execute(
-        text("""
-            SELECT tier_id, tier_code, tier_name, price_cents, sort_order, is_active
-            FROM lkup_photocard_price_tiers WHERE tier_id = :id
-        """),
-        {"id": tier_id},
-    ).fetchone()
-    return {
-        "tier_id": row[0],
-        "tier_code": row[1],
-        "tier_name": row[2],
-        "price_cents": row[3],
-        "sort_order": row[4],
-        "is_active": bool(row[5]),
-        "card_count": card_count,
-        "status": "updated",
-    }
-
-
-@router.delete("/price-tiers/{tier_id}")
-def delete_price_tier(tier_id: int, db=Depends(get_db)):
-    """Refuse to delete a tier that cards still point at.
-
-    FK cascades never fire here (PRAGMA foreign_keys is only ON for init_db's
-    connection), so an unguarded delete would leave dangling price_tier_id
-    values that silently resolve to no price. Retiring a tier is is_active = 0.
-    """
-    existing = db.execute(
-        text("SELECT tier_id FROM lkup_photocard_price_tiers WHERE tier_id = :id"),
-        {"id": tier_id},
-    ).fetchone()
-    if not existing:
-        raise HTTPException(status_code=404, detail="Price tier not found.")
-
-    (in_use,) = db.execute(
-        text("SELECT COUNT(*) FROM tbl_photocard_pricing WHERE price_tier_id = :id"),
-        {"id": tier_id},
-    ).fetchone()
-    if in_use:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"{in_use} card{'s' if in_use != 1 else ''} still use this tier. "
-                "Move them to another tier, or deactivate this one instead."
-            ),
-        )
-
-    db.execute(
-        text("DELETE FROM lkup_photocard_price_tiers WHERE tier_id = :id"),
-        {"id": tier_id},
-    )
-    db.commit()
-    return {"tier_id": tier_id, "status": "deleted"}
-
-
 # ---------- Photocard CRUD ----------
 
 @router.get("")
@@ -707,60 +477,6 @@ def update_photocard(item_id: int, payload: PhotocardUpdate, db=Depends(get_db))
     return {"item_id": item_id, "status": "updated", "photocard": card}
 
 
-@router.put("/{item_id}/price")
-def set_photocard_price(item_id: int, payload: PhotocardPriceUpdate, db=Depends(get_db)):
-    """Set a CUSTOM price on one card, or unprice it with a null amount.
-
-    Deliberately not a field on PhotocardUpdate: clearing the card's tier is a
-    distinct operation with a side effect, not a field assignment, and the
-    detail modal saves it independently of the rest of the form.
-    """
-    existing = db.execute(
-        text("SELECT item_id FROM tbl_items WHERE item_id = :item_id AND collection_type_id = :ct_id"),
-        {"item_id": item_id, "ct_id": PHOTOCARD_COLLECTION_TYPE_ID},
-    ).fetchone()
-    if not existing:
-        raise HTTPException(status_code=404, detail="Photocard not found.")
-
-    if payload.price_cents is None:
-        db.execute(
-            text("DELETE FROM tbl_photocard_pricing WHERE item_id = :item_id"),
-            {"item_id": item_id},
-        )
-        db.commit()
-        return {
-            "item_id": item_id,
-            "price_tier_id": None,
-            "price_cents": None,
-            "price_source": None,
-            "status": "cleared",
-        }
-
-    if payload.price_cents < 0:
-        raise HTTPException(status_code=400, detail="Price must be zero or more.")
-
-    db.execute(
-        text("""
-            INSERT INTO tbl_photocard_pricing
-                (item_id, price_tier_id, price_cents, updated_at)
-            VALUES (:item_id, NULL, :cents, CURRENT_TIMESTAMP)
-            ON CONFLICT(item_id) DO UPDATE SET
-                price_tier_id = NULL,
-                price_cents   = excluded.price_cents,
-                updated_at    = CURRENT_TIMESTAMP
-        """),
-        {"item_id": item_id, "cents": payload.price_cents},
-    )
-    db.commit()
-    return {
-        "item_id": item_id,
-        "price_tier_id": None,
-        "price_cents": payload.price_cents,
-        "price_source": "custom",
-        "status": "updated",
-    }
-
-
 @router.delete("/{item_id}")
 def delete_photocard(item_id: int, db=Depends(get_db)):
     from file_helpers import delete_attachment_files, remove_files
@@ -785,10 +501,6 @@ def delete_photocard(item_id: int, db=Depends(get_db)):
     )
     db.execute(
         text("DELETE FROM tbl_attachments WHERE item_id = :item_id"),
-        {"item_id": item_id},
-    )
-    db.execute(
-        text("DELETE FROM tbl_photocard_pricing WHERE item_id = :item_id"),
         {"item_id": item_id},
     )
     db.execute(
@@ -926,55 +638,6 @@ def bulk_update_photocards(payload: BulkUpdatePayload, db=Depends(get_db)):
                 {**details_params, "item_id": item_id},
             )
 
-    # Bulk price-tier assignment. Assigning a tier CLEARS any custom price on
-    # the card — tier and custom price are mutually exclusive by design, so a
-    # later sweep over a tier can't be silently subverted by a stale override.
-    # That means a re-sweep genuinely destroys custom prices in the selection,
-    # so count them and report it rather than losing them quietly.
-    pricing_result = None
-    if f.price_tier_id is not None:
-        item_ph = ",".join(str(int(i)) for i in payload.item_ids)
-
-        if f.price_tier_id > 0:
-            tier = db.execute(
-                text("SELECT tier_id FROM lkup_photocard_price_tiers WHERE tier_id = :id"),
-                {"id": f.price_tier_id},
-            ).fetchone()
-            if not tier:
-                raise HTTPException(status_code=400, detail="Unknown price_tier_id.")
-
-            (replaced_custom,) = db.execute(
-                text(f"""
-                    SELECT COUNT(*) FROM tbl_photocard_pricing
-                    WHERE item_id IN ({item_ph}) AND price_cents IS NOT NULL
-                """)
-            ).fetchone()
-
-            for item_id in payload.item_ids:
-                db.execute(
-                    text("""
-                        INSERT INTO tbl_photocard_pricing
-                            (item_id, price_tier_id, price_cents, updated_at)
-                        VALUES (:item_id, :tier_id, NULL, CURRENT_TIMESTAMP)
-                        ON CONFLICT(item_id) DO UPDATE SET
-                            price_tier_id = excluded.price_tier_id,
-                            price_cents   = NULL,
-                            updated_at    = CURRENT_TIMESTAMP
-                    """),
-                    {"item_id": item_id, "tier_id": f.price_tier_id},
-                )
-            pricing_result = {
-                "updated": len(payload.item_ids),
-                "replaced_custom": replaced_custom,
-            }
-        else:
-            # 0 = unprice, matching the source_origin_id > 0 sentinel above.
-            result = db.execute(
-                text(f"DELETE FROM tbl_photocard_pricing WHERE item_id IN ({item_ph})")
-            )
-            cleared = result.rowcount if result.rowcount is not None else 0
-            pricing_result = {"updated": cleared, "replaced_custom": 0, "cleared": cleared}
-
     # Replace member associations
     if f.member_ids is not None:
         for item_id in payload.item_ids:
@@ -996,8 +659,6 @@ def bulk_update_photocards(payload: BulkUpdatePayload, db=Depends(get_db)):
     response = {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
     if ownership_result is not None:
         response["ownership"] = ownership_result
-    if pricing_result is not None:
-        response["pricing"] = pricing_result
     return response
 
 
@@ -1035,7 +696,6 @@ def bulk_delete_photocards(payload: BulkDeletePayload, db=Depends(get_db)):
         db.execute(text("DELETE FROM tbl_photocard_copies WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_photocard_members WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
-        db.execute(text("DELETE FROM tbl_photocard_pricing WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
 

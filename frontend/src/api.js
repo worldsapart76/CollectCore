@@ -260,55 +260,6 @@ export async function bulkDeletePhotocards(itemIds) {
   return handleJsonResponse(res, "Failed to bulk delete photocards");
 }
 
-// --- Photocard pricing (admin only) ---
-// Prices never reach /pcs/ or /guest/ — they live in a side table the catalog
-// and seed builders don't read, so there's no guest adapter branch here.
-
-export async function fetchPriceTiers() {
-  const res = await fetch(`${API}/photocards/price-tiers`);
-  return handleJsonResponse(res, "Failed to fetch price tiers");
-}
-
-export async function createPriceTier({ tierName, priceCents, sortOrder = null }) {
-  const res = await fetch(`${API}/photocards/price-tiers`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      tier_name: tierName,
-      price_cents: priceCents,
-      sort_order: sortOrder,
-    }),
-  });
-  return handleJsonResponse(res, "Failed to create price tier");
-}
-
-export async function updatePriceTier(tierId, fields) {
-  const res = await fetch(`${API}/photocards/price-tiers/${encodeURIComponent(tierId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(fields),
-  });
-  return handleJsonResponse(res, "Failed to update price tier");
-}
-
-export async function deletePriceTier(tierId) {
-  const res = await fetch(`${API}/photocards/price-tiers/${encodeURIComponent(tierId)}`, {
-    method: "DELETE",
-  });
-  return handleJsonResponse(res, "Failed to delete price tier");
-}
-
-/** Set a custom price on one card, or pass null to unprice it. Either way the
- *  card leaves its tier — tier and custom price never coexist. */
-export async function updatePhotocardPrice(itemId, priceCents) {
-  const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}/price`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ price_cents: priceCents }),
-  });
-  return handleJsonResponse(res, "Failed to update price");
-}
-
 /** Download the Mercari trade worksheet for the given cards.
  *
  *  A POST returning a file can't be triggered by a plain <a href>, so this
