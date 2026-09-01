@@ -2175,9 +2175,12 @@ def market_summary(db=Depends(get_db)):
     would be almost entirely nulls. Absence from the map IS the "no data"
     answer; the client never has to test a sentinel.
 
-    Deliberately leaner than `/grid`: no labels (the library already has them),
-    no buy-option resolution, no wanted set. This is loaded on every library
-    page load and `/grid` is not.
+    Leaner than `/grid`: no labels (the library already has them) and no wanted
+    set. It DOES resolve buy options, though the first cut did not -- omitting
+    them was wrong. A card that has never sold but sits inside a live lot has no
+    sell price and no cost basis, so the library showed three dashes while the
+    market workspace knew perfectly well it could be bought at $19 a card. The
+    cheapest route is the whole answer for that card.
 
     No app-level auth gate, by design. `/market/*` is not a Cloudflare Access
     bypass path, so it is already admin-only at the edge -- and auth code in the
@@ -2196,24 +2199,49 @@ def market_summary(db=Depends(get_db)):
     # different number from the market workspace.
     sold = _net_sold_by_item(db, ids)
 
-    # How many live listings exist and when the card was last seen. `n_active`
-    # counts EVERY marketplace, not just sellable ones: in the library the
-    # question is "can I get one right now", which a proxy answers. That is the
-    # opposite of `vs_active` in the card detail, which asks "who am I competing
-    # with" and must exclude places you cannot list on.
-    live: Dict[int, Dict[str, Any]] = {}
-    for item_id, n_active, last_seen in db.execute(text(
-        "SELECT ln.item_id,"
-        " SUM(CASE WHEN s.listing_state = 'active'"
-        "          AND l.delisted_at IS NULL THEN 1 ELSE 0 END),"
-        " MAX(s.observed_at) "
+    # When the card was last seen, from ANY sighting in any state -- staleness
+    # is about the observation, not about whether the listing is still up.
+    last_seen: Dict[int, str] = {}
+    for item_id, seen in db.execute(text(
+        "SELECT ln.item_id, MAX(s.observed_at) "
         "FROM mkt_sighting s "
-        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
-        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = s.listing_id "
         f"WHERE ln.item_id IN ({ids}) "
         "GROUP BY ln.item_id"
     )):
-        live[item_id] = {"n_active": n_active or 0, "last_seen": last_seen}
+        last_seen[item_id] = seen
+
+    # How many live listings you could buy this from right now.
+    #
+    # COUNT(DISTINCT listing_id), and gated on the LATEST sighting being active
+    # -- both corrections. Summing sightings counted one listing captured on
+    # three days as three listings, and "has ever been active" counted listings
+    # that have since sold. Same rule `_buy_options` uses, because it is the
+    # same question and the two must not disagree.
+    #
+    # Counts EVERY marketplace, not just sellable ones: in the library the
+    # question is "can I get one right now", which a proxy answers. That is the
+    # opposite of `vs_active` in the card detail, which asks "who am I competing
+    # with" and must exclude places you cannot list on.
+    n_active: Dict[int, int] = {}
+    for item_id, n in db.execute(text(
+        "SELECT ln.item_id, COUNT(DISTINCT l.listing_id) "
+        "FROM mkt_listing l "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN mkt_sighting s ON s.listing_id = l.listing_id "
+        f"WHERE ln.item_id IN ({ids}) "
+        "  AND l.delisted_at IS NULL AND s.listing_state = 'active' "
+        "  AND s.observed_at = (SELECT MAX(s2.observed_at)"
+        "        FROM mkt_sighting s2 WHERE s2.listing_id = l.listing_id) "
+        "GROUP BY ln.item_id"
+    )):
+        n_active[item_id] = n or 0
+
+    # The cheapest route to actually owning one, landed. Reused from the grid so
+    # the two can never quote different numbers, and kept as two routes because
+    # a lot cannot be bought one card at a time: the commitment travels with the
+    # figure, which is why lot_size and landed come with it.
+    best_single, best_lot = _buy_options(db, ids)
 
     # Cost basis, card-level. Same resolution as the grid's, in one pass rather
     # than per-card: a tier row carries no amount of its own, so the effective
@@ -2230,22 +2258,39 @@ def market_summary(db=Depends(get_db)):
             cost[item_id] = {"cost_cents": cents, "source": source,
                              "tier_name": tier_name, "estimated": True}
 
+    # Display names alongside the codes. `mercari_us` is the key everything
+    # joins on and reads like a database row on screen -- the same wart already
+    # fixed once in the resell view.
+    names = {r[0]: r[1] for r in db.execute(text(
+        "SELECT marketplace_code, marketplace_name FROM lkup_mkt_marketplaces"))}
+
     cards: Dict[str, Any] = {}
     for item_id in with_data:
         s = sold.get(item_id)
-        lv = live.get(item_id) or {}
         c = cost.get(item_id)
+        routes = [o for o in (best_single.get(item_id), best_lot.get(item_id)) if o]
+        buy = min(routes, key=lambda o: o["per_card_cents"]) if routes else None
         # Keys are strings: this is JSON, where object keys always are, and
         # pretending otherwise invites a client indexing with a number.
         cards[str(item_id)] = {
             "sell_price_cents": s["sell_price_cents"] if s else None,
             "net_proceeds_cents": s["net_proceeds_cents"] if s else None,
             "sell_marketplace": s["marketplace"] if s else None,
+            "sell_marketplace_name": names.get(s["marketplace"]) if s else None,
             "n_sold": s["n"] if s else 0,
-            "n_active": lv.get("n_active", 0),
-            "last_seen": lv.get("last_seen"),
+            "n_active": n_active.get(item_id, 0),
+            "last_seen": last_seen.get(item_id),
             "cost_cents": c["cost_cents"] if c else None,
             "cost_estimated": bool(c) or None,
+            # What one would cost you today, landed. `buy_lot_size` > 1 means
+            # this price is only reachable by buying the whole lot, and
+            # `buy_landed_cents` is what that actually costs -- a $19 per-card
+            # figure inside a 12-card lot is a $228 decision.
+            "buy_cents": buy["per_card_cents"] if buy else None,
+            "buy_lot_size": buy["line_count"] if buy else None,
+            "buy_landed_cents": buy["landed_cents"] if buy else None,
+            "buy_marketplace": buy["marketplace"] if buy else None,
+            "buy_marketplace_name": names.get(buy["marketplace"]) if buy else None,
         }
 
     return {"cards": cards, "generated_at": datetime.utcnow().isoformat(),

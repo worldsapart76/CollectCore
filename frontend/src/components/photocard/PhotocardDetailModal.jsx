@@ -16,6 +16,8 @@ import {
 import { API_BASE, getImageUrl } from "../../utils/imageUrl";
 import { useSwipeNav } from "../../hooks/useSwipeNav";
 
+const usdc = (cents) => (cents == null ? "—" : `$${(cents / 100).toFixed(2)}`);
+
 // One money figure with its rung named. A bare dollar amount in a modal that
 // shows three of them is how "sell" came to mean two different things.
 function MarketFigure({ label, cents, note }) {
@@ -507,6 +509,16 @@ export default function PhotocardDetailModal({
                     cents={currentCard.market.cost_cents}
                     note={currentCard.market.cost_cents != null ? "estimate" : null}
                   />
+                  {/* What one would cost you today. For a card that has never
+                      sold but sits in a live lot this is the ONLY real figure,
+                      which is why it earns a place beside the sell side. */}
+                  <MarketFigure
+                    label="buy"
+                    cents={currentCard.market.buy_cents}
+                    note={currentCard.market.buy_lot_size > 1
+                      ? `in a ${currentCard.market.buy_lot_size}-card lot · ${usdc(currentCard.market.buy_landed_cents)} for all`
+                      : currentCard.market.buy_marketplace_name}
+                  />
                   <MarketFigure
                     label="sell price"
                     cents={currentCard.market.sell_price_cents}
@@ -517,8 +529,8 @@ export default function PhotocardDetailModal({
                   <MarketFigure
                     label="net proceeds"
                     cents={currentCard.market.net_proceeds_cents}
-                    note={currentCard.market.sell_marketplace
-                      ? `after ${currentCard.market.sell_marketplace} fees`
+                    note={currentCard.market.sell_marketplace_name
+                      ? `after ${currentCard.market.sell_marketplace_name} fees`
                       : null}
                   />
                   {currentCard.market.n_active > 0 && (

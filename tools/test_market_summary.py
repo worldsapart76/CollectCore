@@ -165,6 +165,68 @@ after = c.get("/market/summary").json()["cards"]
 check("501 is down to one live ask", after["501"]["n_active"], 1)
 check("but the card is still in the map", "501" in after, True)
 
+print("\n--- a card that exists ONLY inside a lot still has a price ---")
+# The reported bug. 501 has sold comps; this card has none and never will until
+# something sells -- but it IS buyable, and the library showed three dashes
+# while /grid knew the per-card figure perfectly well. The cheapest route is the
+# whole answer for a card like this, so the summary has to carry it.
+s.execute(text("INSERT INTO tbl_items (item_id, collection_type_id,"
+               " top_level_category_id) VALUES (505, :t, :c)"),
+          {"t": type_id, "c": tlc})
+s.execute(text("INSERT INTO tbl_photocard_details (item_id, group_id,"
+               " source_origin_id, version) VALUES (505, 1, 1, 'Concept B')"))
+s.execute(text("INSERT INTO xref_photocard_members (item_id, member_id)"
+               " VALUES (505, 1)"))
+s.commit()
+
+LOT = [{"lineType": "card", "cardId": 505, "qty": 1},
+       {"lineType": "card", "cardId": 504, "qty": 1}]
+lot_cap = {"marketplace": "mercari_us", "currency": "USD", "externalId": "lot9",
+           "name": "lot9", "capturedAt": "2026-08-30T00:00:00Z", "isLot": True,
+           "lines": LOT,
+           "sightings": [{"observedAt": "2026-08-30T00:00:00Z",
+                          "priceCents": 4000, "listingState": "active",
+                          "rawStatus": "on_sale"}]}
+assert c.post("/market/captures", json={"captures": [lot_cap]}).status_code == 200
+
+lots = c.get("/market/summary").json()["cards"]
+grid2 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
+check("505 is in the map", "505" in lots, True)
+check("it has a buy price", lots["505"]["buy_cents"], 2000)
+check("matching the grid exactly",
+      lots["505"]["buy_cents"], grid2[505]["buy_lot"]["per_card_cents"])
+# The commitment has to travel with the number: a per-card figure inside a lot
+# is not a per-card decision.
+check("the lot size comes with it", lots["505"]["buy_lot_size"], 2)
+check("and what the whole lot costs", lots["505"]["buy_landed_cents"], 4000)
+check("still no sell price, correctly", lots["505"]["sell_price_cents"], None)
+
+print("\n--- marketplaces read as names, not join keys ---")
+check("buy side", lots["505"]["buy_marketplace_name"], "Mercari US")
+check("sell side", lots["501"]["sell_marketplace_name"], "Mercari US")
+
+print("\n--- n_active counts LISTINGS, not sightings ---")
+# Re-capturing the same listing on a later day used to read as another listing
+# on the shelf. One listing seen twice is one listing.
+again = dict(lot_cap, capturedAt="2026-08-31T00:00:00Z",
+             sightings=[{"observedAt": "2026-08-31T00:00:00Z",
+                         "priceCents": 3800, "listingState": "active",
+                         "rawStatus": "on_sale"}])
+assert c.post("/market/captures", json={"captures": [again]}).status_code == 200
+after2 = c.get("/market/summary").json()["cards"]
+check("still one listing after a second capture", after2["505"]["n_active"], 1)
+check("and the price follows the newer sighting", after2["505"]["buy_cents"], 1900)
+
+print("\n--- and only while the latest sighting is still active ---")
+# "Has ever been active" would keep a sold-out listing on the shelf forever.
+lid9 = s.execute(text("SELECT listing_id FROM mkt_listing"
+                      " WHERE external_id = 'lot9'")).scalar()
+assert c.post(f"/market/listings/{lid9}/outcome",
+              json={"outcome": "sold", "price_cents": 3800}).status_code == 200
+after3 = c.get("/market/summary").json()["cards"]
+check("sold listing leaves the count", after3["505"]["n_active"], 0)
+check("and stops being a buy option", after3["505"]["buy_cents"], None)
+
 print()
 if fails:
     print(f"{len(fails)} FAILED: " + ", ".join(fails)); sys.exit(1)

@@ -210,6 +210,23 @@ The two answer different questions on purpose: in the library it is "can I get
 one right now", which a proxy answers, while competition is "who am I up against
 where I would list", which a proxy never is.
 
+**Corrected 2026-08-31, after the first cut shipped:**
+
+- **The payload carries the buy price.** The first version omitted buy-option
+  resolution as a leanness win, and that was wrong. A card that has never sold
+  but sits inside a live lot has no sell price and no cost basis, so the modal
+  showed three dashes while `/grid` knew perfectly well it was buyable at $19 a
+  card. For that card the cheapest route is the *whole* answer. `buy_lot_size`
+  and `buy_landed_cents` travel with it, because a per-card figure inside a
+  12-card lot is a $228 decision, not a $19 one.
+- **`n_active` counts DISTINCT listings whose latest sighting is active.** It
+  summed sightings, so one listing captured on three days read as three
+  listings on the shelf; and "has ever been active" kept sold-out listings
+  counted forever. Now the same rule `_buy_options` uses — it is the same
+  question, and the two must not disagree.
+- **Marketplaces resolve to names.** `mercari_us` was reaching the modal as
+  written, the same wart already fixed once in the resell view.
+
 Admin-gated — the library is shared with `/pcs/`, and `mkt_*` must never reach
 it. There is no app-level auth check: `/market/*` is not a Cloudflare Access
 bypass path, so it is already admin-only at the edge, and auth code in the app
