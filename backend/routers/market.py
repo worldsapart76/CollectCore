@@ -2159,6 +2159,100 @@ def market_grid(db=Depends(get_db)):
     }
 
 
+@router.get("/summary")
+def market_summary(db=Depends(get_db)):
+    """Per-card market facts for the photocard library, as a SPARSE map.
+
+    One request, loaded once alongside the library, feeding four surfaces: the
+    `$` thumbnail badge, the has-comps filter, the caption value line, and the
+    card detail modal. One source deliberately, so those four can never disagree
+    about whether a card has data -- and so opening a card costs no extra call,
+    which matters because `/market/comps/{item_id}` 404s for a card with none
+    and must never be called speculatively.
+
+    Sparse -- only cards carrying a market line. The library holds ~11,300 cards
+    and the ones with data are a small fraction, so returning a row per card
+    would be almost entirely nulls. Absence from the map IS the "no data"
+    answer; the client never has to test a sentinel.
+
+    Deliberately leaner than `/grid`: no labels (the library already has them),
+    no buy-option resolution, no wanted set. This is loaded on every library
+    page load and `/grid` is not.
+
+    No app-level auth gate, by design. `/market/*` is not a Cloudflare Access
+    bypass path, so it is already admin-only at the edge -- and auth code in the
+    app is exactly what the deployment model exists to avoid. The guest bundle
+    simply never calls this.
+    """
+    with_data = [r[0] for r in db.execute(text(
+        "SELECT DISTINCT item_id FROM mkt_listing_line WHERE item_id IS NOT NULL"))]
+    if not with_data:
+        return {"cards": {}, "generated_at": datetime.utcnow().isoformat()}
+
+    ids = ",".join(str(int(i)) for i in with_data)
+
+    # Sell price and net proceeds. Already sell-side filtered and already fee-
+    # aware -- reused rather than reimplemented so the library can never quote a
+    # different number from the market workspace.
+    sold = _net_sold_by_item(db, ids)
+
+    # How many live listings exist and when the card was last seen. `n_active`
+    # counts EVERY marketplace, not just sellable ones: in the library the
+    # question is "can I get one right now", which a proxy answers. That is the
+    # opposite of `vs_active` in the card detail, which asks "who am I competing
+    # with" and must exclude places you cannot list on.
+    live: Dict[int, Dict[str, Any]] = {}
+    for item_id, n_active, last_seen in db.execute(text(
+        "SELECT ln.item_id,"
+        " SUM(CASE WHEN s.listing_state = 'active'"
+        "          AND l.delisted_at IS NULL THEN 1 ELSE 0 END),"
+        " MAX(s.observed_at) "
+        "FROM mkt_sighting s "
+        "JOIN mkt_listing l ON l.listing_id = s.listing_id "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        f"WHERE ln.item_id IN ({ids}) "
+        "GROUP BY ln.item_id"
+    )):
+        live[item_id] = {"n_active": n_active or 0, "last_seen": last_seen}
+
+    # Cost basis, card-level. Same resolution as the grid's, in one pass rather
+    # than per-card: a tier row carries no amount of its own, so the effective
+    # figure is derived here and never denormalized.
+    cost: Dict[int, Dict[str, Any]] = {}
+    for item_id, own_cents, source, tier_name, tier_cents in db.execute(text(
+        "SELECT c.item_id, c.cost_cents, c.source, t.tier_name, t.cost_cents "
+        "FROM mkt_item_cost c "
+        "LEFT JOIN mkt_cost_tier t ON t.cost_tier_id = c.cost_tier_id "
+        f"WHERE c.item_id IN ({ids})"
+    )):
+        cents = own_cents if own_cents is not None else tier_cents
+        if cents is not None:
+            cost[item_id] = {"cost_cents": cents, "source": source,
+                             "tier_name": tier_name, "estimated": True}
+
+    cards: Dict[str, Any] = {}
+    for item_id in with_data:
+        s = sold.get(item_id)
+        lv = live.get(item_id) or {}
+        c = cost.get(item_id)
+        # Keys are strings: this is JSON, where object keys always are, and
+        # pretending otherwise invites a client indexing with a number.
+        cards[str(item_id)] = {
+            "sell_price_cents": s["sell_price_cents"] if s else None,
+            "net_proceeds_cents": s["net_proceeds_cents"] if s else None,
+            "sell_marketplace": s["marketplace"] if s else None,
+            "n_sold": s["n"] if s else 0,
+            "n_active": lv.get("n_active", 0),
+            "last_seen": lv.get("last_seen"),
+            "cost_cents": c["cost_cents"] if c else None,
+            "cost_estimated": bool(c) or None,
+        }
+
+    return {"cards": cards, "generated_at": datetime.utcnow().isoformat(),
+            # Stated, so the library never implies per-copy precision either.
+            "basis_is_per_card": True}
+
+
 # ───────────────────────── Sold vs gone ──────────────────────────────────────
 
 

@@ -1473,6 +1473,22 @@ export async function getMarketGrid() {
   return handleJsonResponse(res, 'Failed to load the market grid');
 }
 
+// Sparse per-card market facts, keyed by item_id as a string. Feeds the
+// library's `$` badge, its has-comps filter, the caption value line and the
+// card detail modal from ONE payload, so those four can never disagree about
+// whether a card has data.
+//
+// Returns an empty map on a non-admin bundle rather than throwing: `mkt_*` is
+// admin-only and /pcs/ has no market module, so every caller would otherwise
+// need its own guard. Absence from the map is already the "no data" answer, so
+// an empty map degrades to exactly the right behaviour -- no badge, no filter
+// matches, no value block.
+export async function getMarketSummary() {
+  if (!isAdmin) return { cards: {} };
+  const res = await fetch(`${API}/market/summary`);
+  return handleJsonResponse(res, 'Failed to load market summary');
+}
+
 // What happened to a listing that is no longer up. `sold` needs a price and
 // becomes a comp; `gone` only removes it as something to buy.
 export async function setListingOutcome(listingId, body) {

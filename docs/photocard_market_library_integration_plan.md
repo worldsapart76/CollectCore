@@ -182,8 +182,24 @@ This is the load-bearing choice, for two reasons:
   never call it speculatively. Reading from a preloaded map sidesteps that
   entirely.
 
+**Scope is cards with a market line — not `/grid`'s scope.** `/grid` also
+includes Wanted cards with no data, as a reminder of where to go browsing. The
+library must not badge those: a `$` on a card with nothing behind it is a claim
+the user cannot check without clicking. A proxy-only card *does* appear — a live
+Neokyo ask is a place to buy it, which is market data even with no sell price.
+
+**`n_active` counts every marketplace**, unlike `vs_active` in the card detail.
+The two answer different questions on purpose: in the library it is "can I get
+one right now", which a proxy answers, while competition is "who am I up against
+where I would list", which a proxy never is.
+
 Admin-gated — the library is shared with `/pcs/`, and `mkt_*` must never reach
-it. On a guest build the fetch is skipped and every affordance below is absent.
+it. There is no app-level auth check: `/market/*` is not a Cloudflare Access
+bypass path, so it is already admin-only at the edge, and auth code in the app
+is what the deployment model exists to avoid. `getMarketSummary()` returns an
+empty map on a non-admin bundle instead of throwing — absence from the map is
+already the "no data" answer, so it degrades to exactly the right behaviour
+(no badge, no filter matches, no value block) without a guard at each caller.
 
 The library already loads all cards in one call and filters client-side
 ([`PhotocardLibraryPage.jsx:132-180`](../frontend/src/pages/PhotocardLibraryPage.jsx#L132-L180)),
@@ -411,7 +427,7 @@ sell price, and only for Pocamarket official rows.
 |---|---|---|
 | **0** | ✅ **BUILT 2026-08-31** — side filter on `_net_sold_by_item`, on `comps_for_card`'s sold stats and its sell fee-model pick, + Pocamarket `side` → `buy` | additive guarded migration in `db.py` |
 | 1 | ✅ **BUILT 2026-08-31** — vocabulary rename across `market.py`, `MarketIntelPage.jsx` and four test suites; sell price gains its own column beside net | frontend rebuild |
-| 2 | `GET /market/summary` + admin gate | — |
+| 2 | ✅ **BUILT 2026-08-31** — `GET /market/summary` + `getMarketSummary()` | — |
 | 3 | Library: `$` badge, has-comps filter, caption line, modal value block, deep link | — |
 | 4 | Remove the price tier system; CSV `price` → `list_price` | the one table-drop migration |
 | — | **Deferred:** era ladder rung (defect 1) | own pass, measured before/after |
