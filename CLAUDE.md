@@ -106,7 +106,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/photocard_pricing_and_trade_export_plan.md` | **Superseded** — price tiers removed 2026-08-31. Still the reference for trade CSV export + Mercari title rules |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
-| `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |
+| `docs/session_notes.md` | Session history — last 5 sessions in full, everything earlier summarised in two "Completed to date" blocks. Full text of collapsed entries is in git history (`23820f4` holds the last uncollapsed copy) |
 | `docs/guest_deploy_runbook.md` | Deploy-time checklist for `/guest/` (CF bypass, smoke test, rollback) |
 | `docs/photocard_market_intel_plan.md` | **Authoritative** — browser-extension price capture + resale ledger (box/purchase/line allocation). Supersedes the listing tracker for photocards (not built) |
 | `docs/listing_tracker_design_plan_v3.md` / `_dev_plan.md` | Listing-tracker design + phased plan (not built). **Superseded for photocards** by `photocard_market_intel_plan.md`; still the reference for cross-module listing tracking |

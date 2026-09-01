@@ -33,7 +33,8 @@ Calibre, Jellyfin still target Unraid). Unraid self-hosting retained as fallback
 **DECIDED 2026-04-25: Cloudflare Access with Google as identity provider.**
 Live; gates `collectcoreapp.com` + `api.collectcoreapp.com` at Cloudflare's edge
 before requests reach Railway. Free tier (50 users), household scale. Team:
-`collectcore`. Full setup history in `docs/session_notes.md` 2026-04-25 Thread 7.
+`collectcore`. Full setup history was in `docs/session_notes.md` 2026-04-25 Thread 7,
+now collapsed — see git history at `23820f4` if the blow-by-blow is needed.
 
 - ZERO code changes in CollectCore — auth happens at the network layer.
 - Single Cloudflare Access Application covering apex + api subdomain so cookies
@@ -48,8 +49,9 @@ before requests reach Railway. Free tier (50 users), household scale. Team:
 ## Multi-User Model
 
 **Two-tier model, both web-only** (2026-04-25 pivot; ARCHITECTURE.md Decision B
-originally had a local-mobile guest). Full reasoning: `docs/session_notes.md`
-2026-04-25 Thread 8.
+originally had a local-mobile guest). Full reasoning was in
+`docs/session_notes.md` 2026-04-25 Thread 8, now collapsed — see git history at
+`23820f4`. The decision itself is recorded above and in CLAUDE.md.
 
 - **Admin tier** (household only): Cloudflare Access auth via Google, full CRUD
   against Railway, all images on R2. `https://collectcoreapp.com`.
