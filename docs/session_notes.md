@@ -6,6 +6,97 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-08-31 (US CDT) — Money vocabulary + library↔market integration BUILT (phases 0-4)
+
+Plan: `docs/photocard_market_library_integration_plan.md` (**authoritative**).
+Shipped as `b923916` → `810d9eb`.
+
+Started as "let me see from the library which cards have comps", and the first
+real finding was that the module could not be *discussed*, let alone extended,
+because one word meant two things.
+
+**The vocabulary, now enforced end to end.** Four rungs, and no word covers two:
+
+```
+cost  →  list price  −offer discount→  sell price  −fees→  net proceeds
+profit = net proceeds − cost
+```
+
+Every quantity was already computed correctly — `list_price_for` even had an
+intermediate literally named `gross`, which *is* the sell price. Only the naming
+was broken, and visibly so: the grid column labelled **`sell` held net
+proceeds**, while the actual sell price had no column at all, and the `flip` /
+`arb` tooltips said "sell − paid" while both computed against net.
+
+**Phase 0 — a live defect, found by taking the vocabulary seriously.**
+`_net_sold_by_item` pooled sold sightings from *every* marketplace. Not via the
+sold/gone feature (never used) — **the capture extension sets sold state from
+page text**, so Neokyo's "out of stock" and Pocamarket's "sold out" arrived as
+`listing_state = 'sold'` with no user action. JPY/KRW domestic prices, below US
+resale, were dragging the sell price **down**, understating every flip and arb
+margin and the era median that ~7,900 cards inherit.
+
+`comps_for_card` already applied the right rule to the *competition* set; the
+sold set never got it. Fixed in three places — the pooling, the detail's sold
+stats, and its **sell fee-model pick** (a card seen only on Neokyo resolved to
+`fee_model('neokyo','sell')`, a marketplace with no sell components, so every
+rate read zero and net proceeds came back *equal to* the sell price — silently
+fee-free, worse than absent). Pocamarket moved `side` `both` → `buy`.
+
+It is a **pooling rule, not a data fix**: the sightings stay, so it corrects
+history as well as new captures, and the Pocamarket popularity signal those same
+rows carry survives intact.
+
+**Phase 1** — the rename, plus a `sell` column beside `net`; the gap between
+them is the fee bite. **Phase 2** — `GET /market/summary`, one sparse payload
+feeding four library surfaces so they cannot disagree, and so opening a card
+costs no extra request (`/market/comps/{id}` 404s on a card with no data and
+must never be called speculatively). **Phase 3** — `$` badge replacing the
+back-image `B` (the Image filter answers that better and is untouched), a Market
+filter section, a caption value line, a cost/sell/net block in the detail modal,
+and a deep link that uses `useNavigate` rather than an anchor because library
+filter state lives in a module store a page load would reset.
+
+**Phase 4 — sell price tiers retired.** Built 2026-08-17, **never used in
+practice**; superseded by observed comps. The one live consumer, the trade CSV's
+`price` column, becomes `list_price` derived from sold data and padded for
+offers. Blank still means "needs pricing" — now "no comp yet".
+
+Two things worth remembering from that removal:
+
+- **No drop migration, deliberately.** A `DROP TABLE` on boot is exactly the
+  restart-alters-data behaviour this project forbids. The code removal *orphans*
+  the tables; `backend/drop_photocard_pricing.py` disposes of them by hand,
+  dry-run by default. Its guard ignores `lkup_photocard_price_tiers` (four
+  seeded rows in every database ever created) — a guard that trips every time
+  only teaches you to force past it.
+- **Both card-delete paths carried a `DELETE FROM tbl_photocard_pricing`.** With
+  the table gone from `schema.sql` those would have raised *no such table* on
+  every card deletion on a fresh database. Found by a reference sweep, **not by
+  the tests** — nothing covered it.
+
+`mkt_cost_tier` / `mkt_item_cost` **stay**: acquisition *cost*, not ask price.
+The shared tier-XOR-custom shape and `t1..t4` codes are what made the two look
+related.
+
+**Next**
+
+1. **The era rung (defect 1) — still distorting lot numbers.** `_value_ladder`
+   falls back to a two-way era median split at 2020-12-31: dev-measured, **78%
+   of cards land in one bucket**, including 806 whose origin has no date and
+   silently read as `new`. The fix is a fallback chain that reports *which* rung
+   it used and how thin it was, not a better bucket.
+2. **`_sold_landed` (defect 3)**, surfaced during phase 0 and deliberately left
+   alone: it is a buy-side figure, and a Neokyo sale really did happen — but a
+   Pocamarket official "sold out" is a restock cycle with no buyer. The
+   distinction it needs is not `side` but *whether a marketplace's sold state
+   is a transaction*, which has no column today.
+3. **Fee components still need real values** (eBay final value / payment
+   processing / sales tax; Pocamarket box size 40). Until then every margin is
+   optimistic.
+4. Take before/after sell-price medians on prod when convenient — that also
+   says how much of the era problem was phase 0 rather than bucket coarseness.
+
 ### 2026-08-30 (US CDT) — eBay + Pocamarket parsers, and per-listing postage
 
 All four declared sources now have capture parsers. Two of the three things
