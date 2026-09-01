@@ -174,12 +174,13 @@ const COLUMNS = [
   { key: "origin", label: "origin", align: "left" },
   { key: "version", label: "version", align: "left" },
   { key: "held", label: "own", title: "copies held — owned, trade or pending outgoing" },
-  { key: "paid_cents", label: "paid", title: "cost basis (card-level estimate)" },
+  { key: "cost_cents", label: "cost", title: "what it cost you — card-level estimate" },
   { key: "buy_single_cents", label: "buy", title: "cheapest landed, single-card listing" },
   { key: "buy_lot_cents", label: "via lot", title: "cheapest landed per card inside a lot — buying it means buying the whole lot" },
-  { key: "sell_net_cents", label: "sell", title: "median sold, net of selling fees" },
-  { key: "flip_cents", label: "flip", title: "sell − paid: margin on what you already hold" },
-  { key: "arb_cents", label: "arb", title: "sell − cheapest buy: margin on what you could source" },
+  { key: "sell_price_cents", label: "sell", title: "median sell price — what it actually sold for" },
+  { key: "net_proceeds_cents", label: "net", title: "sell price minus selling fees — what you keep" },
+  { key: "flip_profit_cents", label: "flip", title: "net proceeds − cost: margin on what you already hold" },
+  { key: "resell_profit_cents", label: "arb", title: "net proceeds − cheapest buy: margin on what you could source" },
   { key: "last_seen", label: "seen", title: "the newest observation of this card, from any source" },
   { key: "comps", label: "comps", sortable: false, align: "left" },
 ];
@@ -194,13 +195,13 @@ function MarketGrid({ cards, selected, onSelect, onOpen }) {
   const [onlyHeld, setOnlyHeld] = useState(false);
   // Best opportunity first, because "what should I act on" is the question the
   // grid exists to answer. Anything else is a click away.
-  const [sort, setSort] = useState({ key: "arb_cents", dir: -1 });
+  const [sort, setSort] = useState({ key: "resell_profit_cents", dir: -1 });
 
   // Flattened once so sorting and filtering both read plain numbers rather
   // than reaching into nested objects on every comparison.
   const rows = (cards || []).map((c) => ({
     ...c,
-    paid_cents: c.paid?.cost_cents ?? null,
+    cost_cents: c.cost?.cost_cents ?? null,
     buy_single_cents: c.buy_single?.per_card_cents ?? null,
     buy_lot_cents: c.buy_lot?.per_card_cents ?? null,
   }));
@@ -339,9 +340,9 @@ function MarketGrid({ cards, selected, onSelect, onOpen }) {
                 </td>
                 <td style={td}>{c.held || <span style={{ color: "#bbb" }}>—</span>}</td>
                 <td style={td}>
-                  {c.paid_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
-                    <span title={`${c.paid.tier_name || c.paid.source || "manual"} — estimated`}>
-                      {usd(c.paid_cents)}
+                  {c.cost_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    <span title={`${c.cost.tier_name || c.cost.source || "manual"} — estimated`}>
+                      {usd(c.cost_cents)}
                     </span>
                   )}
                 </td>
@@ -361,9 +362,9 @@ function MarketGrid({ cards, selected, onSelect, onOpen }) {
                   )}
                 </td>
                 <td style={td}>
-                  {c.sell_net_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
-                    <span title={`median of ${c.n_sold} sold, net of ${c.sell_marketplace} fees`}>
-                      {usd(c.sell_net_cents)}
+                  {c.sell_price_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    <span title={`median of ${c.n_sold} sold on ${c.sell_marketplace}`}>
+                      {usd(c.sell_price_cents)}
                       {/* A margin built on two comps is not the claim a margin
                           built on nineteen is. */}
                       <span style={{ color: c.n_sold < 3 ? "#b45309" : "#aaa" }}>
@@ -372,9 +373,16 @@ function MarketGrid({ cards, selected, onSelect, onOpen }) {
                     </span>
                   )}
                 </td>
-                <td style={td}><Margin cents={c.flip_cents} /></td>
                 <td style={td}>
-                  <Margin cents={c.arb_cents} />
+                  {c.net_proceeds_cents == null ? <span style={{ color: "#bbb" }}>—</span> : (
+                    <span title={`after ${c.sell_marketplace} selling fees`}>
+                      {usd(c.net_proceeds_cents)}
+                    </span>
+                  )}
+                </td>
+                <td style={td}><Margin cents={c.flip_profit_cents} /></td>
+                <td style={td}>
+                  <Margin cents={c.resell_profit_cents} />
                   {c.arb_via_lot && (
                     <span title="cheapest route is inside a lot" style={{ color: "#999" }}> ᴸ</span>
                   )}
@@ -967,7 +975,7 @@ function BuyToKeep({ detail, onChanged, onOpenLot, onError }) {
             looking cheaper than them. */}
         <Stat
           label="median sold"
-          value={usd(k.sold.median_cents)}
+          value={usd(k.sold.landed_median_cents)}
           hint={k.sold.n
             ? `${k.sold.n} sold, landed · ${k.sold.n_shipping_known} with real postage`
             : "no sold comps"}
@@ -1042,7 +1050,7 @@ function BuyToResell({ detail, onChanged, onOpenLot, onError, onTargetChanged })
       <div style={statRow}>
         <Stat
           label="est. sale, net"
-          value={usd(r.sell_net_cents)}
+          value={usd(r.net_proceeds_cents)}
           hint={r.n_sold
             ? `median of ${r.n_sold} sold on ${r.sell_marketplace_name || r.sell_marketplace}, after fees`
             : "no sold comps — see below"}
@@ -1100,13 +1108,13 @@ function BuyToResell({ detail, onChanged, onOpenLot, onError, onTargetChanged })
                   )}
                 </td>
                 <td style={td}>
-                  {o.sell_net_cents != null ? usd(o.sell_net_cents) : (
+                  {o.net_proceeds_cents != null ? usd(o.net_proceeds_cents) : (
                     // A requirement, not a measurement: with no comps there is
                     // nothing to estimate, so the question inverts to what it
                     // would HAVE to fetch. Red because it is not evidence.
                     <span style={{ color: "#b91c1c" }}
                           title="No sold comps. This is what it would have to list at to clear the target profit — a requirement, not an estimate.">
-                      {usd(o.required_list_cents)}?
+                      {usd(o.list_price_cents)}?
                     </span>
                   )}
                 </td>
@@ -2209,7 +2217,7 @@ function BasisLine({ itemId, basis, soldMedian, net, fees, vsActive, onChanged }
             <span style={{ color: net.margin_vs_basis >= 0 ? "#15803d" : "#b91c1c" }}>
               margin <strong>{usd(net.margin_vs_basis)}</strong>
               <span style={{ color: "#666" }}>
-                {" "}— sells {usd(soldMedian)}, you keep {usd(net.sold_median_net)}
+                {" "}— sells {usd(soldMedian)}, you keep {usd(net.net_proceeds_cents)}
               </span>
             </span>
           ) : margin != null ? (

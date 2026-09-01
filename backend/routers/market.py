@@ -931,7 +931,7 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         # Gross is what the market paid; net is what you would keep. Both are
         # returned because the difference is the entire point.
         "net": {
-            "sold_median_net": net_median,
+            "net_proceeds_cents": net_median,
             "margin_vs_basis": margin,
             # What to list at to clear the basis plus the same margin again --
             # the number actually typed into the marketplace.
@@ -1010,7 +1010,7 @@ def _buy_to_resell(db, item_id: int, sell_marketplace: str):
     target = target_profit(db)
 
     sold = _net_sold_by_item(db, str(int(item_id)))
-    net = (sold.get(item_id) or {}).get("net_cents")
+    net = (sold.get(item_id) or {}).get("net_proceeds_cents")
     sell_fm = fee_model(db, sell_marketplace, "sell")
 
     marks = ", ".join(f"'{m}'" for m in RESELL_SOURCES)
@@ -1060,14 +1060,14 @@ def _buy_to_resell(db, item_id: int, sell_marketplace: str):
             # For a lot this is this card's SHARE, not the price of the box.
             "buy_cost_cents": buy_cost,
             "landed_cents": landed,
-            "sell_net_cents": net,
+            "net_proceeds_cents": net,
             "profit_cents": profit,
             "meets_target": profit is not None and profit >= target,
             # With no sold comps there is no estimate to compare against, so
             # the question inverts: what would it have to fetch to be worth
             # doing at all. Shown in place of the estimate, and marked, because
             # it is a requirement rather than a measurement.
-            "required_list_cents": (
+            "list_price_cents": (
                 list_price_for(buy_cost + target, sell_fm)
                 if net is None and buy_cost is not None else None
             ),
@@ -1085,7 +1085,7 @@ def _buy_to_resell(db, item_id: int, sell_marketplace: str):
         "source_names": [names.get(m, m) for m in RESELL_SOURCES],
         "sell_marketplace": sell_marketplace,
         "sell_marketplace_name": names.get(sell_marketplace, sell_marketplace),
-        "sell_net_cents": net,
+        "net_proceeds_cents": net,
         "n_sold": (sold.get(item_id) or {}).get("n", 0),
         "target_profit_cents": target,
         "rows": out,
@@ -1866,8 +1866,8 @@ def _net_sold_by_item(db, ids: Optional[str] = None) -> Dict[int, Dict[str, Any]
         if mkt not in fees:
             fees[mkt] = fee_model(db, mkt, "sell")
         out[item_id] = {
-            "median_cents": median,
-            "net_cents": net_proceeds(median, fees[mkt]),
+            "sell_price_cents": median,
+            "net_proceeds_cents": net_proceeds(median, fees[mkt]),
             "n": len(vals),
             "marketplace": mkt,
         }
@@ -2005,7 +2005,7 @@ def _sold_landed(db, item_id: int) -> Dict[str, Any]:
         if r["shipping_usd"] is not None:
             known_shipping += 1
     return {
-        "median_cents": _median(landed),
+        "landed_median_cents": _median(landed),
         "n": len(landed),
         # How many of them carried a real postage figure rather than the
         # marketplace-wide estimate. A median built mostly on estimates is a
@@ -2097,8 +2097,8 @@ def market_grid(db=Depends(get_db)):
     cards = []
     for item_id in item_ids:
         s = sold.get(item_id)
-        sold_median = s["median_cents"] if s else None
-        sell_net = s["net_cents"] if s else None
+        sell_price = s["sell_price_cents"] if s else None
+        net_proceeds_c = s["net_proceeds_cents"] if s else None
         sell_mkt = s["marketplace"] if s else None
         n_sold = s["n"] if s else 0
 
@@ -2128,9 +2128,9 @@ def market_grid(db=Depends(get_db)):
                              default=None),
             "held": held.get(item_id, 0),
             "wanted": item_id in wanted,
-            "paid": paid,
-            "sold_median_cents": sold_median,
-            "sell_net_cents": sell_net,
+            "cost": paid,
+            "sell_price_cents": sell_price,
+            "net_proceeds_cents": net_proceeds_c,
             "sell_marketplace": sell_mkt,
             "n_sold": n_sold,
             "buy_single": single,
@@ -2138,14 +2138,14 @@ def market_grid(db=Depends(get_db)):
             # sell - paid: margin on what is already held. Only meaningful
             # when something IS held, so it stays None otherwise rather than
             # reporting a profit on a card you do not have.
-            "flip_cents": (
-                sell_net - paid["cost_cents"]
-                if sell_net is not None and paid and held.get(item_id) else None
+            "flip_profit_cents": (
+                net_proceeds_c - paid["cost_cents"]
+                if net_proceeds_c is not None and paid and held.get(item_id) else None
             ),
             # sell - buy: margin on what could be sourced.
-            "arb_cents": (
-                sell_net - cheapest["per_card_cents"]
-                if sell_net is not None and cheapest else None
+            "resell_profit_cents": (
+                net_proceeds_c - cheapest["per_card_cents"]
+                if net_proceeds_c is not None and cheapest else None
             ),
             "arb_via_lot": bool(cheapest and cheapest["line_count"] > 1),
             "comps": comps.get(item_id, []),
@@ -2366,8 +2366,8 @@ def _value_ladder(db) -> Dict[str, Any]:
     eras = _eras_for(db, list(net))
     buckets: Dict[str, List[int]] = {"old": [], "new": []}
     for item_id, row in net.items():
-        if row["net_cents"] is not None:
-            buckets[eras.get(item_id, "new")].append(row["net_cents"])
+        if row["net_proceeds_cents"] is not None:
+            buckets[eras.get(item_id, "new")].append(row["net_proceeds_cents"])
     pooled = buckets["old"] + buckets["new"]
     return {
         "net": net,
@@ -2481,8 +2481,8 @@ def _analyze_lot(db, listing, ladder, wanted, buy_fees,
         # The ladder, in order. A manual value is an override and outranks it.
         if r["value_cents"] is not None:
             value, source = r["value_cents"], "manual"
-        elif sold and sold["net_cents"] is not None:
-            value, source = sold["net_cents"], "sold"
+        elif sold and sold["net_proceeds_cents"] is not None:
+            value, source = sold["net_proceeds_cents"], "sold"
         elif item_id:
             value, source = ladder["era_median"].get(eras.get(item_id, "new")), "era"
         elif r["line_type"] == "unidentified":

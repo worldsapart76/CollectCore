@@ -55,16 +55,30 @@ makes the module discussable; it is not cosmetic, because today's grid column
 labelled `sell` holds net proceeds while the actual sell price has no column at
 all.
 
+Applied 2026-08-31:
+
 | Today | Becomes | Rung |
 |---|---|---|
-| `paid_cents`, `paid.cost_cents` | `cost_cents` | cost |
+| `paid_cents`, and the `paid` container | `cost_cents`, `cost` | cost |
 | `landed_cents`, `per_card_cents` | unchanged — already cost, landed | cost |
-| `sold_median_cents`, `sold_stats.median` | `sell_price_cents` | sell price |
+| `_sold_landed`'s `median_cents` | `landed_median_cents` | cost |
+| `sold_median_cents`, `_net_sold_by_item`'s `median_cents` | `sell_price_cents` | sell price |
 | `sell_net_cents`, `net_cents`, `sold_median_net` | `net_proceeds_cents` | net proceeds |
 | `required_list_cents` | `list_price_cents` | list price |
 | `flip_cents` | `flip_profit_cents` | profit (held) |
 | `arb_cents` | `resell_profit_cents` | profit (sourced) |
 | `target_profit_cents` | unchanged | profit |
+
+Two deviations from the table as first drafted:
+
+- **`sold_stats.median` kept its name.** It comes from a generic `stats()`
+  helper shared with the *active* series, so renaming the key would have put a
+  sell-price name on active asks. Its container already disambiguates it —
+  `d["sold"]["median"]` beside `d["active"]["median"]` reads correctly.
+- **`_sold_landed`'s `median_cents` was renamed** though the table did not ask.
+  It is a landed-**cost** median, and leaving a bare `median_cents` sitting
+  beside a newly-named `sell_price_cents` would have preserved exactly the
+  ambiguity this phase exists to remove.
 
 Grid columns become `… cost · buy · sell · net · flip · arb …` — **sell and net
 sit adjacent on purpose**, because the gap between them is the fee bite and
@@ -396,7 +410,7 @@ sell price, and only for Pocamarket official rows.
 | # | Work | Ships with |
 |---|---|---|
 | **0** | ✅ **BUILT 2026-08-31** — side filter on `_net_sold_by_item`, on `comps_for_card`'s sold stats and its sell fee-model pick, + Pocamarket `side` → `buy` | additive guarded migration in `db.py` |
-| 1 | Vocabulary rename across `market.py`, `MarketIntelPage.jsx`, tests; add the sell-price column | — |
+| 1 | ✅ **BUILT 2026-08-31** — vocabulary rename across `market.py`, `MarketIntelPage.jsx` and four test suites; sell price gains its own column beside net | frontend rebuild |
 | 2 | `GET /market/summary` + admin gate | — |
 | 3 | Library: `$` badge, has-comps filter, caption line, modal value block, deep link | — |
 | 4 | Remove the price tier system; CSV `price` → `list_price` | the one table-drop migration |

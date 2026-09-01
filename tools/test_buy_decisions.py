@@ -138,7 +138,7 @@ print("\n--- sold, landed, so it compares with the asks ---")
 # 18/20/24 each plus $4 postage -> 22/24/28, median 24. A bare median would be
 # 20 and would make every landed ask look worse than it is.
 check("median of what buyers actually paid, all in",
-      keep["sold"]["median_cents"], 2400)
+      keep["sold"]["landed_median_cents"], 2400)
 check("three of them", keep["sold"]["n"], 3)
 check("all three carried a real postage figure",
       keep["sold"]["n_shipping_known"], 3)
@@ -155,7 +155,7 @@ print("\n--- Buy to Resell: Neokyo only, against Mercari US ---")
 check("scoped to neokyo", resell["sources"], ["neokyo"])
 check("selling on mercari US", resell["sell_marketplace"], "mercari_us")
 # Median sold GROSS is 2000; net of the 10% selling fee is 1800.
-check("the estimate is net of selling fees", resell["sell_net_cents"], 1800)
+check("the estimate is net of selling fees", resell["net_proceeds_cents"], 1800)
 check("one neokyo route", len(resell["rows"]), 1)
 row = resell["rows"][0]
 check("it is a lot", row["is_lot"], True)
@@ -170,14 +170,14 @@ check("which this clears", row["meets_target"], True)
 
 print("\n--- with no sold comps the question inverts ---")
 r303 = c.get("/market/comps/303").json()["resell"]
-check("no estimate to compare against", r303["sell_net_cents"], None)
+check("no estimate to compare against", r303["net_proceeds_cents"], None)
 row303 = r303["rows"][0]
 check("so no profit figure", row303["profit_cents"], None)
 # What it would have to fetch to be worth doing at all -- a requirement, not a
 # measurement, which is why the view shows it in red in the estimate's place.
-check("a required list price stands in", row303["required_list_cents"] > 0, True)
+check("a required list price stands in", row303["list_price_cents"] > 0, True)
 check("and it clears the cost plus the target",
-      row303["required_list_cents"] > row303["buy_cost_cents"] + 500, True)
+      row303["list_price_cents"] > row303["buy_cost_cents"] + 500, True)
 
 print("\n--- the lot's verdict ---")
 lot_id = lot_opt["listing_id"]

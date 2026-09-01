@@ -122,16 +122,16 @@ check("mercari_us still sellable",
 
 print("\n--- the sell price pools Mercari US only ---")
 # Median of 2000 and 2400. Unfiltered it would be 1340.
-check("sell price is the US median", grid[401]["sold_median_cents"], 2200)
+check("sell price is the US median", grid[401]["sell_price_cents"], 2200)
 check("built from two comps, not four", grid[401]["n_sold"], 2)
 check("and it is credited to Mercari US", grid[401]["sell_marketplace"], "mercari_us")
-check("net proceeds take the 10% sell fee", grid[401]["sell_net_cents"], 1980)
+check("net proceeds take the 10% sell fee", grid[401]["net_proceeds_cents"], 1980)
 
 print("\n--- a card with only proxy comps has NO sell price ---")
 # The honest answer. A median of Japanese domestic prices is not evidence of
 # what this fetches in the US, and reporting one would be worse than silence.
-check("no sell price", grid[402]["sold_median_cents"], None)
-check("no net proceeds", grid[402]["sell_net_cents"], None)
+check("no sell price", grid[402]["sell_price_cents"], None)
+check("no net proceeds", grid[402]["net_proceeds_cents"], None)
 check("no sold count", grid[402]["n_sold"], 0)
 check("but the card is still in the grid", 402 in grid, True)
 

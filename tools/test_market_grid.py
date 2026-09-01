@@ -148,14 +148,14 @@ print("\n--- what I hold ---")
 check("owned + trade both count as held", grid[101]["held"], 2)
 check("a wanted card is not held", grid[102]["held"], 0)
 check("basis is card-level and says so", g.json()["basis_is_per_card"], True)
-check("paid", grid[101]["paid"]["cost_cents"], 250)
+check("cost", grid[101]["cost"]["cost_cents"], 250)
 
 print("\n--- what it sells for ---")
-check("median of the two sold", grid[101]["sold_median_cents"], 2000)
-check("net of the 10% sell fee", grid[101]["sell_net_cents"], 1800)
+check("median of the two sold", grid[101]["sell_price_cents"], 2000)
+check("net of the 10% sell fee", grid[101]["net_proceeds_cents"], 1800)
 check("sold count", grid[101]["n_sold"], 2)
-check("flip = net - paid", grid[101]["flip_cents"], 1800 - 250)
-check("no flip margin on a card not held", grid[102]["flip_cents"], None)
+check("flip = net - paid", grid[101]["flip_profit_cents"], 1800 - 250)
+check("no flip margin on a card not held", grid[102]["flip_profit_cents"], None)
 
 print("\n--- two buy numbers, never blended ---")
 single = grid[101]["buy_single"]
@@ -166,7 +166,7 @@ print(f"       lot: {lot['currency']} {lot['price_cents']} -> landed"
       f" ${lot['landed_cents']/100:.2f} -> ${lot['per_card_cents']/100:.2f}/card")
 check("lot per-card is the landed total split", lot["per_card_cents"],
       round(lot["landed_cents"] / 2))
-check("arb uses the cheaper route", grid[101]["arb_cents"],
+check("arb uses the cheaper route", grid[101]["resell_profit_cents"],
       1800 - min(single["per_card_cents"], lot["per_card_cents"]))
 check("and says when that route is a lot", grid[101]["arb_via_lot"],
       lot["per_card_cents"] < single["per_card_cents"])
@@ -200,7 +200,7 @@ check("it records a sighting", r.json()["sighting_added"], True)
 g3 = {x["item_id"]: x for x in c.get("/market/grid").json()["cards"]}
 check("the sale joined the series", g3[101]["n_sold"], 3)
 check("median moved to the middle of 15.00/18.00/22.00",
-      g3[101]["sold_median_cents"], 1800)
+      g3[101]["sell_price_cents"], 1800)
 check("and it is no longer buyable", g3[101]["buy_single"], None)
 
 print("\n--- postage rides on the listing, not on an average ---")
