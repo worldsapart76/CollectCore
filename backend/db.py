@@ -252,6 +252,21 @@ def _run_migrations(conn) -> None:
             if cur.rowcount:
                 logger.info("Migration: pocamarket currency KRW -> USD")
 
+    # Pocamarket is a place to BUY, never one to list on. Seeded 'both', which
+    # let its sold rows into the sell-price median -- and the extension sets
+    # sold state from page text ("sold out" / 판매완료), so this fired on its
+    # own with no user action. Unlike the currency fix above this must apply
+    # even where listings exist, because that is precisely where the damage is.
+    #
+    # Guarded on the value still being the seeded 'both' so a deliberate change
+    # is never stomped; re-running is a no-op once applied.
+    if "lkup_mkt_marketplaces" in tables:
+        cur = raw.execute(
+            "UPDATE lkup_mkt_marketplaces SET side = 'buy' "
+            " WHERE marketplace_code = 'pocamarket' AND side = 'both'")
+        if cur.rowcount:
+            logger.info("Migration: pocamarket side both -> buy")
+
     if "mkt_fee_component" in tables:
         cols = {r[1] for r in raw.execute(
             "PRAGMA table_info(mkt_fee_component)").fetchall()}

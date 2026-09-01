@@ -64,6 +64,18 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
   prefix belongs to the API and Vite's dev proxy matches on prefix, so sharing
   it makes a page load and the list endpoint indistinguishable. Layout codes
   read **across × down** (`4x3` = 12 pockets). Admin-only. See the plan doc.
+- Market money has **four distinct rungs** and one word must never cover two:
+  **cost** (what I pay, landed) → **list price** (what I type into Mercari) →
+  **sell price** (what it actually sells for; the sold comp) → **net proceeds**
+  (sell price minus fees). Profit = net proceeds − cost. See the integration
+  plan doc.
+- **Sell-side figures draw only from marketplaces you can sell on**
+  (`side IN ('sell','both')`). The capture extension sets sold state from page
+  text, so a proxy's "out of stock" arrives as `listing_state = 'sold'` with no
+  user action — and on Pocamarket's official section, where one persistent
+  listing per card fluctuates in stock, it isn't a sale at all. Pooling those
+  into the sell price understates every margin. Buy-side figures are a separate
+  question; see `_sold_landed` in the plan doc.
 - SQLite **FK cascades never fire** — `PRAGMA foreign_keys = ON` is only issued
   on `init_db`'s connection. Every delete path must clean up child rows
   explicitly; `FOREIGN KEY` clauses in `schema.sql` are documentation.
@@ -86,7 +98,8 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/image_handling.md` | Photocard image pipeline, R2 conventions, render helpers |
 | `docs/photocard_triage_statuses_plan.md` | **Authoritative** — Undecided/Not Wanted triage statuses: decision-vs-possession split, co-occurrence rules, sweep semantics |
 | `docs/photocard_binder_designer_plan.md` | **Authoritative** — Binder Designer: layouts, spread/mirroring, one-binder-per-card rule, fit-to-space sizing, Wanted sweep |
-| `docs/photocard_pricing_and_trade_export_plan.md` | **Authoritative** — price tiers (tier XOR custom price), trade CSV export, Mercari title rules |
+| `docs/photocard_market_library_integration_plan.md` | **Authoritative** — money vocabulary (cost / list price / sell price / net proceeds), library↔market integration, price-tier removal, open defects |
+| `docs/photocard_pricing_and_trade_export_plan.md` | **Superseded** by the integration plan above — price tiers are being removed (never used in practice). Still the reference for trade CSV export + Mercari title rules |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |
 | `docs/collectcore_books_module_design.md` / `_plan.md` / `_v1_schema_proposal.md` | Books module design, plan, v1 schema |
 | `docs/session_notes.md` | Session history; 2026-04-25 entry = apex-SPA cutover + auth + guest pivot |

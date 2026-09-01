@@ -2059,7 +2059,11 @@ INSERT OR IGNORE INTO lkup_mkt_marketplaces
     -- amounts are entered in and the one it actually charges. A capture
     -- still records KRW correctly if the display is ever switched, since
     -- the currency follows the page rather than the marketplace row.
-    ('pocamarket', 'Pocamarket',  'USD', 'both', 30),
+    -- buy, not both: a sourcing route for the personal collection, never
+    -- somewhere listings are posted. Its sold rows must not reach the
+    -- sell-price median -- and on the official section "sold out" is a restock
+    -- cycle on one persistent listing, not a sale at all.
+    ('pocamarket', 'Pocamarket',  'USD', 'buy',  30),
     ('ebay',       'eBay',        'USD', 'both', 40);
 
 -- USD conversion rates, by currency and effective date.

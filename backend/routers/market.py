@@ -780,8 +780,13 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     active = [r["price_usd"] for r in series
               if r["listing_state"] == "active" and r["price_usd"] is not None
               and r["marketplace"] in sellable]
+    # Sold rows get the SAME restriction, and for the same reason. This half was
+    # missed originally: the extension sets sold state from page text, so a
+    # proxy's "out of stock" was entering the sell-price median as though it
+    # were a US sale. See _net_sold_by_item for the full argument.
     sold = [r["price_usd"] for r in series
-            if r["listing_state"] == "sold" and r["price_usd"] is not None]
+            if r["listing_state"] == "sold" and r["price_usd"] is not None
+            and r["marketplace"] in sellable]
     unconverted = sum(1 for r in series if r["price_usd"] is None)
 
     def stats(vals):
@@ -803,8 +808,15 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     # Comps can span marketplaces; the fee model belongs to whichever one the
     # sales actually happened on. Sold rows decide it — that is the side being
     # modelled — falling back to the most common marketplace overall.
-    sold_mkts = [r["marketplace"] for r in series if r["listing_state"] == "sold"]
-    mkts = sold_mkts or [r["marketplace"] for r in series]
+    # Restricted to sellable on both rungs, matching the `sold` list above. A
+    # card seen only on Neokyo would otherwise resolve to fee_model('neokyo',
+    # 'sell') -- a marketplace with no sell-side components at all, so every
+    # rate reads zero and net proceeds come back equal to the sell price.
+    # Silently fee-free, which is worse than absent.
+    sold_mkts = [r["marketplace"] for r in series
+                 if r["listing_state"] == "sold" and r["marketplace"] in sellable]
+    mkts = sold_mkts or [r["marketplace"] for r in series
+                         if r["marketplace"] in sellable]
     mkt = max(set(mkts), key=mkts.count) if mkts else "mercari_us"
     # Explicitly the SELL side: this figure is what a sale nets. The buy side
     # is a different set of costs entirely (buyer protection, duty, PayPal) and
@@ -1801,7 +1813,7 @@ def _median(values: List[int]) -> Optional[int]:
 
 
 def _net_sold_by_item(db, ids: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
-    """Median SOLD price per card, net of the selling fees where it sold.
+    """Median SELL PRICE per card, and the net proceeds it leaves.
 
     Sole-unit sold sightings only: an ask is what a seller hopes for, and a
     bundle's price is not this card's price. `is_lot` is checked as well as the
@@ -1809,9 +1821,23 @@ def _net_sold_by_item(db, ids: Optional[str] = None) -> Dict[int, Dict[str, Any]
     and N unknowns never entered, which counts as one unit and would otherwise
     walk straight into the series as a sole comp.
 
-    Unfiltered by default, because the lot analyzer's value ladder needs an era
-    median and that is a statistic over the whole series. At this size the whole
-    series costs nothing to compute.
+    SELL-SIDE MARKETPLACES ONLY. This is the same rule `comps_for_card` already
+    applies to the competition set, and it belongs here for a stronger reason: a
+    proxy is somewhere you BUY, so its sold rows are not evidence of what your
+    card fetches. The capture extension sets sold state from page text --
+    Neokyo's "out of stock", Pocamarket's "sold out" -- so without this filter a
+    JPY/KRW domestic price lands in a median labelled "what this sells for on
+    Mercari US", drags it down, and understates every flip and arb margin. On
+    Pocamarket's official section it is not even a sale: one persistent listing
+    per card whose stock fluctuates, so "sold out" is a restock cycle with no
+    buyer and no transaction price.
+
+    The sightings stay in the table and stay correct -- this is a pooling rule,
+    not a data fix, so it corrects history as well as new captures.
+
+    Unfiltered BY ITEM by default, because the lot analyzer's value ladder needs
+    an era median and that is a statistic over the whole series. At this size
+    the whole series costs nothing to compute.
     """
     where = f"AND ln.item_id IN ({ids}) " if ids else ""
     prices: Dict[int, List[int]] = {}
@@ -1821,7 +1847,9 @@ def _net_sold_by_item(db, ids: Optional[str] = None) -> Dict[int, Dict[str, Any]
         "FROM mkt_sighting s "
         "JOIN mkt_listing l ON l.listing_id = s.listing_id "
         "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        "JOIN lkup_mkt_marketplaces m ON m.marketplace_code = l.marketplace "
         "WHERE ln.item_id IS NOT NULL " + where +
+        "  AND m.side IN ('sell', 'both') "
         "  AND s.listing_state = 'sold' AND s.price_usd IS NOT NULL "
         f"  AND l.is_lot = 0 AND {UNITS_SQL} = 1"
     )):
