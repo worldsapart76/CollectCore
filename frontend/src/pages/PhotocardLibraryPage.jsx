@@ -5,6 +5,7 @@ import {
   fetchTopLevelCategories,
   fetchOwnershipStatuses,
   exportPhotocardTradesCsv,
+  getMarketSummary,
 } from "../api";
 import { isAdmin } from "../utils/env";
 import PhotocardFilters from "../components/photocard/PhotocardFilters";
@@ -48,10 +49,15 @@ const COLLECTION_TYPE_ID = COLLECTION_TYPE_IDS.photocards;
 
 export default function PhotocardLibraryPage() {
   // Data
-  const [cards, setCards] = useState([]);
+  const [rawCards, setCards] = useState([]);
   const [groups, setGroups] = useState([]);
   const [categories, setCategories] = useState([]);
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
+  // Sparse map of item_id -> market facts, from /market/summary. One payload
+  // feeding the $ badge, the Market filter, the caption line and the detail
+  // modal, so those four can never disagree about whether a card has data.
+  // Empty on guest builds; getMarketSummary() short-circuits there.
+  const [market, setMarket] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -144,6 +150,12 @@ export default function PhotocardLibraryPage() {
         setGroups(groupData);
         setCategories(categoryData);
         setOwnershipStatuses(statusData);
+        // Deliberately NOT in the Promise.all above: the library must render
+        // with no market data at all rather than block on, or fail because of,
+        // an admin-only extra. A dropped summary costs badges, not the page.
+        getMarketSummary()
+          .then((m) => setMarket(m?.cards || {}))
+          .catch(() => setMarket({}));
 
         // Guest default-filter logic:
         // - First-visit experience (guest has zero real copies): show the full
@@ -204,6 +216,17 @@ export default function PhotocardLibraryPage() {
     window.addEventListener("collectcore:guest-catalog-updated", handler);
     return () => window.removeEventListener("collectcore:guest-catalog-updated", handler);
   }, []);
+
+  // Market facts grafted onto the card rows, once, so filtering, the badge,
+  // the caption and the detail modal all read `c.market` instead of each
+  // reaching into the map with its own lookup.
+  const cards = useMemo(() => {
+    if (!market) return rawCards;
+    return rawCards.map((c) => {
+      const m = market[String(c.item_id)];
+      return m ? { ...c, market: m } : c;
+    });
+  }, [rawCards, market]);
 
   // Member list for filter sidebar — sorted by canonical MEMBER_ORDER
   const filterMembers = useMemo(() => deriveFilterMembers(cards), [cards]);
@@ -564,6 +587,7 @@ export default function PhotocardLibraryPage() {
           onSectionChange={handleSectionChange}
           onClearAll={handleClearAll}
           showTriage={isAdmin && triageStatusIds.size > 0}
+          showMarket={isAdmin}
         />
 
         {/* Grid area */}

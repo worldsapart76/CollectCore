@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   fetchPhotocardMembers,
   fetchPhotocardSourceOrigins,
@@ -16,6 +17,22 @@ import {
 } from "../../api";
 import { API_BASE, getImageUrl } from "../../utils/imageUrl";
 import { useSwipeNav } from "../../hooks/useSwipeNav";
+
+// One money figure with its rung named. A bare dollar amount in a modal that
+// shows three of them is how "sell" came to mean two different things.
+function MarketFigure({ label, cents, note }) {
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", lineHeight: 1.25 }}>
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{label}</span>
+      <strong style={{ fontSize: "var(--text-base)" }}>
+        {cents == null ? "—" : `$${(cents / 100).toFixed(2)}`}
+      </strong>
+      {note && (
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{note}</span>
+      )}
+    </span>
+  );
+}
 
 function resolveCardSrc(path) {
   if (!path) return null;
@@ -51,6 +68,7 @@ export default function PhotocardDetailModal({
     () => Math.max(0, effectiveAllCards.findIndex((c) => c.item_id === card.item_id))
   );
   const currentCard = effectiveAllCards[currentIndex] ?? card;
+  const navigate = useNavigate();
 
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
   const [members, setMembers] = useState([]);
@@ -579,6 +597,56 @@ export default function PhotocardDetailModal({
               {priceError && <div style={styles.fieldError}>{priceError}</div>}
             </FormRow>
 
+            {/* Market — what the comps actually say, beside the price you would
+                ask. Three separate rungs and never one word for two: cost is
+                what it took to get, sell price is what it fetched, net proceeds
+                is what was left after fees. */}
+            <FormRow label="Market">
+              {currentCard.market ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "baseline" }}>
+                  <MarketFigure
+                    label="cost"
+                    cents={currentCard.market.cost_cents}
+                    note={currentCard.market.cost_cents != null ? "estimate" : null}
+                  />
+                  <MarketFigure
+                    label="sell price"
+                    cents={currentCard.market.sell_price_cents}
+                    note={currentCard.market.n_sold
+                      ? `${currentCard.market.n_sold} sold`
+                      : "no sales yet"}
+                  />
+                  <MarketFigure
+                    label="net proceeds"
+                    cents={currentCard.market.net_proceeds_cents}
+                    note={currentCard.market.sell_marketplace
+                      ? `after ${currentCard.market.sell_marketplace} fees`
+                      : null}
+                  />
+                  {currentCard.market.n_active > 0 && (
+                    <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+                      {currentCard.market.n_active} listed now
+                    </span>
+                  )}
+                  {/* Client-side nav, not an anchor: the library's filters and
+                      sort live in a module-level store, which a full page load
+                      would reset -- so coming back would land on a different
+                      list than the one you left. */}
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/market-intel?item=${currentCard.item_id}`)}
+                    style={styles.marketLink}
+                  >
+                    Market detail →
+                  </button>
+                </div>
+              ) : (
+                <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+                  Nothing captured for this card yet.
+                </span>
+              )}
+            </FormRow>
+
             {/* Members */}
             <FormRow label="Members">
               <div style={styles.memberGrid}>
@@ -1038,6 +1106,15 @@ const styles = {
     borderRadius: "var(--radius-sm)",
     background: "var(--bg-base)",
     color: "var(--danger-text)",
+  },
+  marketLink: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    color: "var(--link-text, #2563eb)",
+    fontSize: "var(--text-sm)",
+    cursor: "pointer",
+    textDecoration: "underline",
   },
   fieldError: {
     color: "var(--danger-text)",

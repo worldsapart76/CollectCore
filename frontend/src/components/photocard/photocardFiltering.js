@@ -39,6 +39,7 @@ export const DEFAULT_FILTERS = {
   ownership: emptySection(),
   imageStatus: emptySection(),
   triage: emptySection(),
+  market: emptySection(),
 };
 
 // Standing triage decisions (admin/photocards only). A card is "tracked" when it
@@ -181,6 +182,17 @@ export function applyPhotocardFilters(cards, filters, triageStatusIds) {
       if (!c.back_image_path) missing.push("missing_back");
       return applySection(filters.imageStatus, missing);
     });
+  }
+
+  // Whether the card has anything captured about it in the market module.
+  // `card.market` is grafted on by the library page from /market/summary and is
+  // absent on guest builds, where this section never renders -- so with no
+  // summary loaded every card reads as `no_comps` and an accidental filter
+  // would empty the library rather than silently mis-filter it.
+  if (sectionActive(filters.market)) {
+    result = result.filter((c) =>
+      applySection(filters.market, [c.market ? "has_comps" : "no_comps"])
+    );
   }
 
   if (sectionActive(filters.triage)) {

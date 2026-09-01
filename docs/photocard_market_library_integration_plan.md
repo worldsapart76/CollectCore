@@ -230,8 +230,21 @@ at 255, the render at 307). They share nothing. Only those three lines change.
   an empty state with machinery in it.
 - **Deep link** to `/market-intel?item={item_id}`, opening straight into the
   card overlay. Offered only when comps exist. The market grid's scope is
-  cards-with-data ∪ wanted, so a comped card is always reachable. The return
-  trip already works — library filter state is module-level and survives it.
+  cards-with-data ∪ wanted, so a comped card is always reachable. The param is
+  stripped from the URL on arrival, so closing and reopening the overlay is not
+  fought by a param that keeps reasserting itself.
+
+  **Client-side navigation, never an anchor.** The return trip depends on
+  library filter state living in a module-level store, and a full page load
+  resets it — you would come back to a different list than the one you left. So
+  the link is a `useNavigate()` call, not an `<a href>`.
+
+**Not covered by automated tests.** Phase 3 is entirely UI, and the repo has no
+frontend unit harness — the `.mjs` suites cover the extension's pure libraries,
+and `photocardFiltering.js` imports a `.jsx` component, so Node cannot load it
+without a bundler. Verified instead by: all three bundles building (admin,
+guest, `pcs`), a clean ESLint parse, and the phase 2 contract tests underneath.
+The visible behaviour needs eyes on it.
 
 ---
 
@@ -428,7 +441,7 @@ sell price, and only for Pocamarket official rows.
 | **0** | ✅ **BUILT 2026-08-31** — side filter on `_net_sold_by_item`, on `comps_for_card`'s sold stats and its sell fee-model pick, + Pocamarket `side` → `buy` | additive guarded migration in `db.py` |
 | 1 | ✅ **BUILT 2026-08-31** — vocabulary rename across `market.py`, `MarketIntelPage.jsx` and four test suites; sell price gains its own column beside net | frontend rebuild |
 | 2 | ✅ **BUILT 2026-08-31** — `GET /market/summary` + `getMarketSummary()` | — |
-| 3 | Library: `$` badge, has-comps filter, caption line, modal value block, deep link | — |
+| 3 | ✅ **BUILT 2026-08-31** — `$` badge (replacing `B`), Market filter section, caption value line, modal value block, deep link | rebuild of all three bundles |
 | 4 | Remove the price tier system; CSV `price` → `list_price` | the one table-drop migration |
 | — | **Deferred:** era ladder rung (defect 1) | own pass, measured before/after |
 

@@ -217,7 +217,7 @@ function CardCell({
           primaryBadge={primary}
           otherBadges={other}
           isSpecial={card.is_special}
-          hasBack={!isFrontsBacksMode && !!card.back_image_path}
+          hasComps={!!card.market}
         />
 
         {/* Back image (fronts+backs mode) */}
@@ -242,6 +242,13 @@ function CardCell({
           {card.version && (
             <span style={styles.captionSub}>{card.version}</span>
           )}
+          {card.market && (
+            <span style={styles.captionSub}>
+              {card.market.sell_price_cents != null
+                ? `$${(card.market.sell_price_cents / 100).toFixed(2)} · ${card.market.n_sold} sold`
+                : `${card.market.n_active} listed · no sales yet`}
+            </span>
+          )}
         </div>
       )}
 
@@ -252,7 +259,7 @@ function CardCell({
   );
 }
 
-function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpecial, hasBack }) {
+function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpecial, hasComps }) {
   return (
     <div
       style={{
@@ -303,9 +310,12 @@ function ImageSlot({ path, side, width, height, primaryBadge, otherBadges, isSpe
         </div>
       )}
 
-      {/* Back-image indicator — top-left */}
-      {hasBack && side === "front" && (
-        <div className="pc-badge pc-badge--back" style={styles.backBadge}>B</div>
+      {/* Market data — top-left, where the back-image "B" used to sit. All four
+          corners were taken, and the back indicator was the one earning its
+          place least: the Image filter already answers "which cards have backs"
+          and answers it better. The filter itself is untouched. */}
+      {hasComps && side === "front" && (
+        <div className="pc-badge pc-badge--back" style={styles.backBadge}>$</div>
       )}
 
       {/* Special star — top-right */}

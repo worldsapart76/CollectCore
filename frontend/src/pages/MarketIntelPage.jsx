@@ -1263,6 +1263,23 @@ export default function MarketIntelPage() {
     getMarketSettings().then(setSettings).catch(() => {});
   }, []);
 
+  // Arriving from the library's "Market detail →" link. Read once on mount and
+  // then stripped from the URL, so a later close-and-reopen is not fought by a
+  // param that keeps reasserting itself.
+  //
+  // No existence check before opening: the link is only ever offered for a card
+  // /market/summary returned, and a hand-typed id that has no data lands on the
+  // overlay's own error rather than being silently ignored.
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("item"));
+    if (!Number.isInteger(id) || id <= 0) return;
+    setView("cards");
+    setCardTab("keep");
+    setSelected(id);
+    setOpen(true);
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
   useEffect(() => {
     if (!selected) return;
     setDetail(null);

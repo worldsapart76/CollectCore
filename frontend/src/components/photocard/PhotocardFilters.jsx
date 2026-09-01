@@ -12,6 +12,7 @@
  *   ownership     — { mode, include, exclude }  (ownership_status_id)
  *   imageStatus   — { mode, include, exclude }  ("missing_front" | "missing_back")
  *   triage        — { mode, include, exclude }  ("tracked" | "untracked")
+ *   market        — { mode, include, exclude }  ("has_comps" | "no_comps")
  *
  * Props:
  *   groups            — array of { group_id, group_name }
@@ -23,6 +24,9 @@
  *   filters           — current filter state object
  *   onSectionChange   — callback(filterKey, value)
  *   onClearAll        — callback to reset all filters
+ *   showMarket        — render the Market section (admin only; /market/summary
+ *                       never loads on guest builds, so every card would read
+ *                       as "no comps" and the filter would empty the library)
  *   showTriage        — render the Triage section (admin only; the triage
  *                       statuses don't exist on /pcs/)
  */
@@ -44,6 +48,7 @@ export default function PhotocardFilters({
   onSectionChange,
   onClearAll,
   showTriage = false,
+  showMarket = false,
 }) {
   const hasFilters =
     filters.notesSearch?.trim() ||
@@ -55,7 +60,8 @@ export default function PhotocardFilters({
     sectionActive(filters.version) ||
     sectionActive(filters.ownership) ||
     sectionActive(filters.imageStatus) ||
-    sectionActive(filters.triage);
+    sectionActive(filters.triage) ||
+    sectionActive(filters.market);
 
   return (
     <FilterSidebarShell
@@ -147,6 +153,21 @@ export default function PhotocardFilters({
           {Not Wanted + Trade} card is Tracked (you hold a copy), which an
           Ownership exclusion could not express — applySection's exclude is
           card-wide and would hide it. "Untracked" is the triage queue. */}
+      {/* Market data. The verb behind "show me what I have comps on" -- a
+          badge alone would be a needle hunt across 11,000 thumbnails, and the
+          header's count is half the answer. */}
+      {showMarket && (
+        <TriStateFilterSection
+          title="Market"
+          items={[
+            { id: "has_comps", label: "Has comps" },
+            { id: "no_comps", label: "No comps" },
+          ]}
+          section={filters.market}
+          onChange={(s) => onSectionChange("market", s)}
+        />
+      )}
+
       {showTriage && (
         <TriStateFilterSection
           title="Triage"
