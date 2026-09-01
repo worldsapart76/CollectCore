@@ -57,6 +57,16 @@
       ],
       "run_at": "document_idle",
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://collectcoreapp.com/*",
+        "http://localhost:5181/*"
+      ],
+      "js": [
+        "content/appbridge.js"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

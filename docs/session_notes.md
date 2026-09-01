@@ -6,6 +6,58 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-09-01 (US CDT) — Listing photos served from the extension, not hosted
+
+Started as a question about the capture extension's ✓ state and ended somewhere
+more useful. Two findings, one shipped fix.
+
+**Why cards stop showing as logged.** The tile ✓ is derived live from the
+observation store (`GET_KEYS` → `allKeys()`), and *Clear* genuinely deleted the
+record — so clearing the panel erased the extension's memory of ever having seen
+a listing. An archive design was sketched (keep the record, mark `archivedAt`,
+third grey-✓ dot state, re-capture on click) but **not built** — the
+conversation moved to images and that is what shipped. Still worth doing.
+
+**Why market listings render blank.** `mkt_listing.thumbnail_url` is a hotlink
+to the marketplace CDN, which drops the photo when the listing closes. Worst on
+Japanese-titled rows, where the picture is the only identifier, and on the lot
+list, which showed **no image at all**. This was the documented revisit
+condition on the plan doc's declined R2 upload — so the decision was reopened.
+
+**R2 was reconsidered and rejected on scope, not cost.** 8GB of 640px JPEGs sits
+inside R2's free tier; the hosting was ~$0 either way. But the extension already
+downloads a 640px copy at capture, the work is admin-only on one desktop, and
+`lib/db.js`'s `getImage` was **dead code** — blobs were written and never read.
+The bytes were already in the right place; only delivery was missing.
+
+Built instead:
+
+- `extension/content/appbridge.js` — runs on `collectcoreapp.com`, answers
+  batched `window.postMessage` key requests with `blob:` URLs. A content script
+  rather than `externally_connectable`, which would need a pinned extension id
+  and therefore a packaging step this extension deliberately does not have.
+- `frontend/src/marketImages.js` — batches on-screen keys into one round trip,
+  caches per key, **always falls back to `thumbnail_url`**. No extension → the
+  page renders exactly what it did before.
+- **Image lifetime split from observation lifetime** (`extension/lib/db.js`).
+  `deleteObservation` and `clearAll` used to take the blob too, which made the
+  safest-looking button in the extension the one that destroyed irreplaceable
+  bytes. Nothing removes image bytes implicitly now.
+- `navigator.storage.persist()` at startup — unpersisted IndexedDB is evictable
+  under disk pressure, and these are one-shot captures.
+- `GET /market/listings/images` + panel **Images** button: backfills a local copy
+  of every thumbnail still alive on a CDN. One-shot rescue; more rots daily.
+- `external_id` added beside `thumbnail_url` on all five market query sites, so
+  the app can rebuild the extension's `(marketplace, external_id)` key.
+- Photos now render in the **lot list** and **lot analyzer** (96px), which had
+  none, as well as the comps evidence list. The panel's own thumbnails upgrade
+  to the stored blob too — they were hotlinking and rotting the same way.
+
+Accepted explicitly: one profile, one machine, no backup. Losing them returns
+the screen to hotlinks that work until they don't.
+
+**Next:** the archive/grey-✓ design above; then the v2 market workspace.
+
 ### 2026-08-31 (US CDT) — Money vocabulary + library↔market integration BUILT (phases 0-4)
 
 Plan: `docs/photocard_market_library_integration_plan.md` (**authoritative**).

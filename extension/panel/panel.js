@@ -92,7 +92,8 @@ function row(rec) {
   // load, missing says none was read. They point at different bugs, so they
   // must not look alike. Also covers a URL that 404s later, which is the same
   // situation arriving a different way.
-  setThumb(img, rec.thumbnailUrl);
+  img.dataset.thumbKey = rec.key;
+  setThumb(img, rec.thumbnailUrl, rec.key);
   // After setThumb, which writes its own title: the "image N of M" hint has to
   // survive, and it is the only thing saying the pick can be changed.
   makePickable(img, rec);
@@ -206,8 +207,8 @@ function row(rec) {
   del.type = 'button';
   del.className = 'row-remove';
   del.title = rec.syncedAt
-    ? 'Remove from this queue (CollectCore keeps it)'
-    : 'Delete — NOT synced, this is the only copy';
+    ? 'Remove from this queue (CollectCore keeps it, and so is the photo)'
+    : 'Delete — NOT synced, this is the only copy. The photo is kept.';
   del.textContent = '✕';
   del.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -410,7 +411,7 @@ async function renderCandidates() {
 // Identification is the job this image does, so its absence matters and has to
 // be legible: "no photo" is a parser that read nothing, "broken" is a CDN that
 // stopped serving. The dotted placeholder says which without a console.
-function setThumb(img, url) {
+function setThumb(img, url, key = null) {
   img.classList.toggle('thumb-empty', !url);
   img.title = url ? '' : 'No photo was read from the page';
   if (!url) {
@@ -423,6 +424,37 @@ function setThumb(img, url) {
     img.title = 'The photo was captured but no longer loads';
     img.removeAttribute('src');
   };
+  // The panel hotlinked too, so its own thumbnails went dead alongside the
+  // app's -- on the very rows still waiting to be identified, which is where a
+  // photo is the whole point. Upgrade to the stored blob when there is one.
+  // Async and after the hotlink is already set, so a slow lookup shows the
+  // remote image first rather than an empty square.
+  if (key) upgradeThumb(img, key);
+}
+
+const thumbUrls = new Map();
+
+async function upgradeThumb(img, key) {
+  try {
+    let url = thumbUrls.get(key);
+    if (url === undefined) {
+      const res = await send({ type: 'GET_IMAGES', keys: [key] });
+      const dataUrl = res?.images?.[key];
+      url = dataUrl
+        ? URL.createObjectURL(await (await fetch(dataUrl)).blob())
+        : null;
+      thumbUrls.set(key, url);
+    }
+    if (!url) return;
+    // The row may have been re-rendered onto a different listing while this
+    // was in flight; only the element still showing this key may be touched.
+    if (img.dataset.thumbKey !== key) return;
+    img.onerror = null;
+    img.classList.remove('thumb-empty');
+    img.src = url;
+  } catch {
+    // The hotlink is already in place; a failed upgrade changes nothing.
+  }
 }
 
 // Click the thumbnail to step through the other images the page offered.
@@ -595,7 +627,8 @@ function openAssociate(rec) {
   $('assoc-open').hidden = false;
   $('assoc-lot').closest('.assoc-actions').hidden = false;
 
-  setThumb($('assoc-img'), rec.thumbnailUrl);
+  $('assoc-img').dataset.thumbKey = rec.key;
+  setThumb($('assoc-img'), rec.thumbnailUrl, rec.key);
   makePickable($('assoc-img'), rec);
   $('assoc-name').textContent = rec.name || '(untitled)';
   $('assoc-open').href = rec.listingUrl;
@@ -728,6 +761,68 @@ $('sync').addEventListener('click', async () => {
   );
 });
 
+// Stored listing photos. These are what CollectCore renders for a listing whose
+// marketplace has dropped the hotlinked photo, which every listing's does once
+// it closes — so this is a one-shot rescue and the window is closing the whole
+// time. Everything already rotted is unrecoverable; the point is to save what
+// has not.
+$('backfill').addEventListener('click', async () => {
+  const stats = await send({ type: 'IMAGE_STATS' });
+  const mb = ((stats?.bytes || 0) / 1048576).toFixed(1);
+  if (!confirm(
+    `Holding ${stats?.count ?? 0} listing photos (${mb} MB).\n\n` +
+    `Fetch a local copy of every listing photo CollectCore does not have one ` +
+    `for yet? Listings that have already closed will have had their photo ` +
+    `dropped by the marketplace and cannot be recovered.`
+  )) return;
+
+  $('backfill').disabled = true;
+  setStatus('Asking CollectCore which listings it has…');
+
+  // Fetched HERE, not in the service worker. CollectCore sits behind Cloudflare
+  // Access, and this page carries the CF_Authorization cookie on a cross-origin
+  // fetch where the worker does not -- from there the request is bounced to the
+  // Google redirect and reported as an expired sign-in on a session that is
+  // fine. Every other authed call in this extension is made from the panel.
+  const manifest = await apiFetch('/market/listings/images');
+  if (!manifest.ok) {
+    $('backfill').disabled = false;
+    // 404/405 means the endpoint is not on the server yet, which is a deploy
+    // and not a fault. Worth saying, because "http 405" reads like a bug in the
+    // extension and sends you looking in the wrong place.
+    const missing = /^http 40[45]/.test(manifest.reason || '');
+    setStatus(
+      missing
+        ? 'Images need a CollectCore deploy — /market/listings/images is not live yet.'
+        : manifest.reason === 'signin'
+          ? SIGNIN_HINT
+          : `Images failed: ${manifest.reason}`
+    );
+    return;
+  }
+
+  setStatus('Fetching listing photos…');
+  const res = await send({
+    type: 'BACKFILL_IMAGES',
+    listings: manifest.data?.listings || [],
+  });
+  $('backfill').disabled = false;
+
+  if (!res?.ok) {
+    setStatus(`Images failed: ${res?.reason || 'no reply from the extension'}`);
+    return;
+  }
+  setStatus(
+    `Images: stored ${res.stored}, already had ${res.alreadyHeld}` +
+    (res.failed ? `, ${res.failed} gone from the marketplace` : '')
+  );
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type !== 'BACKFILL_PROGRESS') return;
+  setStatus(`Fetching listing photos… ${msg.done}/${msg.total}`);
+});
+
 $('refresh').addEventListener('click', () => refreshCards());
 $('import').addEventListener('click', () => $('import-file').click());
 
@@ -791,6 +886,8 @@ ${unsynced} unsynced will be kept here.` : '')
   if (!confirm(
     `None of these ${recs.length} have been synced — this is the only copy ` +
     `and deleting cannot be undone.
+
+The listing photos are kept either way.
 
 Delete anyway?`
   )) return;

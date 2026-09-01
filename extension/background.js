@@ -12,13 +12,20 @@ import {
   allObservations,
   allKeys,
   putImage,
+  getImage,
+  imageKeys,
+  imageStats,
   clearAll,
 } from './lib/db.js';
 
-// Hosts the capture content script runs on. Must stay in step with `matches`
-// in manifest.json -- a host listed there but missing here loads the script and
-// then never gets told the session is active, so the page comes up with no
-// buttons and nothing says why.
+// Hosts the capture content script runs on. Must stay in step with the
+// `content/capture.js` entry's `matches` in manifest.json -- a host listed
+// there but missing here loads the script and then never gets told the session
+// is active, so the page comes up with no buttons and nothing says why.
+//
+// NOT every content script's hosts: content/appbridge.js also runs on
+// collectcoreapp.com, and that is a place to READ captured images, never to
+// capture. Adding it here would arm the capture overlay on the admin app.
 const CAPTURE_HOSTS =
   /^https:\/\/(www\.)?(mercari\.com|neokyo\.com|ebay\.com|pocamarket\.com)\//;
 
@@ -52,6 +59,30 @@ async function hydrate() {
 }
 hydrate();
 chrome.runtime.onStartup.addListener(hydrate);
+
+// Captured images are the app's only copy — the marketplace CDN drops the photo
+// when the listing closes. Unpersisted IndexedDB is "best effort" storage that
+// Chrome may evict under disk pressure with no warning and no way to get the
+// bytes back, so ask for the durable kind. Extensions are normally granted it
+// without a prompt; a refusal is worth knowing about rather than discovering as
+// a hole in the archive months later.
+async function requestPersistence() {
+  try {
+    if (!navigator.storage?.persist) return;
+    if (await navigator.storage.persisted()) return;
+    const granted = await navigator.storage.persist();
+    if (!granted) {
+      console.warn(
+        'CollectCore: persistent storage refused — captured images may be ' +
+          'evicted if the disk fills.'
+      );
+    }
+  } catch {
+    // Not fatal: capture still works, the bytes are just evictable.
+  }
+}
+requestPersistence();
+chrome.runtime.onInstalled.addListener(requestPersistence);
 
 // Mercari thumbnails carry their own dimensions in the query string, so a
 // bigger image is free. 200px is unusable for comparing photocard versions.
@@ -255,6 +286,119 @@ async function cacheImage(key, url) {
   } catch {
     // A missing thumbnail must never fail the capture itself.
   }
+}
+
+// --- Serving stored images -------------------------------------------------
+//
+// The app reads its listing thumbnails from here, through the content-script
+// bridge on collectcoreapp.com. Blobs cannot cross chrome.runtime messaging --
+// it serialises as JSON -- so they go over as data URLs and the bridge turns
+// them back into blob: URLs on the page's own origin. That keeps the base64
+// out of the DOM and out of React state; only the wire pays for it.
+
+function blobToDataUrl(blob) {
+  // No FileReader in an MV3 service worker. Manual base64 in chunks, because
+  // spreading a 100KB Uint8Array into String.fromCharCode as one call blows
+  // the argument limit.
+  return blob.arrayBuffer().then((buf) => {
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(
+        null,
+        bytes.subarray(i, i + 0x8000)
+      );
+    }
+    const type = blob.type || 'image/jpeg';
+    return `data:${type};base64,${btoa(binary)}`;
+  });
+}
+
+// Batched on purpose: the app asks for the rows it has on screen in one round
+// trip rather than waking the worker once per thumbnail. Missing keys are
+// simply absent from the reply -- the caller falls back to the hotlink, which
+// still works for a listing that is still open.
+async function imagesFor(keys) {
+  const out = {};
+  for (const key of keys || []) {
+    try {
+      const rec = await getImage(key);
+      if (rec?.blob) out[key] = await blobToDataUrl(rec.blob);
+    } catch {
+      // One unreadable blob must not fail the whole batch.
+    }
+  }
+  return out;
+}
+
+// --- Backfill --------------------------------------------------------------
+//
+// Everything captured before images were served from here is a hotlink on the
+// server and a blob only if its observation was never cleared. This stores a
+// local copy of every thumbnail still alive on the CDN. It is a one-shot
+// rescue: what has already rotted is gone, and every day it is not run, more of
+// it rots.
+//
+// The listing manifest is fetched BY THE PANEL and passed in, rather than being
+// fetched here. CollectCore is behind Cloudflare Access, and an extension page
+// carries the CF_Authorization cookie on a cross-origin fetch where a service
+// worker does not -- the worker's request gets bounced to the Google redirect,
+// which then dies on CORS and surfaces as "sign-in expired" on a session that
+// is perfectly valid. Every other authed call in this extension already runs
+// from the panel; this one had no business being the exception.
+//
+// The CDN fetches below stay here: they are unauthenticated, they are already
+// what cacheImage does at capture time, and the worker remains the single
+// writer to IndexedDB.
+
+const BACKFILL_CONCURRENCY = 4;
+
+async function backfillImages(rows, onProgress) {
+  const have = new Set(await imageKeys());
+  const withUrl = rows.filter((r) => r.thumbnail_url);
+  const queue = withUrl.filter(
+    (r) => !have.has(obsKey(r.marketplace, r.external_id))
+  );
+  const total = queue.length;
+
+  let done = 0;
+  let stored = 0;
+  let failed = 0;
+
+  // A fixed pool rather than Promise.all over everything: a few thousand
+  // simultaneous fetches at one CDN is indistinguishable from an attack, and
+  // the whole design rests on this traffic looking like browsing.
+  async function worker() {
+    for (;;) {
+      const row = queue.shift();
+      if (!row) return;
+      const key = obsKey(row.marketplace, row.external_id);
+      await cacheImage(key, row.thumbnail_url);
+      // cacheImage swallows its own failures so a capture never dies on a bad
+      // thumbnail, which leaves the store as the only honest report of whether
+      // anything actually landed.
+      if (await getImage(key)) stored++;
+      else failed++;
+      done++;
+      if (onProgress && done % 10 === 0) onProgress({ done, total, stored, failed });
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(BACKFILL_CONCURRENCY, total) }, worker)
+  );
+
+  return {
+    ok: true,
+    scanned: rows.length,
+    noUrl: rows.length - withUrl.length,
+    alreadyHeld: withUrl.length - total,
+    stored,
+    // Almost always a listing that has already closed and had its photo
+    // dropped by the marketplace. Nothing can be done about those; the count
+    // is here so the number is a known loss rather than a silent one.
+    failed,
+  };
 }
 
 // `status` is the source of truth for state, never which filter was running —
@@ -641,6 +785,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'GET_KEYS':
         sendResponse({ ok: true, keys: await allKeys() });
         break;
+      // Serving the app. Sent by content/appbridge.js on collectcoreapp.com,
+      // and by the panel for its own thumbnails.
+      case 'GET_IMAGES':
+        sendResponse({ ok: true, images: await imagesFor(msg.keys) });
+        break;
+      case 'IMAGE_STATS': {
+        const stats = await imageStats();
+        sendResponse({
+          ok: true,
+          ...stats,
+          persisted: await navigator.storage
+            ?.persisted?.()
+            .catch(() => null),
+        });
+        break;
+      }
+      case 'BACKFILL_IMAGES': {
+        const result = await backfillImages(msg.listings || [], (p) => {
+          chrome.runtime
+            .sendMessage({ type: 'BACKFILL_PROGRESS', ...p })
+            .catch(() => {});
+        });
+        sendResponse(result);
+        break;
+      }
       case 'GET_ALL':
         sendResponse({ ok: true, records: await allObservations() });
         break;

@@ -96,6 +96,42 @@ pushing again.
 > offline fallback for when the index cannot be fetched from prod. There is no
 > capture-import; the server copy is the restore path.
 
+**Clearing does not remove the photos.** Captured images have a different
+lifetime to the queue rows they arrived with — see *Listing photos* below.
+
+## Listing photos
+
+CollectCore stores only a **hotlink** to the marketplace's own CDN, and the
+marketplace drops the photo when the listing closes. So a comp captured months
+ago renders as a blank square, and that hurts most on exactly the rows where the
+title is Japanese and the picture was the only way to tell what the card is.
+
+The extension keeps a 640px copy of every thumbnail it captures, and
+`content/appbridge.js` serves those to the app on `collectcoreapp.com`. Nothing
+is uploaded anywhere — the photos live in this browser profile, on this machine.
+
+- The market module asks over `window.postMessage`; the bridge answers with
+  `blob:` URLs. No extension, or no stored copy, and the app falls back to the
+  hotlink exactly as it did before.
+- **Images** in the panel backfills: it fetches a local copy of every listing
+  photo still alive on a CDN. This is a **one-shot rescue** — anything already
+  closed has had its photo dropped and cannot be recovered, and more rots every
+  day it is not run. It needs `GET /market/listings/images`, so CollectCore has
+  to be deployed with it; the button says so if it is missing.
+- **Authenticated calls are made from the panel, never the service worker.**
+  A worker fetch does not carry the Cloudflare Access cookie and gets bounced to
+  the login redirect, which `lib/api.js` reports as `signin` — "Sign-in expired"
+  on a session that is fine. The worker fetches marketplace CDNs only.
+- **Nothing deletes image bytes.** Not *Clear*, not un-capturing a tile, not
+  removing a row — and there is no purge button either. That is deliberate: the
+  blob is irreplaceable and the row is not. Reclaiming the space means removing
+  the extension.
+- Storage is requested as **persistent**, so Chrome will not evict it under
+  disk pressure.
+
+There is **no backup**, by choice. Losing the profile means going back to
+hotlinks that work until they don't, which is where this started.
+
 ## The card index
 
 The picker matches against a local copy of your library, pulled straight from
@@ -527,7 +563,7 @@ tile at all.
 |---|---|
 | `manifest.json` | MV3 manifest, permissions, content-script matches |
 | `background.js` | Service worker — activation state, capture writes, image fetch |
-| `lib/db.js` | IndexedDB wrapper for captures (service worker is the single writer) |
+| `lib/db.js` | IndexedDB wrapper for captures and photos (service worker is the single writer). **The two stores have different lifetimes** |
 | `lib/api.js` | Talking to CollectCore — CF Access cookie, sign-in detection |
 | `lib/cardIndex.js` | Local card library — storage, server refresh, search |
 | `lib/matcher.js` | Title → candidate cards. Pure; `node tools/test_matcher.mjs` exercises it |
@@ -536,6 +572,7 @@ tile at all.
 | `content/fiber.js` | **Page world** (`"world": "MAIN"`) — reads React's fiber, stamps `data-cc-item` on tiles |
 | `content/capture.js` | Isolated world — tile overlay, reads the stamp. Standalone: content scripts cannot import modules |
 | `content/overlay.css` | Capture dot styling |
+| `content/appbridge.js` | Runs on `collectcoreapp.com` — serves stored listing photos to the app as `blob:` URLs |
 | `panel/` | Side panel — capture list, associate view, armed mode |
 
 ## Syncing to CollectCore

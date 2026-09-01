@@ -83,6 +83,16 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
 - SQLite **FK cascades never fire** — `PRAGMA foreign_keys = ON` is only issued
   on `init_db`'s connection. Every delete path must clean up child rows
   explicitly; `FOREIGN KEY` clauses in `schema.sql` are documentation.
+- **Listing photos are local-only and never deleted implicitly.**
+  `mkt_listing.thumbnail_url` is a hotlink that dies when the listing closes;
+  the real photo is a blob in the extension's IndexedDB, served to the app by
+  `extension/content/appbridge.js` and rendered via `frontend/src/marketImages.js`.
+  Two consequences: **the image store's lifetime is separate from the
+  observation store's** — clearing the capture queue must never take the blobs
+  with it, which it used to — and every market endpoint returning
+  `thumbnail_url` must also return `external_id`, because
+  `(marketplace, external_id)` is the key the app looks the photo up by.
+  Nothing is uploaded; there is no backup, by decision.
 
 ## UI Design Principles
 

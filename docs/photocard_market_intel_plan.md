@@ -722,6 +722,21 @@ An extension is not a person clicking through Google. Three doors:
 An MV3 background-worker fetch uses the browser's cookie jar, so with host
 permission the extension sends a live `CF_Authorization` automatically.
 
+> **Corrected 2026-09-01 — make authed calls from the PANEL, not the worker.**
+> The paragraph above is wrong in practice. A cross-origin fetch from the side
+> panel carries `CF_Authorization`; the same fetch from the service worker does
+> not, and Access answers it with a 302 to `collectcore.cloudflareaccess.com`.
+> That host is not in `host_permissions`, so the redirect dies on CORS, the
+> fetch **throws**, and `apiFetch` reports its catch-all `reason: 'signin'` —
+> "Sign-in expired" on a session that is perfectly valid.
+>
+> Found when the image backfill (the first authed call written in the worker)
+> failed immediately while a card-index refresh from the panel succeeded in the
+> same second. The rule: **every authenticated CollectCore call is made from
+> `panel/panel.js`.** The worker may fetch marketplace CDNs, which need no
+> cookie. Watch for the same false signal elsewhere — `reason: 'signin'` covers
+> every thrown fetch, so it names a cause it has not actually established.
+
 - The cookie lives in the **profile**, not in a tab. A tab open for three days
   does not help; a **reload** does, because that re-runs the Access check and
   reissues the cookie (silently, if the Google session is live). "Reload the
@@ -1757,27 +1772,57 @@ everything, prune later if volume ever justifies it.
   IndexedDB handles comfortably.
 - **Thumbnail only at capture.** The full photo set is fetched on demand from
   the review queue (see Enrich), not automatically.
-- **On sync, upload to R2** under the `listings/` prefix via
-  `images.collectcoreapp.com` — the same client and custom domain used for
-  `catalog/` and `admin/`. Not in the backup ZIP; R2 is independently durable.
-
-> **NOT BUILT, and DECLINED 2026-08-30.** The extension stores the blob
-> locally as designed, but `POST /market/captures` sends only `thumbnailUrl`,
-> so server-side thumbnails are hotlinked to the marketplace's CDN and **will
-> rot when listings close**.
->
-> Decided not to close it. The bytes are in the browser where identification
-> actually happens, which is the job the asymmetry above was about; a blank
-> thumbnail on a *historical* comp is the cosmetic case the earlier draft
-> correctly identified. What it costs is portability — captures do not follow
-> you to another machine — and that is not a constraint today.
->
-> Revisit if captures ever need to be worked from a second machine, or if the
-> comp view's audit thumbnails going blank turns out to matter in practice.
-> Nothing else depends on it.
+- ~~**On sync, upload to R2** under the `listings/` prefix.~~ **Not done — see
+  the served-locally decision below.** The R2 design is kept here as the
+  documented upgrade path if the single-machine constraint ever lifts.
 - **Pruning, if ever needed:** an observation associated to a single catalog
   card has a library image already, so its captured image is the first
   candidate to drop. Unassociated and lot images are never pruned.
+
+#### Served from the extension, not hosted — BUILT 2026-09-01
+
+The R2 half above was **declined 2026-08-30** on the grounds that a blank
+thumbnail on a historical comp is cosmetic, then **reopened 2026-09-01** on the
+revisit condition it named: reviewing listings in the market module without
+photos turned out to be genuinely hard, because a Japanese title identifies
+nothing and the lot list showed no image at all.
+
+R2 was reconsidered and **rejected on scope, not on cost** (~$0 either way —
+8GB of 640px JPEGs is inside R2's free tier). The work is admin-only, on one
+desktop, and the bytes were *already on that desktop*. Hosting them would have
+added an upload endpoint, a publish script, a column and a second copy to solve
+a delivery problem that a content script solves with none of it.
+
+So the images stay in the extension's IndexedDB and are **served to the app over
+a content-script bridge**:
+
+- `extension/content/appbridge.js` runs on `collectcoreapp.com`, answers
+  `window.postMessage` requests for a batch of keys, and hands back
+  `blob:` URLs. A content script rather than `externally_connectable` because
+  the latter needs a pinned extension id, and this extension has no packaging
+  step to pin one with.
+- `frontend/src/marketImages.js` is the app's half: batches the keys on screen
+  into one round trip, caches per key, and **falls back to `thumbnail_url`**
+  whenever there is no extension, no stored blob, or no answer. With the
+  extension absent the module renders exactly what it always did.
+- The dedupe key is `(marketplace, external_id)` — the same one the extension
+  keys captures on — so every market endpoint that returns `thumbnail_url` now
+  returns `external_id` beside it.
+- **`navigator.storage.persist()` is requested at startup.** Unpersisted
+  IndexedDB is evictable under disk pressure, which for one-shot captures is a
+  silent unrecoverable loss.
+- **Image lifetime is split from observation lifetime** (`extension/lib/db.js`).
+  Clearing the panel used to delete the blob with the record, which made the
+  safest-looking button the one that destroyed irreplaceable bytes. Images are
+  now removed only by an explicit purge.
+- `GET /market/listings/images` + the panel's **Images** button backfill a local
+  copy of every thumbnail still alive on a CDN. One-shot rescue; what has
+  already rotted is gone.
+
+**Accepted, explicitly:** the images live in one browser profile on one machine,
+are in no backup, and are not in the SQLite hot-copy. Losing them returns this
+screen to hotlinks that work until they don't — which is where it was before,
+so the downside of the loss is bounded by the status quo.
 
 ### Backup
 

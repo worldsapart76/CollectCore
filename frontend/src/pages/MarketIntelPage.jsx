@@ -9,6 +9,7 @@ import {
   listFeeComponents, createFeeComponent, updateFeeComponent,
   deleteFeeComponent, setOfferDiscount, setBoxSize,
 } from "../api";
+import { useListingImage } from "../marketImages";
 
 // Price comps from the browser-extension captures.
 // Design: docs/photocard_market_intel_plan.md.
@@ -93,6 +94,46 @@ function Spread({ label, stats, scaleMax, color }) {
 // from "20 comps", and the overall figure hides the part that decides whether
 // to trust it.
 const SOURCE_INITIAL = { mercari_us: "M", neokyo: "N", pocamarket: "P", ebay: "E" };
+
+// A listing's photo.
+//
+// Prefers the copy the capture extension stored on this machine and falls back
+// to `thumbnail_url`, which is a hotlink to the marketplace's CDN and goes dead
+// when the listing closes. See src/marketImages.js for why, and note that with
+// no extension installed this renders exactly what it always did.
+//
+// Its own component rather than a hook at each call site because most of these
+// are inside a .map() over listings, where a hook cannot go.
+function ListingThumb({ listing, size = 40, style }) {
+  const src = useListingImage(
+    listing?.marketplace,
+    listing?.external_id,
+    listing?.thumbnail_url
+  );
+  const base = {
+    width: size, height: size, objectFit: "cover", borderRadius: 4,
+    background: "#f0f0f0", flexShrink: 0, ...style,
+  };
+  // A dead hotlink renders as a broken-image glyph, which is noisier than the
+  // empty square it replaced and says nothing useful. Swap it for the plain
+  // placeholder on error.
+  if (!src) return <div style={base} />;
+  return (
+    <img
+      // Keyed on src so a hotlink that failed and then resolves to a stored
+      // blob remounts clean. Without it the hidden-on-error element below stays
+      // hidden after the good image arrives.
+      key={src}
+      src={src}
+      alt=""
+      loading="lazy"
+      style={base}
+      onError={(e) => {
+        e.currentTarget.style.visibility = "hidden";
+      }}
+    />
+  );
+}
 
 function ageDays(iso) {
   if (!iso) return null;
@@ -428,6 +469,7 @@ function LotList({ lots, selected, onSelect }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr>
+            <th style={{ ...th, width: 44 }} aria-label="photo" />
             <th style={{ ...th, textAlign: "left" }}>lot</th>
             <th style={th} title="cards in the listing, counting quantity">cards</th>
             <th style={th} title="identified cards still to be entered">unknown</th>
@@ -447,6 +489,12 @@ function LotList({ lots, selected, onSelect }) {
                 background: selected === l.listing_id ? "#eef6ff" : "transparent",
               }}
             >
+              {/* A lot is the one row where the title is least use — bundles are
+                  listed as トレカ まとめ売り and nothing else — so the photo is
+                  not decoration here, it is the only way to see what is in it. */}
+              <td style={{ ...td, padding: "3px 4px" }}>
+                <ListingThumb listing={l} size={36} />
+              </td>
               <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>
                 {l.delisted_at && (
                   <span title="no longer listed" style={{ color: "#999" }}>✕ </span>
@@ -688,6 +736,11 @@ function LotAnalyzer({ lot, onChanged, onDeleted, onError }) {
 
   return (
     <div style={{ marginTop: 14, opacity: busy ? 0.6 : 1 }}>
+      {/* Bigger than the list's, because this is where the lot is actually
+          decomposed into lines — you are counting cards off the photo. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <ListingThumb listing={lot} size={96} style={{ borderRadius: 6 }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 14 }}>{lot.title || `listing ${lot.listing_id}`}</strong>
         <span style={{ fontSize: 12, color: "#666" }}>
@@ -737,6 +790,8 @@ function LotAnalyzer({ lot, onChanged, onDeleted, onError }) {
         >
           delete lot
         </button>
+      </div>
+        </div>
       </div>
 
       {lot.landed_cents == null && (
@@ -2441,8 +2496,7 @@ function CardDetail({ detail, onChanged }) {
               borderBottom: "1px solid #eee", textDecoration: "none", color: "inherit",
             }}
           >
-            <img src={r.thumbnail_url} alt="" loading="lazy"
-                 style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 4, background: "#f0f0f0" }} />
+            <ListingThumb listing={r} size={40} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {r.title_raw}

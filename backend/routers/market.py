@@ -735,7 +735,8 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
         text(
             "SELECT s.observed_at, s.listing_state, s.price_cents,"
             " s.currency, s.price_usd, s.fx_rate, s.fx_source, l.marketplace,"
-            " l.listing_url, l.title_raw, l.item_condition, l.thumbnail_url"
+            " l.listing_url, l.title_raw, l.item_condition, l.thumbnail_url,"
+            " l.external_id"
             + SOLE_LINE_SQL
             + " AND ln.item_id = :id ORDER BY s.observed_at"
         ),
@@ -748,7 +749,8 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     lots = db.execute(
         text(
             "SELECT l.listing_id, l.marketplace, l.listing_url, l.title_raw,"
-            " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+            " l.thumbnail_url, l.external_id,"
+            " s.price_cents, s.currency, s.price_usd,"
             " s.listing_state, s.observed_at,"
             " (SELECT COUNT(*) FROM mkt_listing_line x"
             "   WHERE x.listing_id = l.listing_id) AS line_count "
@@ -848,7 +850,8 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
     buy_rows = db.execute(
         text(
             "SELECT l.listing_id, l.marketplace, l.listing_url, l.title_raw,"
-            " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+            " l.thumbnail_url, l.external_id,"
+            " s.price_cents, s.currency, s.price_usd,"
             " s.observed_at, s.shipping_cents, s.shipping_usd,"
             f" {UNITS_SQL} AS line_count "
             "FROM mkt_listing l "
@@ -1016,7 +1019,8 @@ def _buy_to_resell(db, item_id: int, sell_marketplace: str):
     marks = ", ".join(f"'{m}'" for m in RESELL_SOURCES)
     rows = db.execute(text(
         "SELECT l.listing_id, l.marketplace, l.title_raw, l.listing_url,"
-        " l.thumbnail_url, s.price_cents, s.currency, s.price_usd,"
+        " l.thumbnail_url, l.external_id,"
+        " s.price_cents, s.currency, s.price_usd,"
         " s.shipping_usd, s.observed_at,"
         f" {UNITS_SQL} AS units "
         "FROM mkt_listing l "
@@ -2359,6 +2363,31 @@ def listing_outcome(listing_id: int, body: DelistIn, db=Depends(get_db)):
             "price_usd": usd}
 
 
+@router.get("/listings/images")
+def listing_images(db=Depends(get_db)):
+    """Every listing's dedupe key and its hotlinked thumbnail.
+
+    Read by the capture extension's image backfill, which stores a local copy of
+    each thumbnail that is still alive on the marketplace's CDN. Listing photos
+    are hotlinked here (`thumbnail_url` points at mercdn/ebayimg/fril), and a
+    marketplace drops the photo when the listing closes -- so a comp captured
+    months ago renders as a blank square, worst on exactly the rows where the
+    title is Japanese and the picture was the only way to tell what it is.
+
+    Ordered oldest first: those are the rows closest to rotting, so a backfill
+    interrupted half way through has saved the half that was most at risk.
+
+    No pagination. This is a few thousand rows of two short strings, read once
+    per backfill, by one admin.
+    """
+    rows = db.execute(text(
+        "SELECT marketplace, external_id, thumbnail_url FROM mkt_listing "
+        "WHERE thumbnail_url IS NOT NULL AND thumbnail_url != '' "
+        "ORDER BY first_seen_at"
+    )).mappings().all()
+    return {"listings": [dict(r) for r in rows], "count": len(rows)}
+
+
 @router.delete("/listings/{listing_id}")
 def delete_listing(listing_id: int, db=Depends(get_db)):
     """Remove a listing and everything hanging off it.
@@ -2561,7 +2590,7 @@ def _lot_listings(db, listing_id: Optional[int] = None):
     one = " AND l.listing_id = :i " if listing_id else ""
     return db.execute(text(
         "SELECT l.listing_id, l.marketplace, l.title_raw, l.listing_url,"
-        " l.thumbnail_url, l.is_lot, l.delisted_at,"
+        " l.thumbnail_url, l.external_id, l.is_lot, l.delisted_at,"
         f" {UNITS_SQL} AS units,"
         " (SELECT s.price_cents FROM mkt_sighting s WHERE s.listing_id = l.listing_id"
         "   ORDER BY s.observed_at DESC LIMIT 1) AS price_cents,"
@@ -2725,6 +2754,10 @@ def _analyze_lot(db, listing, ladder, wanted, buy_fees,
         "title": listing["title_raw"],
         "listing_url": listing["listing_url"],
         "thumbnail_url": listing["thumbnail_url"],
+        # The extension's dedupe key is (marketplace, external_id), and the
+        # app rebuilds it to ask the capture extension for the stored photo
+        # when the marketplace has dropped the hotlinked one.
+        "external_id": listing["external_id"],
         "delisted_at": listing["delisted_at"],
         "price_cents": listing["price_cents"],
         "currency": listing["currency"],
