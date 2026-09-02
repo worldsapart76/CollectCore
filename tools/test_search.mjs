@@ -64,6 +64,49 @@ check(!!topField, `the top hit carries "Rock Star" as a whole field (${topField 
 const joined = searchCards(cards, 'rockstar');
 check(joined.total > 0, `"rockstar" (no space) still matches ${joined.total} cards`);
 
+console.log('\n--- a member has to be findable by every name it goes by ---');
+// I.N is the case that broke: tokenize() splits on non-alphanumerics and drops
+// anything shorter than two characters, so "I.N" produced NO tokens at all and
+// the search fell through to its no-query branch -- the whole library, in id
+// order, looking exactly like a search that had stopped working.
+//
+// The aliases were a second half of the same hole. ALIASES has mapped jeongin
+// and innie to I.N all along, but only matchTitle ever read it, so shorthand
+// that worked on a listing title returned zero results typed into the box.
+const isIN = (c) => (c.members || []).some((m) => m.toLowerCase() === 'i.n');
+const inTotal = cards.filter(isIN).length;
+
+for (const query of ['I.N', 'i.n', 'in', 'jeongin', 'innie', 'yangjeongin']) {
+  const { cards: page, total } = searchCards(cards, query);
+  const onPage = page.filter(isIN).length;
+  check(
+    onPage === page.length && total >= inTotal,
+    `"${query}" fills the page with I.N (${onPage}/${page.length}, ${total} matched)`
+  );
+}
+
+// The alias forms name exactly one member, so they should not drag anything
+// else in with them -- unlike "in", which is also an ordinary English word.
+check(
+  searchCards(cards, 'jeongin').total === inTotal,
+  `"jeongin" matches the ${inTotal} I.N cards and nothing else`
+);
+
+// Naming a member must not stop the same token being read as ordinary text.
+check(
+  searchCards(cards, 'all in').total < searchCards(cards, 'in').total,
+  `"all in" still narrows to the era (${searchCards(cards, 'all in').total} cards)`
+);
+
+// The same treatment reaches every member, not just the punctuated one.
+for (const [alias, canonical] of [['minho', 'lee know'], ['lino', 'lee know'], ['bangchan', 'bang chan']]) {
+  const { cards: page } = searchCards(cards, alias);
+  const hit = page.filter((c) =>
+    (c.members || []).some((m) => m.toLowerCase() === canonical)
+  ).length;
+  check(hit === page.length && page.length > 0, `"${alias}" finds ${canonical} (${hit}/${page.length})`);
+}
+
 console.log('\n--- fast enough to type against ---');
 const t0 = process.hrtime.bigint();
 for (let i = 0; i < 20; i++) searchCards(cards, 'hyunjin rock star');

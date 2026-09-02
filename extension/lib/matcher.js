@@ -320,6 +320,53 @@ function tokenScore(token, field, joined, wordRe, prefixRe) {
 // would quietly paper over a change to tokenize() that made it untrue.
 const SAFE_TOKEN = /^[a-z0-9]+$/;
 
+// --- Finding a member by whatever the user typed ----------------------------
+
+// A dotted initialism is invisible to tokenize(): it splits on
+// non-alphanumerics and drops anything under two characters, so "I.N" yields
+// NOTHING AT ALL. A search for it therefore took the no-tokens branch below and
+// returned the whole library unfiltered -- 11,323 cards, in id order, looking
+// for all the world like a search that had simply broken.
+//
+// Collapsing the dots between letters first makes it the single token "in".
+// Applied to the QUERY only, not inside tokenize(): matchTitle and the inverted
+// index are a separate question with their own tests, and this is the panel's
+// free-text search.
+function collapseInitials(text) {
+  return (text || '').replace(/([a-z])\.(?=[a-z])/gi, '$1');
+}
+
+const memberKey = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// token -> canonical member name. Built from the library's own members plus the
+// alias table, so "i.n", "in", "jeongin", "innie" and "yangjeongin" all arrive
+// at the same place -- and so does every other member, without a second table
+// to keep in step with the first.
+//
+// ALIASES existed all along but only matchTitle consulted it, so the fan
+// shorthand that works on a listing title returned zero results when typed into
+// the search box. Same vocabulary, two behaviours.
+const memberLookups = new WeakMap();
+
+function memberLookup(cards) {
+  let map = memberLookups.get(cards);
+  if (map) return map;
+  map = new Map();
+  for (const card of cards) {
+    for (const m of card.members || []) {
+      map.set(memberKey(m), m);
+      for (const t of tokenize(m)) map.set(t, m);
+    }
+  }
+  // After the real names, so a stale alias can never shadow a member the
+  // library actually holds.
+  for (const [alias, member] of Object.entries(ALIASES)) {
+    if (!map.has(memberKey(alias))) map.set(memberKey(alias), member);
+  }
+  memberLookups.set(cards, map);
+  return map;
+}
+
 /**
  * Free-text search over the whole library, for when the title inferred nothing
  * useful and the card has to be found by hand.
@@ -331,10 +378,12 @@ const SAFE_TOKEN = /^[a-z0-9]+$/;
  * as "60 matches" forever and gives no signal that typing more would help.
  */
 export function searchCards(cards, query, { limit = 60 } = {}) {
-  const tokens = tokenize(query);
+  const tokens = tokenize(collapseInitials(query));
   if (tokens.length === 0) {
     return { cards: cards.slice(0, limit), total: cards.length };
   }
+
+  const members = memberLookup(cards);
 
   // One regex per token, not per token per card: 11,000 cards times a fresh
   // RegExp each was the difference between instant and noticeable.
@@ -342,6 +391,10 @@ export function searchCards(cards, query, { limit = 60 } = {}) {
     t,
     wordRe: new RegExp(`(^|[^a-z0-9])${t}([^a-z0-9]|$)`),
     prefixRe: new RegExp(`(^|[^a-z0-9])${t}`),
+    // The member this token names, if it names one. Checked as a set
+    // membership rather than as text, which is what lets "in" find I.N without
+    // also promoting every card whose origin merely contains those letters.
+    member: members.get(t) || null,
   }));
   if (!probes.length) {
     return { cards: cards.slice(0, limit), total: cards.length };
@@ -359,8 +412,14 @@ export function searchCards(cards, query, { limit = 60 } = {}) {
     let score = 0;
     let matchedAll = true;
     for (const p of probes) {
-      let best = 0;
-      for (let i = 0; i < fields.length; i++) {
+      // Naming a member the card actually has is the strongest claim available,
+      // so it scores as an exact hit. It does NOT short-circuit a miss: a token
+      // that happens to name a member can still be meant as ordinary text --
+      // "chan" naming Bang Chan must not stop it matching a version that says
+      // Chan on a card by someone else.
+      let best =
+        p.member && (card.members || []).includes(p.member) ? EQUALS : 0;
+      for (let i = 0; i < fields.length && best < EQUALS; i++) {
         const s = tokenScore(p.t, fields[i], joined[i], p.wordRe, p.prefixRe);
         if (s > best) best = s;
       }
