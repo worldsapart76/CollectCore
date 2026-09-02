@@ -93,6 +93,7 @@ function row(rec) {
   // must not look alike. Also covers a URL that 404s later, which is the same
   // situation arriving a different way.
   img.dataset.thumbKey = rec.key;
+  img.dataset.thumbSrc = rec.thumbnailUrl || '';
   setThumb(img, rec.thumbnailUrl, rec.key);
   // After setThumb, which writes its own title: the "image N of M" hint has to
   // survive, and it is the only thing saying the pick can be changed.
@@ -429,26 +430,38 @@ function setThumb(img, url, key = null) {
   // photo is the whole point. Upgrade to the stored blob when there is one.
   // Async and after the hotlink is already set, so a slow lookup shows the
   // remote image first rather than an empty square.
-  if (key) upgradeThumb(img, key);
+  if (key) upgradeThumb(img, key, url);
 }
 
+// `${key}|${photoUrl}` -> blob: URL, or null once the worker has said it holds
+// nothing for it.
+//
+// Keyed on the PHOTO as well as the record, which is the whole point. Keyed on
+// the record alone, picking a different image (makePickable, below) looked
+// broken: SET_THUMB updated the record and re-cached the blob correctly, the
+// row re-rendered with the newly picked hotlink -- and then this pasted the
+// stale capture-time blob straight back over it. The photo could never be
+// changed, which on a card whose captured image is its back is the difference
+// between an identifiable row and a useless one.
 const thumbUrls = new Map();
 
-async function upgradeThumb(img, key) {
+async function upgradeThumb(img, key, photoUrl) {
+  const cacheKey = `${key}|${photoUrl}`;
   try {
-    let url = thumbUrls.get(key);
+    let url = thumbUrls.get(cacheKey);
     if (url === undefined) {
       const res = await send({ type: 'GET_IMAGES', keys: [key] });
       const dataUrl = res?.images?.[key];
       url = dataUrl
         ? URL.createObjectURL(await (await fetch(dataUrl)).blob())
         : null;
-      thumbUrls.set(key, url);
+      thumbUrls.set(cacheKey, url);
     }
     if (!url) return;
-    // The row may have been re-rendered onto a different listing while this
-    // was in flight; only the element still showing this key may be touched.
-    if (img.dataset.thumbKey !== key) return;
+    // The row may have been re-rendered -- onto a different listing, or onto a
+    // different photo of this one -- while this was in flight. Only the element
+    // still showing exactly what was asked for may be touched.
+    if (img.dataset.thumbKey !== key || img.dataset.thumbSrc !== photoUrl) return;
     img.onerror = null;
     img.classList.remove('thumb-empty');
     img.src = url;
@@ -628,6 +641,7 @@ function openAssociate(rec) {
   $('assoc-lot').closest('.assoc-actions').hidden = false;
 
   $('assoc-img').dataset.thumbKey = rec.key;
+  $('assoc-img').dataset.thumbSrc = rec.thumbnailUrl || '';
   setThumb($('assoc-img'), rec.thumbnailUrl, rec.key);
   makePickable($('assoc-img'), rec);
   $('assoc-name').textContent = rec.name || '(untitled)';
