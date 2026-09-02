@@ -8,7 +8,7 @@
 // Needs data/card-index.json (same fixture as test_matcher.mjs), built with
 // tools/export_card_index.py against a PROD database.
 import { readFileSync } from 'node:fs';
-import { searchCards } from '../extension/lib/matcher.js';
+import { searchCards, matchTitle, buildIndex } from '../extension/lib/matcher.js';
 
 const cards = JSON.parse(readFileSync('data/card-index.json', 'utf8')).cards;
 const label = (c) =>
@@ -105,6 +105,53 @@ for (const [alias, canonical] of [['minho', 'lee know'], ['lino', 'lee know'], [
     (c.members || []).some((m) => m.toLowerCase() === canonical)
   ).length;
   check(hit === page.length && page.length > 0, `"${alias}" finds ${canonical} (${hit}/${page.length})`);
+}
+
+console.log('\n--- the member dropdown narrows the SET, not the page ---');
+// The property that makes the filter worth having. searchCards caps at 60, so
+// filtering what came back would answer "which of these 60 happen to be I.N"
+// -- on "rock star" that is 16 cards when the real answer is 66.
+{
+  const hasMember = (c, m) => (c.members || []).includes(m);
+  const wide = searchCards(cards, 'rock star');
+  const narrow = searchCards(cards, 'rock star', { member: 'I.N' });
+  const onPage = wide.cards.filter((c) => hasMember(c, 'I.N')).length;
+
+  check(
+    narrow.total > onPage,
+    `"rock star" + I.N finds ${narrow.total}, not the ${onPage} I.N cards visible on the unfiltered page`
+  );
+  check(
+    narrow.cards.every((c) => hasMember(c, 'I.N')),
+    'every card returned under the filter carries that member'
+  );
+  check(
+    narrow.total < wide.total,
+    `the filter narrows (${wide.total} -> ${narrow.total})`
+  );
+
+  // No query at all: the dropdown alone is a legitimate way to browse.
+  const bare = searchCards(cards, '', { member: 'I.N' });
+  check(
+    bare.total === cards.filter((c) => hasMember(c, 'I.N')).length,
+    `member with no query returns that member's whole set (${bare.total})`
+  );
+
+  // The title path takes the same constraint, and it is the one filter there
+  // that widening must never drop -- it is the user's answer, not an inference.
+  const index = buildIndex(cards);
+  const title = 'Stray Kids Felix Rock Star photocard';
+  const contradicted = matchTitle(title, index, { memberFilter: 'I.N' });
+  check(
+    contradicted.total > 0 &&
+      contradicted.cards.every((c) => hasMember(c, 'I.N')),
+    `a member contradicting the title still holds (${contradicted.total} I.N cards, widened=${contradicted.widened})`
+  );
+  check(
+    matchTitle(title, index, { memberFilter: 'Felix' }).total ===
+      matchTitle(title, index).total,
+    'a member agreeing with the title changes nothing'
+  );
 }
 
 console.log('\n--- fast enough to type against ---');

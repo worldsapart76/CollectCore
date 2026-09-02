@@ -372,6 +372,12 @@ button.danger {
   text-decoration: line-through;
 }
 
+.search-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
 .search {
   width: 100%;
   padding: 6px 9px;
@@ -380,6 +386,29 @@ button.danger {
   background: var(--bg);
   color: var(--fg);
   font: inherit;
+}
+
+/* Sized to the widest member name and no wider — the search box is what earns
+   the space in a panel this narrow. */
+.member-select {
+  flex: 0 0 auto;
+  max-width: 40%;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* An active filter has to be obvious. It persists across listings on purpose —
+   sweeping one member is the whole point — and a narrowing you have forgotten
+   about looks exactly like a library that has lost cards. */
+.member-select.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  font-weight: 600;
 }
 
 /* --- Candidate grid ------------------------------------------------------ */

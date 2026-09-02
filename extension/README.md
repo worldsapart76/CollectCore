@@ -132,6 +132,22 @@ is uploaded anywhere — the photos live in this browser profile, on this machin
 There is **no backup**, by choice. Losing the profile means going back to
 hotlinks that work until they don't, which is where this started.
 
+### Narrowing by member
+
+The dropdown beside the search box filters to one member. It applies to the
+title suggestions as well as to a typed search, and it filters the **set**, not
+the page — searching "rock star" shows 16 I.N cards out of the 60 it can fit,
+where filtering to I.N finds all 66.
+
+It is **sticky across listings**, because working a run of one member's cards is
+what it is for. The control is highlighted and the summary line says "I.N only"
+while it is set, so a filter you have forgotten cannot pass for a library that
+has lost cards.
+
+Typing a member's name works too, including punctuated and shorthand forms —
+`I.N`, `in`, `jeongin`, `innie`, `minho`, `lino`. The dropdown is the reliable
+way; typing is for when it is quicker than reaching for it.
+
 ## The card index
 
 The picker matches against a local copy of your library, pulled straight from

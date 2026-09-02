@@ -54,6 +54,14 @@ let armed = null;
 // typing in the search box does on every keystroke) would throw those away.
 let viewMode = 'associate';
 
+// The member dropdown's selection, or '' for any.
+//
+// Sticky across listings, unlike `dropped` above. Working a run of one member's
+// cards is the case this exists for, and re-picking on every listing would undo
+// the point. The cost is a filter you can forget, which is why the control is
+// highlighted while it is set and the summary line says so in words.
+let memberFilter = '';
+
 // --- Activation ------------------------------------------------------------
 
 // Opening this panel turns capture on; closing it turns capture off. The port
@@ -291,6 +299,7 @@ async function refreshCards({ silent = false } = {}) {
   if (!silent) $('index-status').textContent = 'Refreshing from server…';
   const res = await cardIndex.refreshFromServer();
   if (res.ok) {
+    await fillMemberSelect();
     await renderIndexStatus(null, 'refreshed');
     return;
   }
@@ -370,37 +379,56 @@ async function renderCandidates() {
   }
 
   const query = $('assoc-search').value.trim();
+  const member = memberFilter || null;
+  // Never silent. A narrowing you have forgotten about looks exactly like a
+  // library that has lost cards, and this one persists across listings.
+  const memberNote = member ? ` · ${member} only` : '';
 
   // Arming has no listing title to match against, so it is search-only.
-  if (viewMode === 'arm' || query) {
-    const { cards, total } = await cardIndex.search(query);
+  if (viewMode === 'arm' || query || (member && !current)) {
+    const { cards, total } = await cardIndex.search(query, { member });
     $('assoc-chips').replaceChildren();
     // The count is the TRUE total, not the page. It used to be cards.length,
     // which is capped at the page size -- so every query said "60 match" no
     // matter how many there were, and there was no way to tell a query that
     // had narrowed to 60 from one that had narrowed to 600. Saying which it is
     // turns "keep typing" from guesswork into a decision.
-    $('assoc-summary').textContent = query
+    const head = query
       ? total > cards.length
         ? `${total.toLocaleString()} match "${query}" — showing the closest ${cards.length}`
         : `${total.toLocaleString()} match "${query}"`
-      : 'Search for the card to arm.';
+      : member
+        ? `${total.toLocaleString()} cards` +
+          (total > cards.length ? ` — showing ${cards.length}` : '')
+        : 'Search for the card to arm.';
+    $('assoc-summary').textContent = head + memberNote;
     $('assoc-grid').replaceChildren(...cards.map(cardTile));
     return;
   }
 
-  const res = await cardIndex.suggest(current.name, { drop: [...dropped] });
+  const res = await cardIndex.suggest(current.name, {
+    drop: [...dropped],
+    member,
+  });
   $('assoc-chips').replaceChildren(...res.chips.map(chipEl));
 
   const bits = [`${res.total.toLocaleString()} candidates`];
+  if (member) bits.push(`${member} only`);
   if (res.unreadableTitle) {
     // Say it once and plainly. The matcher is Latin-only, so a Japanese title
     // filters nothing -- without this the panel shows the entire library and
     // looks like it simply failed.
+    //
+    // Still worth saying under a member filter: the filter is why there are
+    // candidates at all, and none of them came from reading the title.
     bits.push('Japanese title — not readable yet, search for the card');
   } else {
     if (res.widened) bits.push('widened to avoid an empty result');
-    if (res.lowConfidence) bits.push('no member matched — may not be your group');
+    // Only meaningful when nothing has said which member it is. With the
+    // dropdown set, "no member matched" is answering a question nobody asked.
+    if (res.lowConfidence && !member) {
+      bits.push('no member matched — may not be your group');
+    }
   }
   $('assoc-summary').textContent = bits.join(' · ');
 
@@ -846,6 +874,7 @@ $('import-file').addEventListener('change', async (e) => {
   try {
     const payload = JSON.parse(await file.text());
     const saved = await cardIndex.save(payload);
+    await fillMemberSelect();
     setStatus(`Imported ${saved.count.toLocaleString()} cards.`);
   } catch (err) {
     setStatus(`Import failed: ${err.message}`);
@@ -915,6 +944,31 @@ Delete anyway?`
 $('back').addEventListener('click', closeAssociate);
 $('arm').addEventListener('click', toggleArmed);
 $('assoc-search').addEventListener('input', () => renderCandidates());
+$('assoc-member').addEventListener('change', (e) => {
+  memberFilter = e.target.value;
+  e.target.classList.toggle('on', !!memberFilter);
+  renderCandidates();
+});
+
+// Filled from the library rather than hardcoded, so it cannot drift out of step
+// with what is actually catalogued. Runs once at panel open; the library is
+// loaded from IndexedDB, so this costs nothing on a cold panel with no index.
+async function fillMemberSelect() {
+  const names = await cardIndex.memberNames();
+  const sel = $('assoc-member');
+  const keep = sel.value;
+  sel.replaceChildren(
+    new Option('Any member', ''),
+    ...names.map((n) => new Option(n, n))
+  );
+  // A refresh must not silently clear a filter the user set.
+  if (keep && names.includes(keep)) sel.value = keep;
+  else if (keep) {
+    memberFilter = '';
+    sel.value = '';
+  }
+  sel.classList.toggle('on', !!sel.value);
+}
 $('assoc-lot').addEventListener('change', async (e) => {
   if (!current) return;
   current.isLot = e.target.checked;
@@ -936,6 +990,11 @@ renderList();
 // matches what is actually catalogued rather than whatever was current the last
 // time anyone thought to refresh. Silent on failure — the stored copy still
 // works, and an outage should not block a sweep.
+fillMemberSelect();
+
 cardIndex.refreshIfStale().then((res) => {
-  if (!res.skipped) renderList();
+  if (!res.skipped) {
+    renderList();
+    fillMemberSelect();
+  }
 });

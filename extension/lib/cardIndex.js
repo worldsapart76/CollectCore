@@ -115,10 +115,10 @@ export async function refreshIfStale() {
  * `drop` carries the tokens whose chips the user switched off, so removing a
  * chip re-runs the same match minus that constraint.
  */
-export async function suggest(title, { drop = [], limit = 60 } = {}) {
+export async function suggest(title, { drop = [], limit = 60, member = null } = {}) {
   const store = await load();
   if (!store) return null;
-  return matchTitle(title, store.index, { drop, limit });
+  return matchTitle(title, store.index, { drop, limit, memberFilter: member });
 }
 
 /**
@@ -126,10 +126,27 @@ export async function suggest(title, { drop = [], limit = 60 } = {}) {
  * to be found by hand. Scoring lives in matcher.js, which is pure and testable
  * against the real 11k index without stubbing IndexedDB.
  */
-export async function search(query, { limit = 60 } = {}) {
+export async function search(query, { limit = 60, member = null } = {}) {
   const store = await load();
   if (!store) return { cards: [], total: 0 };
-  return searchCards(store.cards, query, { limit });
+  return searchCards(store.cards, query, { limit, member });
+}
+
+/**
+ * Every member the library actually holds, alphabetical.
+ *
+ * Read off the cards rather than hardcoded, so a lineup change or a card by
+ * someone outside the group cannot leave the dropdown quietly unable to select
+ * a member that exists.
+ */
+export async function memberNames() {
+  const store = await load();
+  if (!store) return [];
+  const seen = new Set();
+  for (const card of store.cards) {
+    for (const m of card.members || []) seen.add(m);
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
 export function cardLabel(card) {

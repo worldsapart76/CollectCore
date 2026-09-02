@@ -92,13 +92,22 @@
         <div id="assoc-chips" class="chips"></div>
       </div>
 
-      <input
-        id="assoc-search"
-        type="search"
-        class="search"
-        placeholder="Search all cards…"
-        autocomplete="off"
-      />
+      <div class="search-row">
+        <input
+          id="assoc-search"
+          type="search"
+          class="search"
+          placeholder="Search all cards…"
+          autocomplete="off"
+        />
+        <select
+          id="assoc-member"
+          class="member-select"
+          title="Narrow to one member. Applies to the title suggestions as well as to a search."
+        >
+          <option value="">Any member</option>
+        </select>
+      </div>
 
       <p id="assoc-summary" class="status"></p>
       <div id="assoc-grid" class="grid"></div>

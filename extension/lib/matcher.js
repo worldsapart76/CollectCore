@@ -175,7 +175,14 @@ function weight(token, index) {
  *   cards  — candidates, best first, never empty while the library is non-empty
  *   widened — true when chips had to be dropped to avoid an empty result
  */
-export function matchTitle(title, index, { limit = 60, drop = [] } = {}) {
+export function matchTitle(
+  title,
+  index,
+  // Named for what it is, not `member`: the chip loop below declares its own
+  // `member` per token, and two different meanings under one name in one
+  // function is how the wrong one gets read.
+  { limit = 60, drop = [], memberFilter = null } = {}
+) {
   const tokens = tokenize(title);
   const dropped = new Set(drop);
 
@@ -210,7 +217,16 @@ export function matchTitle(title, index, { limit = 60, drop = [] } = {}) {
 
   const active = chips.filter((c) => c.active);
   let widened = false;
-  let pool = null;
+
+  // A member chosen in the panel seeds the pool, so every chip below narrows
+  // WITHIN that member and the widening rule can never widen back out past it.
+  // Unlike a chip, this is not an inference from the title -- it is the user
+  // saying which member this is -- so it is the one constraint here that is
+  // never dropped to avoid an empty result. An empty answer to "I.N cards
+  // matching this title" is a true answer.
+  let pool = memberFilter
+    ? new Set(memberBucket(memberFilter, index))
+    : null;
 
   // Intersect strongest-first, and stop before any chip empties the set. A
   // near-miss title must still land you in the right neighbourhood rather than
@@ -377,12 +393,22 @@ function memberLookup(cards) {
  * true total alongside the page, because a count capped at the page size reads
  * as "60 matches" forever and gives no signal that typing more would help.
  */
-export function searchCards(cards, query, { limit = 60 } = {}) {
+export function searchCards(cards, query, { limit = 60, member = null } = {}) {
+  // Applied BEFORE scoring and before the page is cut, which is the whole
+  // point: filtering the 60 already on screen would answer "which of these
+  // happen to be I.N", not "which I.N cards match".
+  const pool = member
+    ? cards.filter((c) => (c.members || []).includes(member))
+    : cards;
+
   const tokens = tokenize(collapseInitials(query));
   if (tokens.length === 0) {
-    return { cards: cards.slice(0, limit), total: cards.length };
+    return { cards: pool.slice(0, limit), total: pool.length };
   }
 
+  // Built from the FULL library, not the filtered pool: the lookup is cached
+  // against the array it was built from, and a fresh filtered array every
+  // keystroke would rebuild it every keystroke.
   const members = memberLookup(cards);
 
   // One regex per token, not per token per card: 11,000 cards times a fresh
@@ -397,11 +423,11 @@ export function searchCards(cards, query, { limit = 60 } = {}) {
     member: members.get(t) || null,
   }));
   if (!probes.length) {
-    return { cards: cards.slice(0, limit), total: cards.length };
+    return { cards: pool.slice(0, limit), total: pool.length };
   }
 
   const scored = [];
-  for (const card of cards) {
+  for (const card of pool) {
     const fields = [
       (card.members || []).join(' ').toLowerCase(),
       (card.origin || '').toLowerCase(),
