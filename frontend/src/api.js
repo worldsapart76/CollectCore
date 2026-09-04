@@ -1826,3 +1826,14 @@ export async function getPurchasable(marketplace = 'neokyo') {
     `${API}/market/purchasable?marketplace=${encodeURIComponent(marketplace)}`);
   return handleJsonResponse(res, 'Failed to load purchasable listings');
 }
+
+// Find a card by name, for logging a purchase against it.
+//
+// Card-first rather than listing-first: most Neokyo titles are Japanese, so a
+// dropdown of captures is a list you cannot skim, and it cannot offer a card
+// bought without a capture at all. Any live captures for a card come back WITH
+// it, so a price prefills where one exists.
+export async function searchMarketCards(q) {
+  const res = await fetch(`${API}/market/card-search?q=${encodeURIComponent(q)}`);
+  return handleJsonResponse(res, 'Card search failed');
+}

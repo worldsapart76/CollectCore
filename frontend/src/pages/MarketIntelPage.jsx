@@ -9,10 +9,11 @@ import {
   listFeeComponents, createFeeComponent, updateFeeComponent,
   deleteFeeComponent, setOfferDiscount, setBoxSize,
   getWarehouse, listCharges, createCharge, updateCharge, cancelPurchase,
-  getPurchasable, createBox, listBoxes, getBox, setBoxCharge, receiveBox,
-  deleteBox,
+  getPurchasable, searchMarketCards, createBox, listBoxes, getBox,
+  setBoxCharge, receiveBox, deleteBox,
 } from "../api";
 import { useListingImage } from "../marketImages";
+import { getImageUrl } from "../utils/imageUrl";
 
 // Price comps from the browser-extension captures.
 // Design: docs/photocard_market_intel_plan.md.
@@ -2566,6 +2567,23 @@ function CardDetail({ detail, onChanged }) {
 
 const DEFAULT_GRAMS_HINT = "card 5g, non-card 300g";
 
+// A library card's own scan, as opposed to ListingThumb's marketplace photo.
+// Two components because the two images come from different places: this one is
+// hosted and addressed by path, that one is a hotlink backed by a blob in the
+// extension. Both fall back to an empty square rather than a broken glyph.
+function CardThumb({ image, size = 34 }) {
+  const base = {
+    width: size, height: size, objectFit: "cover", borderRadius: 4,
+    background: "#f0f0f0", flexShrink: 0,
+  };
+  const src = image ? getImageUrl(image.path, image.storage_type) : null;
+  if (!src) return <div style={base} />;
+  return (
+    <img src={src} alt="" loading="lazy" style={base}
+         onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+  );
+}
+
 // Dollars in, cents out. Returns undefined for anything unparseable so a
 // mistyped field is rejected rather than silently becoming zero — a zero here
 // is a real cost of nothing, which is a different claim.
@@ -2615,14 +2633,37 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
   const [creditUsed, setCreditUsed] = useState("");
   const [note, setNote] = useState("");
   const [rows, setRows] = useState([]);
-  const [pick, setPick] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // Card search is the primary way in. Captures are secondary and loaded only
+  // if asked for — a Japanese-titled list is not something to read by default.
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const [pick, setPick] = useState(null);
+
   useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults(null); return undefined; }
+    // Debounced: a search per keystroke over the whole library is a lot of
+    // round trips to answer a question the next keystroke changes.
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchMarketCards(q)
+        .then((d) => setResults(d.cards || []))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  useEffect(() => {
+    if (!browsing || pick !== null) return;
     getPurchasable("neokyo")
       .then((d) => setPick(d.listings || []))
       .catch(() => setPick([]));
-  }, []);
+  }, [browsing, pick]);
 
   const picked = new Set(rows.map((r) => r.listing_id).filter(Boolean));
   const available = (pick || []).filter((l) => !picked.has(l.listing_id));
@@ -2647,8 +2688,42 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
     }]);
   }
 
+  // One click adds the card. A single live capture links itself and prefills
+  // the price — visibly, with an unlink control, never silently. More than one
+  // and it stays unlinked: picking a listing for you when there is a choice is
+  // exactly the guess that puts the wrong price on the row.
+  function addFromCard(card) {
+    const only = card.captures?.length === 1 ? card.captures[0] : null;
+    setRows((rs) => [...rs, {
+      item_id: card.item_id,
+      title: card.label,
+      card,
+      listing_id: only?.listing_id,
+      thumb: only || null,
+      units: only?.units,
+      price: only?.price_minor == null ? "" : String(only.price_minor),
+      fee: "",
+    }]);
+    setQuery("");
+    setResults(null);
+  }
+
   function addBlank() {
     setRows((rs) => [...rs, { title: "", price: "", fee: "" }]);
+  }
+
+  // Attach or detach a capture after the fact, for a card with several live
+  // listings — or none, where the price is simply typed.
+  function linkCapture(i, capture) {
+    setRows((rs) => rs.map((r, j) => (j === i ? {
+      ...r,
+      listing_id: capture?.listing_id,
+      thumb: capture || null,
+      units: capture?.units,
+      price: capture
+        ? (capture.price_minor == null ? r.price : String(capture.price_minor))
+        : r.price,
+    } : r)));
   }
 
   function patch(i, key, val) {
@@ -2668,6 +2743,10 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
         note: note || null,
         purchases: rows.map((r) => ({
           listing_id: r.listing_id || null,
+          // Ignored when a listing is linked — that path copies the listing's
+          // own lines, decomposition included — and the whole point of the row
+          // when it is not: it is what makes the cost reach a card.
+          item_id: r.item_id || null,
           marketplace: "neokyo",
           title_raw: r.title || null,
           item_minor: minorOrUndef(r.price, 0) ?? 0,
@@ -2710,29 +2789,100 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
         </Field>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-        <select
-          value=""
-          style={{ ...inp, maxWidth: 460 }}
-          onChange={(e) => {
-            const l = available.find((x) => x.listing_id === Number(e.target.value));
-            if (l) addFromListing(l);
-          }}
+      {/* Search your own library, in your own labels. The alternative — a
+          dropdown of captured listings — is a list of Japanese titles that
+          cannot be skimmed, and it has nothing to offer for a card bought
+          without capturing it first, which is the common case when you go
+          straight to buying. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search a card — member, origin, version…"
+          style={{ ...inp, width: 340 }}
+        />
+        <Button size="sm" onClick={addBlank}>Add something not in the library</Button>
+        <button
+          onClick={() => setBrowsing((b) => !b)}
+          style={{ border: "none", background: "none", color: "#0369a1",
+                   fontSize: 11, cursor: "pointer", padding: 0 }}
         >
-          <option value="">
-            {pick === null ? "Loading captures…"
-              : available.length ? `Add from a capture (${available.length})`
-              : "No unpurchased Neokyo captures"}
-          </option>
-          {available.map((l) => (
-            <option key={l.listing_id} value={l.listing_id}>
-              {money(l.price_minor, l.currency)} · {(l.title_raw || "").slice(0, 70)}
-              {l.units > 1 ? ` · ${l.units} cards` : ""}
-            </option>
-          ))}
-        </select>
-        <Button size="sm" onClick={addBlank}>Add blank row</Button>
+          {browsing ? "hide captures" : "or browse captures"}
+        </button>
       </div>
+
+      {query.trim().length >= 2 && (
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 6,
+                      marginBottom: 8, maxHeight: 260, overflow: "auto" }}>
+          {searching && results === null && (
+            <div style={{ padding: 8, fontSize: 12, color: "#666" }}>Searching…</div>
+          )}
+          {results?.length === 0 && (
+            <div style={{ padding: 8, fontSize: 12, color: "#666" }}>
+              No card matches. Use <em>Add something not in the library</em> for a
+              lot or a non-card item.
+            </div>
+          )}
+          {results?.map((card) => (
+            <div
+              key={card.item_id}
+              onClick={() => addFromCard(card)}
+              style={{ display: "flex", alignItems: "center", gap: 8,
+                       padding: "5px 8px", cursor: "pointer",
+                       borderBottom: "1px solid #f4f4f5" }}
+            >
+              <CardThumb image={card.image} size={34} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12 }}>{card.label}</div>
+                <div style={{ fontSize: 10, color: "#999" }}>
+                  {card.wanted && <span style={{ color: "#0369a1" }}>wanted · </span>}
+                  {card.held > 0 && `${card.held} held · `}
+                  {card.captures.length
+                    ? `${card.captures.length} live listing${
+                        card.captures.length === 1 ? "" : "s"}`
+                    : "no captures"}
+                </div>
+              </div>
+              {/* The price is only shown when there is exactly one, because
+                  that is the only case where clicking the row also settles
+                  which listing it came from. */}
+              {card.captures.length === 1 && (
+                <span style={{ fontSize: 12, color: "#0369a1" }}>
+                  {money(card.captures[0].price_minor, card.captures[0].currency)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {browsing && (
+        <div style={{ marginBottom: 8 }}>
+          <select
+            value=""
+            style={{ ...inp, maxWidth: 460 }}
+            onChange={(e) => {
+              const l = available.find((x) => x.listing_id === Number(e.target.value));
+              if (l) addFromListing(l);
+            }}
+          >
+            <option value="">
+              {pick === null ? "Loading captures…"
+                : available.length ? `Add from a capture (${available.length})`
+                : "No unpurchased Neokyo captures"}
+            </option>
+            {available.map((l) => (
+              <option key={l.listing_id} value={l.listing_id}>
+                {money(l.price_minor, l.currency)} · {(l.title_raw || "").slice(0, 70)}
+                {l.units > 1 ? ` · ${l.units} cards` : ""}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
+            For a lot or anything the card search cannot name.
+          </div>
+        </div>
+      )}
 
       {rows.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12,
@@ -2755,14 +2905,55 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
                 <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
                   <td style={{ ...td, textAlign: "left" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {r.thumb && <ListingThumb listing={r.thumb} size={28} />}
-                      {r.listing_id ? (
-                        <span>
-                          {r.title}
-                          {r.units > 1 && (
-                            <span style={{ color: "#999" }}> · {r.units} cards</span>
+                      {r.card ? <CardThumb image={r.card.image} size={28} />
+                        : r.thumb ? <ListingThumb listing={r.thumb} size={28} /> : null}
+                      {r.item_id || r.listing_id ? (
+                        <div>
+                          <div>
+                            {r.title}
+                            {r.units > 1 && (
+                              <span style={{ color: "#999" }}> · {r.units} cards</span>
+                            )}
+                          </div>
+                          {/* Which listing this came from, if any. Stated on the
+                              row rather than assumed, and removable: a linked
+                              listing decides the purchase's contents, so it must
+                              never be something that just happened. */}
+                          {r.card && (
+                            <div style={{ fontSize: 10, color: "#999" }}>
+                              {r.listing_id ? (
+                                <>
+                                  from a capture{" "}
+                                  <button
+                                    onClick={() => linkCapture(i, null)}
+                                    style={{ border: "none", background: "none",
+                                             color: "#0369a1", cursor: "pointer",
+                                             fontSize: 10, padding: 0 }}
+                                  >unlink</button>
+                                </>
+                              ) : r.card.captures?.length > 1 ? (
+                                <select
+                                  value=""
+                                  style={{ ...inp, fontSize: 10, padding: "1px 4px" }}
+                                  onChange={(e) => linkCapture(
+                                    i,
+                                    r.card.captures.find(
+                                      (x) => x.listing_id === Number(e.target.value)))}
+                                >
+                                  <option value="">
+                                    {r.card.captures.length} live listings — link one?
+                                  </option>
+                                  {r.card.captures.map((cp) => (
+                                    <option key={cp.listing_id} value={cp.listing_id}>
+                                      {money(cp.price_minor, cp.currency)}
+                                      {cp.units > 1 ? ` · ${cp.units} cards` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : "typed by hand"}
+                            </div>
                           )}
-                        </span>
+                        </div>
                       ) : (
                         <input value={r.title} placeholder="what it was"
                                style={{ ...inp, width: 280 }}

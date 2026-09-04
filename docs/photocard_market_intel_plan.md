@@ -1987,14 +1987,34 @@ different moments and only the second one knows what it cost.
 
 **Warehouse** — everything bought, paid for and unshipped, with the storage
 clock counting down. *Log a paid batch* opens one form for the whole payment:
-the date, the exact USD PayPal took, credit applied if any, and the rows. Rows
-are picked from captured Neokyo listings wherever possible — the capture already
-carries price, photo, URL and, for a lot, the decomposition worked out in the
-analyzer — or typed by hand. **The per-row share is shown live, before saving**,
-along with the implied rate, so the split is inspectable rather than discovered
-later. Per row: *+ domestic* for the occasional separate shipping bill, and
-*Cancelled* which asks for the store credit issued. *Request packing* empties
-the warehouse into a new box.
+the date, the exact USD PayPal took, credit applied if any, and the rows. **The
+per-row share is shown live, before saving**, along with the implied rate, so
+the split is inspectable rather than discovered later. Per row: *+ domestic* for
+the occasional separate shipping bill, and *Cancelled* which asks for the store
+credit issued. *Request packing* empties the warehouse into a new box.
+
+#### Rows are found by searching CARDS, not listings
+
+The first cut picked rows from a dropdown of captured Neokyo listings. It was
+wrong on two counts, and both are about how buying actually goes:
+
+- **Most Neokyo titles are Japanese**, so the dropdown is a list that cannot be
+  skimmed. Recognising your own card in it is harder than naming the card.
+- **Buying often skips capture entirely.** Going straight to a buy request is
+  normal, and a listing-first picker has nothing to offer for it — the card
+  simply is not in the list.
+
+`GET /market/card-search` searches the library instead: tokens ANDed across
+member, group, origin and version, wanted cards first, each result carrying its
+scan, held count, and **any live captures for that card**. So the capture path
+survives without being the way in — a card with exactly one live listing links
+it and prefills the price on click, visibly and with an *unlink* control; with
+several it stays unlinked and offers them on the row, because choosing a listing
+for you when there is a choice is how the wrong price lands.
+
+Two escape hatches remain: *Add something not in the library*, for a lot or a
+non-card item, and a collapsed *browse captures* for a Japanese-titled lot the
+card search cannot name.
 
 **Boxes** — the shipment list, then one box: item cost, shipping/duties/fees,
 landed, and the rung. The packing quote is entered as its own split (total,
@@ -2992,3 +3012,11 @@ this document entirely: it is superseded by detail-page capture, not deferred.
   `GET /market/purchasable` lists Neokyo listings not yet bought; picking one
   carries its price, photo, URL and lot decomposition into the purchase, so
   identification already done in the analyzer is not done twice.
+- **2026-09-03** — **Batch rows are found by searching cards, not listings.**
+  The capture dropdown shipped first and was replaced the same day: Neokyo
+  titles are Japanese, so it was a list that could not be skimmed, and it had
+  nothing to offer for a card bought without capturing it — which is the normal
+  case when you go straight to a buy request. `GET /market/card-search` searches
+  the library and returns any live captures alongside each card, so a single
+  capture still links itself and prefills the price; several stay unlinked
+  rather than guessed at.

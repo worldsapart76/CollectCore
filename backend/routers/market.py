@@ -3798,6 +3798,131 @@ def warehouse(db=Depends(get_db)):
 # ---------- Charges ----------
 
 
+@router.get("/card-search")
+def card_search(q: str = "", limit: int = 40, db=Depends(get_db)):
+    """Find a card by name, for logging a purchase against it.
+
+    Card-first, not listing-first. The obvious picker — a dropdown of captured
+    listings — is unusable for the actual buy flow: most Neokyo titles are in
+    Japanese, so choosing from them means reading a list you cannot skim, and it
+    is silent about cards bought without a capture at all. Searching your own
+    library instead means typing an English member name and getting your own
+    labels back.
+
+    Any captures for the card come back WITH it rather than instead of it, so a
+    price prefills where one exists and is typed where it does not. A card with
+    no captures is a completely ordinary result here.
+
+    Tokens are ANDed across every searchable field at once ('hyunjin rock star'
+    narrows), because a member-only match on a 40-card line is not a result you
+    can pick from.
+    """
+    tokens = [t for t in (q or "").split() if t][:6]
+    if not tokens:
+        return {"cards": [], "q": q}
+
+    type_id = _photocard_type_id(db)
+    # Everything a card can be recognised by, flattened once so a token can
+    # match any of it. Members are aggregated rather than joined per row: a
+    # two-member card must not appear twice.
+    haystack = (
+        "(COALESCE(g.group_name, '') || ' ' || COALESCE(g.group_code, '')"
+        " || ' ' || COALESCE(so.source_origin_name, '')"
+        " || ' ' || COALESCE(d.version, '')"
+        " || ' ' || COALESCE((SELECT GROUP_CONCAT(m.member_name, ' ')"
+        "                     FROM xref_photocard_members x"
+        "                     JOIN lkup_photocard_members m"
+        "                       ON m.member_id = x.member_id"
+        "                    WHERE x.item_id = d.item_id), ''))"
+    )
+    where = " AND ".join(
+        f"{haystack} LIKE :t{i}" for i in range(len(tokens)))
+    params: Dict[str, Any] = {f"t{i}": f"%{t}%" for i, t in enumerate(tokens)}
+    params["type_id"] = type_id
+    params["lim"] = max(1, min(200, limit))
+
+    rows = db.execute(text(
+        "SELECT d.item_id, "
+        # Wanted first: this is a buying screen, and the card you are logging a
+        # purchase for is very often one you had marked.
+        "  MAX(CASE WHEN s.status_code = 'wanted' THEN 1 ELSE 0 END) AS wanted "
+        "FROM tbl_photocard_details d "
+        "JOIN tbl_items i ON i.item_id = d.item_id "
+        "JOIN lkup_photocard_groups g ON g.group_id = d.group_id "
+        "LEFT JOIN lkup_photocard_source_origins so "
+        "       ON so.source_origin_id = d.source_origin_id "
+        "LEFT JOIN tbl_photocard_copies c ON c.item_id = d.item_id "
+        "LEFT JOIN lkup_ownership_statuses s "
+        "       ON s.ownership_status_id = c.ownership_status_id "
+        f"WHERE i.collection_type_id = :type_id AND {where} "
+        "GROUP BY d.item_id "
+        "ORDER BY wanted DESC, d.item_id "
+        "LIMIT :lim"), params).mappings().all()
+    if not rows:
+        return {"cards": [], "q": q}
+
+    ids = [r["item_id"] for r in rows]
+    labels = _labels_for(db, ids)
+    id_list = ",".join(str(int(i)) for i in ids)
+
+    images = {}
+    for item_id, path, storage in db.execute(text(
+        "SELECT item_id, file_path, storage_type FROM tbl_attachments "
+        f"WHERE attachment_type = 'front' AND item_id IN ({id_list}) "
+        "ORDER BY item_id, display_order DESC")):
+        images[item_id] = {"path": path, "storage_type": storage}
+
+    held: Dict[int, int] = {}
+    for item_id, n in db.execute(text(
+        "SELECT c.item_id, COUNT(*) FROM tbl_photocard_copies c "
+        "JOIN lkup_ownership_statuses s"
+        "  ON s.ownership_status_id = c.ownership_status_id "
+        f"WHERE c.item_id IN ({id_list}) "
+        f"  AND s.status_code IN {HELD_STATUSES} "
+        "GROUP BY c.item_id")):
+        held[item_id] = n
+
+    # Live captures for these cards, so picking a card can also pick the
+    # listing it is being bought from. Excludes anything already purchased or
+    # delisted, matching /market/purchasable.
+    captures: Dict[int, List[Dict[str, Any]]] = {}
+    for r in db.execute(text(
+        "SELECT ln.item_id, l.listing_id, l.marketplace, l.external_id,"
+        " l.listing_url, l.title_raw, l.thumbnail_url,"
+        f" {UNITS_SQL} AS units,"
+        " (SELECT s.price_cents FROM mkt_sighting s"
+        "   WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS price_minor,"
+        " (SELECT s.currency FROM mkt_sighting s"
+        "   WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS currency "
+        "FROM mkt_listing l "
+        "JOIN mkt_listing_line ln ON ln.listing_id = l.listing_id "
+        f"WHERE ln.item_id IN ({id_list}) AND l.delisted_at IS NULL "
+        "  AND NOT EXISTS (SELECT 1 FROM mkt_purchase p"
+        "                   WHERE p.listing_id = l.listing_id) "
+        "ORDER BY l.last_seen_at DESC")).mappings():
+        captures.setdefault(r["item_id"], []).append(
+            {k: r[k] for k in r.keys() if k != "item_id"})
+
+    cards = []
+    for r in rows:
+        item_id = r["item_id"]
+        lab = labels.get(item_id) or {}
+        cards.append({
+            "item_id": item_id,
+            "label": lab.get("label"),
+            "members": lab.get("members"),
+            "origin": lab.get("origin"),
+            "version": lab.get("version"),
+            "wanted": bool(r["wanted"]),
+            "held": held.get(item_id, 0),
+            "image": images.get(item_id),
+            "captures": captures.get(item_id, []),
+        })
+    return {"cards": cards, "q": q}
+
+
 @router.get("/purchasable")
 def purchasable(marketplace: str = "neokyo", db=Depends(get_db)):
     """Captured listings that could be bought, for the batch-entry picker.

@@ -46,9 +46,18 @@ Re-specified, then built:
   capture ingest replaces a listing's lines wholesale on every sync and would
   otherwise erase outcomes and allocation overrides.
 - **UI:** Warehouse and Boxes tabs. Batch entry is one form for the whole
-  payment, with rows picked from captured Neokyo listings (`GET
-  /market/purchasable`) so identification already done in the lot analyzer is
-  not done twice, and the per-row share shown live before saving.
+  payment, with the per-row share shown live before saving.
+
+**Then the picker was rebuilt, card-first.** The first cut picked rows from a
+dropdown of captured listings and was wrong twice over: Neokyo titles are
+Japanese, so it was a list that could not be skimmed, and buying often skips
+capture entirely — go straight to a buy request and the card is simply not in
+the list. `GET /market/card-search` searches the library instead (tokens ANDed
+over member/group/origin/version, wanted first, with scans and held counts), and
+returns each card's **live captures alongside it**. A card with exactly one
+capture links it and prefills the price on click, visibly and unlinkable; with
+several it stays unlinked rather than guessed at. *Add something not in the
+library* and a collapsed *browse captures* cover lots and non-card items.
 
 Verified end to end against a scratch copy of the dev DB — 37 checks over the
 weighted split, the credit round trip, both allocation bases, the residual and
