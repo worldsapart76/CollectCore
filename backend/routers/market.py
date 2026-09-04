@@ -805,7 +805,12 @@ def comps_for_card(item_id: int, db=Depends(get_db)):
                 "median": median}
 
     if not series and not lots:
-        raise HTTPException(status_code=404, detail="no comp data for this card")
+        # A logged purchase is market data even with no sightings, and since
+        # the grid now lists bought cards, 404ing here would make one of its
+        # own rows un-openable. Wanted cards still 404: there is genuinely
+        # nothing to show for a card nobody has priced or bought.
+        if item_id not in _ledger_basis(db):
+            raise HTTPException(status_code=404, detail="no comp data for this card")
 
     # Comps can span marketplaces; the fee model belongs to whichever one the
     # sales actually happened on. Sold rows decide it — that is the side being
@@ -1315,15 +1320,33 @@ def effective_basis(db, item_id: int) -> Optional[Dict[str, Any]]:
     """The card's cost basis, resolved on read.
 
     Precedence, per the plan:
-        real logged purchase  -> exact      (ledger; not built, hence no branch)
-        cost tier / manual    -> ESTIMATED
-        neither               -> None
+        real logged purchase, box closed  -> EXACT
+        real logged purchase, in warehouse -> PARTIAL (item cost only)
+        cost tier / manual                -> ESTIMATED
+        none of them                      -> None
 
     Never denormalized: a tier row carries no amount of its own, so editing the
-    tier reprices every card sitting on it. `estimated` is returned rather than
-    inferred by the caller, because a blended figure must never be presented as
-    a measured one.
+    tier reprices every card sitting on it, and editing a packing quote reprices
+    a whole box. `rung` is returned rather than inferred by the caller, because
+    a blended figure must never be presented as a measured one.
     """
+    ledger = _ledger_basis(db).get(item_id)
+    if ledger is not None:
+        return {
+            "cost_cents": ledger["cost_cents"],
+            "source": "purchase",
+            "tier_code": None,
+            "tier_name": None,
+            "rung": ledger["rung"],
+            "purchase_id": ledger["purchase_id"],
+            "box_id": ledger["box_id"],
+            "n_purchase_lines": ledger["n_purchase_lines"],
+            # A warehouse purchase knows its item cost and none of the shipping
+            # or duties it will still absorb, so it is not yet a measured
+            # number either.
+            "estimated": ledger["rung"] != "exact",
+        }
+
     row = db.execute(text("""
         SELECT c.cost_cents, c.source, t.tier_code, t.tier_name, t.cost_cents
         FROM mkt_item_cost c
@@ -1341,8 +1364,7 @@ def effective_basis(db, item_id: int) -> Optional[Dict[str, Any]]:
         "source": source,
         "tier_code": tier_code,
         "tier_name": tier_name,
-        # Everything available today is an estimate. When the ledger lands, a
-        # row backed by a real purchase flips this to False.
+        "rung": "estimated",
         "estimated": True,
     }
 
@@ -2034,7 +2056,11 @@ def market_grid(db=Depends(get_db)):
         "SELECT DISTINCT item_id FROM mkt_listing_line "
         "WHERE item_id IS NOT NULL"))}
     wanted = _wanted_items(db)
-    item_ids = sorted(with_data | wanted)
+    # A card can reach the grid by having been BOUGHT even with no comps and no
+    # Wanted flag -- it has a real cost basis, which is market data.
+    ledger = _ledger_basis(db)
+    item_set = with_data | wanted | set(ledger)
+    item_ids = sorted(item_set)
     if not item_ids:
         return {"cards": [], "generated_at": datetime.utcnow().isoformat()}
 
@@ -2054,9 +2080,9 @@ def market_grid(db=Depends(get_db)):
         held[item_id] = n
 
     # ---- What I paid ------------------------------------------------------
-    # Card-level. Per-copy basis arrives with the ledger; until then this is a
-    # single figure for every copy and the response says so rather than
-    # implying a precision it does not have.
+    # Card-level. Per-copy basis needs copies linked to purchase lines, which is
+    # a later step; until then this is a single figure for every copy and the
+    # response says so rather than implying a precision it does not have.
     basis: Dict[int, Dict[str, Any]] = {}
     for item_id, own_cents, source, tier_name, tier_cents in db.execute(text(
         "SELECT c.item_id, c.cost_cents, c.source, t.tier_name, t.cost_cents "
@@ -2071,8 +2097,20 @@ def market_grid(db=Depends(get_db)):
             "cost_cents": cents,
             "source": source,
             "tier_name": tier_name,
-            # Everything available today is an estimate; the ledger flips this.
+            "rung": "estimated",
             "estimated": True,
+            "per_copy": False,
+        }
+    # A logged purchase outranks any tier, here as in effective_basis(). Done
+    # after the tier pass rather than instead of it, so a card bought once and
+    # tiered as well reads off the receipt.
+    for item_id, led in ledger.items():
+        basis[item_id] = {
+            "cost_cents": led["cost_cents"],
+            "source": "purchase",
+            "tier_name": None,
+            "rung": led["rung"],
+            "estimated": led["rung"] != "exact",
             "per_copy": False,
         }
 
@@ -2191,8 +2229,12 @@ def market_summary(db=Depends(get_db)):
     app is exactly what the deployment model exists to avoid. The guest bundle
     simply never calls this.
     """
-    with_data = [r[0] for r in db.execute(text(
-        "SELECT DISTINCT item_id FROM mkt_listing_line WHERE item_id IS NOT NULL"))]
+    ledger_cost = _ledger_basis(db)
+    # A bought card belongs here even with no comps: the library's "what did
+    # this cost" column is answered by the receipt, not by the sightings.
+    with_data = sorted({r[0] for r in db.execute(text(
+        "SELECT DISTINCT item_id FROM mkt_listing_line WHERE item_id IS NOT NULL"
+    ))} | set(ledger_cost))
     if not with_data:
         return {"cards": {}, "generated_at": datetime.utcnow().isoformat()}
 
@@ -2260,7 +2302,13 @@ def market_summary(db=Depends(get_db)):
         cents = own_cents if own_cents is not None else tier_cents
         if cents is not None:
             cost[item_id] = {"cost_cents": cents, "source": source,
-                             "tier_name": tier_name, "estimated": True}
+                             "tier_name": tier_name, "rung": "estimated",
+                             "estimated": True}
+    # A logged purchase outranks the tier, same precedence as the grid's.
+    for item_id, led in ledger_cost.items():
+        cost[item_id] = {"cost_cents": led["cost_cents"], "source": "purchase",
+                         "tier_name": None, "rung": led["rung"],
+                         "estimated": led["rung"] != "exact"}
 
     # Display names alongside the codes. `mercari_us` is the key everything
     # joins on and reads like a database row on screen -- the same wart already
@@ -2285,7 +2333,11 @@ def market_summary(db=Depends(get_db)):
             "n_active": n_active.get(item_id, 0),
             "last_seen": last_seen.get(item_id),
             "cost_cents": c["cost_cents"] if c else None,
-            "cost_estimated": bool(c) or None,
+            # Not "does a cost exist" any more: a card in a closed box has a
+            # measured figure, and calling that an estimate throws away the
+            # distinction the ledger exists to make.
+            "cost_estimated": c["estimated"] if c else None,
+            "cost_rung": c["rung"] if c else None,
             # What one would cost you today, landed. `buy_lot_size` > 1 means
             # this price is only reachable by buying the whole lot, and
             # `buy_landed_cents` is what that actually costs -- a $19 per-card
@@ -3047,3 +3099,1235 @@ def delete_lot_line(listing_id: int, line_id: int, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail="No such line on that listing.")
     db.commit()
     return {"ok": True}
+
+
+# ═════════════════════ The ledger — what was actually bought ═════════════════
+#
+# Design: docs/photocard_market_intel_plan.md -> Part 2, revised 2026-09-03
+# against the real Neokyo flow. The one rule everything else follows from:
+#
+#     THE CHARGE HOLDS THE MONEY; THE PURCHASE HOLDS THE WEIGHT.
+#
+# A PayPal batch is one exact USD amount at one FX moment, covering several buy
+# requests. Per-card USD is therefore ALLOCATED DOWN from that total, never
+# converted up from the yen — converting would drop PayPal's cut and the FX
+# spread, silently, in the direction that makes every flip look better than it
+# was. The implied rate falls out of the division instead of being an input.
+
+# Neokyo's storage clock. A warehouse purchase is not free to sit forever, and
+# the countdown is the reason the packing sweep always takes everything.
+WAREHOUSE_DAYS = 45
+
+# Shipping-basis defaults, grams per unit. Deliberately crude and deliberately
+# visible: a real album or photobook should be typed in, because a heavy line
+# under-absorbing shipping pushes its share onto every card in the box.
+DEFAULT_GRAMS = {"card": 5, "unidentified": 5, "non_card": 300}
+
+LINE_TYPES = ("card", "non_card", "unidentified")
+PURCHASE_STATUSES = ("requested", "paid", "received", "cancelled")
+BOX_STATUSES = ("packing", "shipped", "received")
+OUTCOMES = ("kept", "listed", "sold", "unsold", "filler")
+
+
+def _today() -> str:
+    return datetime.utcnow().date().isoformat()
+
+
+def _days_since(iso: Optional[str]) -> Optional[int]:
+    if not iso:
+        return None
+    try:
+        d = datetime.fromisoformat(iso[:10]).date()
+    except ValueError:
+        return None
+    return (datetime.utcnow().date() - d).days
+
+
+def _alloc_with_overrides(total: Optional[int], weights: List[Optional[int]],
+                          overrides: List[Optional[int]]) -> Dict[str, Any]:
+    """Fixed amounts come out first; the remainder splits by weight.
+
+    Same tier-XOR-custom shape used everywhere else in the module: setting an
+    explicit amount pulls that line out of the weighted sweep and the rest
+    redistributes across the still-weighted rows, rather than the override
+    being added on top of a share it also received.
+
+    Overrides summing past the total is a data-entry error, not a rounding
+    one, so the remainder floors at zero and the caller is told — quietly
+    scaling the overrides down would hide which number was wrong.
+    """
+    n = len(weights)
+    if total is None:
+        return {"parts": [None] * n, "over": False}
+    fixed = sum(o for o in overrides if o is not None)
+    rest = total - fixed
+    over = rest < 0
+    if over:
+        rest = 0
+    free = [w if o is None else None for w, o in zip(weights, overrides)]
+    parts = _allocate(rest, free)
+    return {"parts": [o if o is not None else p
+                      for o, p in zip(overrides, parts)],
+            "over": over}
+
+
+def _add(a: Optional[int], b: Optional[int]) -> Optional[int]:
+    """Sum two allocations where None means 'no share', not zero."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a + b
+
+
+# ---------- The snapshot ----------
+#
+# Everything is costed in one pass rather than per-box, because a card's basis
+# has to be answerable from the grid without knowing which box it came in. Boxes
+# are few and purchases are hundreds, so this stays cheap.
+
+
+def _ledger_snapshot(db) -> Dict[str, Any]:
+    """Every charge, purchase and line, with cost allocated all the way down.
+
+    Three levels, and each reconciles exactly:
+
+        charge (exact USD)  ->  purchases (by native price weight)
+                            ->  lines     (by value)
+        packing charge      ->  lines     (shipping by weight, duties by value)
+
+    Returns dicts keyed by id plus the residual/warning flags a caller needs to
+    say what it could not allocate, rather than presenting a tidy number that
+    quietly dropped money.
+    """
+    # Nothing logged yet, and every read path calls this — including
+    # /market/summary, which the library hits on load. Bail before building the
+    # value ladder, which is a full pass over the sold comps.
+    if not db.execute(text("SELECT 1 FROM mkt_purchase LIMIT 1")).first():
+        return {"charges": {}, "purchases": {}, "boxes": {}, "lines": []}
+
+    charges = {r["charge_id"]: dict(r) for r in db.execute(text(
+        "SELECT * FROM mkt_charge")).mappings()}
+    purchases = {r["purchase_id"]: dict(r) for r in db.execute(text(
+        "SELECT * FROM mkt_purchase ORDER BY purchase_id")).mappings()}
+    lines = [dict(r) for r in db.execute(text(
+        "SELECT * FROM mkt_purchase_line ORDER BY line_id")).mappings()]
+    boxes = {r["box_id"]: dict(r) for r in db.execute(text(
+        "SELECT * FROM mkt_box")).mappings()}
+
+    for ch in charges.values():
+        ch["purchase_ids"] = []
+    for b in boxes.values():
+        b["purchase_ids"] = []
+        b["packing_charge_id"] = None
+    for ch in charges.values():
+        if ch["kind"] == "packing" and ch["box_id"] in boxes:
+            boxes[ch["box_id"]]["packing_charge_id"] = ch["charge_id"]
+
+    for p in purchases.values():
+        p["lines"] = []
+        p["items_cents"] = None
+        p["domestic_cents"] = 0
+        p["cost_cents"] = None
+        if p["charge_id"] in charges:
+            charges[p["charge_id"]]["purchase_ids"].append(p["purchase_id"])
+        if p["box_id"] in boxes:
+            boxes[p["box_id"]]["purchase_ids"].append(p["purchase_id"])
+    for ln in lines:
+        p = purchases.get(ln["purchase_id"])
+        if p is not None:
+            p["lines"].append(ln)
+
+    # ---- Level 1: the batch charge -> its purchases ------------------------
+    #
+    # The pool is what the batch really cost, which is not what PayPal took:
+    # store credit consumed was money spent earlier, and credit issued by a
+    # cancellation inside this same batch leaves the pool to be spent again
+    # later. Missing either turns every card in the batch into a wrong number.
+    for ch in charges.values():
+        if ch["kind"] != "items":
+            continue
+        rows = [purchases[i] for i in ch["purchase_ids"]]
+        issued = sum(p["credit_issued_cents"] or 0 for p in rows
+                     if p["status"] == "cancelled")
+        pool = (ch["paid_usd_cents"] or 0) + (ch["credit_applied_cents"] or 0) - issued
+        ch["pool_cents"] = pool
+        ch["credit_issued_cents"] = issued
+        live = [p for p in rows if p["status"] != "cancelled"]
+        weights = [(p["item_minor"] or 0) + (p["proxy_fee_minor"] or 0)
+                   for p in live]
+        # A batch of free items, or one whose prices were never typed in, has
+        # nothing to split by. Falling back to an even split is honest here:
+        # the money is real and has to land somewhere.
+        if not any(weights):
+            weights = [1] * len(live)
+            ch["weight_basis"] = "even"
+        else:
+            ch["weight_basis"] = "price"
+        for p, share in zip(live, _allocate(pool, weights)):
+            p["items_cents"] = share
+        native = sum((p["item_minor"] or 0) + (p["proxy_fee_minor"] or 0)
+                     for p in live)
+        cur = live[0]["currency"] if live else None
+        ch["native_minor"] = native
+        ch["currency"] = cur
+        ch["implied_rate"] = implied_rate(native, cur, pool) if cur else None
+
+    for ch in charges.values():
+        if ch["kind"] == "domestic_shipping" and ch["purchase_id"] in purchases:
+            p = purchases[ch["purchase_id"]]
+            p["domestic_cents"] += ch["paid_usd_cents"] or 0
+
+    for p in purchases.values():
+        if p["status"] == "cancelled":
+            p["cost_cents"] = None
+        else:
+            p["cost_cents"] = _add(p["items_cents"], p["domestic_cents"] or None)
+
+    # ---- Line valuation ----------------------------------------------------
+    ladder = _value_ladder(db)
+    card_ids = [ln["item_id"] for ln in lines if ln["item_id"]]
+    labels = _labels_for(db, card_ids)
+    eras = _eras_for(db, card_ids)
+    wanted = _wanted_items(db)
+
+    for ln in lines:
+        qty = max(1, ln["qty"] or 1)
+        item_id = ln["item_id"]
+        sold = ladder["net"].get(item_id) if item_id else None
+        # Same ladder as the lot analyzer, deliberately: a purchase is a lot
+        # that was actually bought, and two different valuations of the same
+        # cards would make the box disagree with the analysis that justified it.
+        if ln["value_cents"] is not None:
+            value, vsource = ln["value_cents"], "manual"
+        elif sold and sold["net_proceeds_cents"] is not None:
+            value, vsource = sold["net_proceeds_cents"], "sold"
+        elif item_id:
+            value, vsource = ladder["era_median"].get(eras.get(item_id, "new")), "era"
+        elif ln["line_type"] == "unidentified":
+            value, vsource = ladder["pooled_median"], "era"
+        else:
+            value, vsource = None, "none"
+        if value is None:
+            vsource = "none"
+
+        grams = ln["weight_grams"]
+        ln["_grams_estimated"] = grams is None
+        if grams is None:
+            grams = DEFAULT_GRAMS.get(ln["line_type"], DEFAULT_GRAMS["card"])
+        ln["_qty"] = qty
+        ln["_value_cents"] = value
+        ln["_value_source"] = vsource
+        ln["_line_value_cents"] = value * qty if value is not None else None
+        ln["_line_grams"] = grams * qty
+        ln["_label"] = (((labels.get(item_id) or {}).get("label") if item_id else None)
+                        or ln["label"]
+                        or ("unidentified" if ln["line_type"] == "unidentified" else "—"))
+        ln["_wanted"] = item_id in wanted if item_id else False
+        if ln["disposition"] in ("keep", "flip"):
+            ln["_disposition"], ln["_disp_source"] = ln["disposition"], "manual"
+        else:
+            ln["_disposition"] = "keep" if ln["_wanted"] else "flip"
+            ln["_disp_source"] = "library"
+        ln["item_cost_cents"] = None
+        ln["box_cost_cents"] = None
+        ln["landed_cents"] = None
+
+    # ---- Level 2: a purchase's cost -> its lines ---------------------------
+    for p in purchases.values():
+        pl = p["lines"]
+        if not pl:
+            continue
+        vals = [ln["_line_value_cents"] for ln in pl]
+        # One line takes the lot whatever its value: the single-card purchase
+        # is the common case and it must not fall out over a missing comp.
+        if len(pl) == 1 or not any(vals):
+            vals = [ln["_qty"] for ln in pl]
+        res = _alloc_with_overrides(p["cost_cents"], vals,
+                                    [ln["alloc_override_cents"] for ln in pl])
+        p["override_exceeds_cost"] = res["over"]
+        for ln, part in zip(pl, res["parts"]):
+            ln["item_cost_cents"] = part
+
+    # ---- Level 3: the packing charge -> every line in the box --------------
+    #
+    # Two bases, because one is wrong. Shipping goes by weight (an album really
+    # does cost more to fly); duties and fees go by value (they scale with the
+    # declared amount, and a heavy cheap item does not owe more duty).
+    for b in boxes.values():
+        blines = [ln for pid in b["purchase_ids"] for ln in purchases[pid]["lines"]
+                  if purchases[pid]["status"] != "cancelled"]
+        b["_lines"] = blines
+        ch = charges.get(b["packing_charge_id"])
+        b["box_cost_cents"] = None
+        b["basis_split"] = None
+        if ch is None or not blines:
+            continue
+        pool = (ch["paid_usd_cents"] or 0) + (ch["credit_applied_cents"] or 0)
+        b["box_cost_cents"] = pool
+        split = any(ch[k] is not None
+                    for k in ("ship_usd_cents", "duties_usd_cents", "fees_usd_cents"))
+        weights_w = [ln["_line_grams"] for ln in blines]
+        weights_v = [ln["_line_value_cents"] for ln in blines]
+        # No values on file anywhere in the box: fall back to weight rather
+        # than dropping the duties, and say so.
+        value_basis_ok = any(weights_v)
+        if not value_basis_ok:
+            weights_v = weights_w
+        if split:
+            named = sum(ch[k] or 0 for k in
+                        ("ship_usd_cents", "duties_usd_cents", "fees_usd_cents"))
+            # Anything the quote's own split does not name still has to land.
+            by_weight = (ch["ship_usd_cents"] or 0) + max(0, pool - named)
+            by_value = (ch["duties_usd_cents"] or 0) + (ch["fees_usd_cents"] or 0)
+            b["basis_split"] = {"by_weight_cents": by_weight,
+                                "by_value_cents": by_value,
+                                "value_basis": "value" if value_basis_ok else "weight",
+                                "unnamed_cents": max(0, pool - named)}
+        else:
+            by_weight, by_value = pool, 0
+            b["basis_split"] = {"by_weight_cents": by_weight, "by_value_cents": 0,
+                                "value_basis": "weight", "unnamed_cents": 0}
+        parts_w = _allocate(by_weight, weights_w) if by_weight else [None] * len(blines)
+        parts_v = _allocate(by_value, weights_v) if by_value else [None] * len(blines)
+        for ln, a, c in zip(blines, parts_w, parts_v):
+            ln["box_cost_cents"] = _add(a, c)
+
+    for ln in lines:
+        ln["landed_cents"] = _add(ln["item_cost_cents"], ln["box_cost_cents"])
+        ln["landed_per_unit_cents"] = (
+            round(ln["landed_cents"] / ln["_qty"])
+            if ln["landed_cents"] is not None else None)
+
+    return {"charges": charges, "purchases": purchases, "boxes": boxes,
+            "lines": lines}
+
+
+def _line_out(ln: Dict[str, Any]) -> Dict[str, Any]:
+    """One line, as the API shows it. Private keys stay private."""
+    return {
+        "line_id": ln["line_id"],
+        "purchase_id": ln["purchase_id"],
+        "line_type": ln["line_type"],
+        "item_id": ln["item_id"],
+        "label": ln["_label"],
+        "qty": ln["_qty"],
+        "wanted": ln["_wanted"],
+        "weight_grams": ln["weight_grams"],
+        "weight_estimated": ln["_grams_estimated"],
+        "value_cents": ln["_value_cents"],
+        "value_source": ln["_value_source"],
+        "alloc_override_cents": ln["alloc_override_cents"],
+        "disposition": ln["_disposition"],
+        "disposition_source": ln["_disp_source"],
+        "outcome": ln["outcome"],
+        "notes": ln["notes"],
+        "item_cost_cents": ln["item_cost_cents"],
+        "box_cost_cents": ln["box_cost_cents"],
+        "landed_cents": ln["landed_cents"],
+        "landed_per_unit_cents": ln["landed_per_unit_cents"],
+        "margin_cents": (ln["_line_value_cents"] - ln["landed_cents"]
+                         if ln["_line_value_cents"] is not None
+                         and ln["landed_cents"] is not None else None),
+    }
+
+
+def _purchase_out(p: Dict[str, Any], snap: Dict[str, Any]) -> Dict[str, Any]:
+    """One purchase, with its lines and the state of its costing."""
+    box = snap["boxes"].get(p["box_id"])
+    packed = box is not None
+    costed = packed and box.get("packing_charge_id") is not None
+    days = _days_since(p["ordered_on"] or snap["charges"].get(
+        p["charge_id"], {}).get("paid_on"))
+    return {
+        "purchase_id": p["purchase_id"],
+        "charge_id": p["charge_id"],
+        "box_id": p["box_id"],
+        "box_label": box["label"] if box else None,
+        "listing_id": p["listing_id"],
+        "marketplace": p["marketplace"],
+        "external_id": p["external_id"],
+        "listing_url": p["listing_url"],
+        "title_raw": p["title_raw"],
+        "thumbnail_url": p["thumbnail_url"],
+        "item_minor": p["item_minor"],
+        "proxy_fee_minor": p["proxy_fee_minor"],
+        "currency": p["currency"],
+        "status": p["status"],
+        "ordered_on": p["ordered_on"],
+        "received_on": p["received_on"],
+        "cancelled_on": p["cancelled_on"],
+        "credit_issued_cents": p["credit_issued_cents"],
+        "notes": p["notes"],
+        "items_cents": p["items_cents"],
+        "domestic_cents": p["domestic_cents"] or None,
+        "cost_cents": p["cost_cents"],
+        # Which rung this purchase's cards sit on. `partial` is the whole point
+        # of the distinction: item cost is real, box cost has not happened yet.
+        "cost_rung": ("exact" if costed else
+                      "partial" if p["status"] != "cancelled" else None),
+        "days_in_warehouse": days,
+        "days_left": (WAREHOUSE_DAYS - days
+                      if days is not None and not packed else None),
+        "n_lines": len(p["lines"]),
+        "lines": [_line_out(ln) for ln in p["lines"]],
+    }
+
+
+def _credit_balance(db) -> Dict[str, int]:
+    """Store credit, derived — never a stored counter that can drift."""
+    issued = db.execute(text(
+        "SELECT COALESCE(SUM(credit_issued_cents), 0) FROM mkt_purchase "
+        "WHERE status = 'cancelled'")).scalar() or 0
+    applied = db.execute(text(
+        "SELECT COALESCE(SUM(credit_applied_cents), 0) FROM mkt_charge"
+    )).scalar() or 0
+    return {"issued_cents": issued, "applied_cents": applied,
+            "balance_cents": issued - applied}
+
+
+# ---------- Cost basis from the ledger ----------
+
+
+def _ledger_basis(db, snap: Optional[Dict[str, Any]] = None) -> Dict[int, Dict[str, Any]]:
+    """Per-card landed cost from real purchases, keyed by item_id.
+
+    Outranks the cost tiers wherever it exists — a tier is a guess about the
+    backlog and this is a number off a receipt.
+
+    Where a card was bought more than once the MOST RECENT purchase wins and
+    the count comes with it. Averaging would invent a figure matching no copy
+    in hand, and per-copy attribution needs copies linked to lines, which is a
+    later step.
+    """
+    if snap is None:
+        snap = _ledger_snapshot(db)
+    out: Dict[int, Dict[str, Any]] = {}
+    for ln in snap["lines"]:
+        item_id = ln["item_id"]
+        if not item_id or ln["landed_per_unit_cents"] is None:
+            continue
+        p = snap["purchases"].get(ln["purchase_id"])
+        if p is None or p["status"] == "cancelled":
+            continue
+        box = snap["boxes"].get(p["box_id"])
+        rung = "exact" if box and box.get("packing_charge_id") else "partial"
+        when = (p["received_on"] or p["ordered_on"]
+                or snap["charges"].get(p["charge_id"], {}).get("paid_on") or "")
+        prev = out.get(item_id)
+        if prev is None or (when, ln["line_id"]) >= (prev["_when"], prev["_line_id"]):
+            keep = {"cost_cents": ln["landed_per_unit_cents"],
+                    "source": "purchase", "rung": rung,
+                    "purchase_id": p["purchase_id"], "box_id": p["box_id"],
+                    "_when": when, "_line_id": ln["line_id"],
+                    "n_purchase_lines": (prev or {}).get("n_purchase_lines", 0) + 1}
+            out[item_id] = keep
+        else:
+            prev["n_purchase_lines"] += 1
+    for v in out.values():
+        v.pop("_when", None)
+        v.pop("_line_id", None)
+    return out
+
+
+# ---------- Request bodies ----------
+
+
+class PurchaseIn(BaseModel):
+    """One listing bought. Prices are WEIGHTS, in the marketplace's minor units."""
+    listing_id: Optional[int] = None
+    marketplace: str = "neokyo"
+    external_id: Optional[str] = None
+    listing_url: Optional[str] = None
+    title_raw: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    item_minor: Optional[int] = None
+    proxy_fee_minor: int = 0
+    currency: Optional[str] = None
+    # Convenience for the common single-card purchase: seeds one card line so
+    # the money can reach a card without a second trip to the lines editor.
+    item_id: Optional[int] = None
+    qty: int = 1
+    status: str = "paid"
+    ordered_on: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ChargeIn(BaseModel):
+    kind: str = "items"
+    paid_on: Optional[str] = None
+    paid_usd_cents: int
+    credit_applied_cents: int = 0
+    box_id: Optional[int] = None
+    purchase_id: Optional[int] = None
+    ship_usd_cents: Optional[int] = None
+    duties_usd_cents: Optional[int] = None
+    fees_usd_cents: Optional[int] = None
+    note: Optional[str] = None
+    purchases: List[PurchaseIn] = Field(default_factory=list)
+
+
+class ChargePatch(BaseModel):
+    paid_on: Optional[str] = None
+    paid_usd_cents: Optional[int] = None
+    credit_applied_cents: Optional[int] = None
+    ship_usd_cents: Optional[int] = None
+    duties_usd_cents: Optional[int] = None
+    fees_usd_cents: Optional[int] = None
+    note: Optional[str] = None
+
+
+class PurchasePatch(BaseModel):
+    title_raw: Optional[str] = None
+    listing_url: Optional[str] = None
+    item_minor: Optional[int] = None
+    proxy_fee_minor: Optional[int] = None
+    status: Optional[str] = None
+    ordered_on: Optional[str] = None
+    received_on: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CancelIn(BaseModel):
+    """A cancellation refunds as Neokyo store credit, not to PayPal."""
+    credit_issued_cents: int
+    cancelled_on: Optional[str] = None
+
+
+class PurchaseLineIn(BaseModel):
+    line_type: str = "card"
+    item_id: Optional[int] = None
+    label: Optional[str] = None
+    qty: int = 1
+    weight_grams: Optional[int] = None
+    value_cents: Optional[int] = None
+    alloc_override_cents: Optional[int] = None
+    disposition: Optional[str] = None
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PurchaseLinePatch(BaseModel):
+    line_type: Optional[str] = None
+    item_id: Optional[int] = None
+    label: Optional[str] = None
+    qty: Optional[int] = None
+    weight_grams: Optional[int] = None
+    value_cents: Optional[int] = None
+    alloc_override_cents: Optional[int] = None
+    disposition: Optional[str] = None
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BoxIn(BaseModel):
+    """A packing request. The box is born here, out of the warehouse pool."""
+    label: Optional[str] = None
+    requested_on: Optional[str] = None
+    # Omitted means the whole warehouse, which is what the 45-day clock makes
+    # the normal case — nothing is ever deliberately held back.
+    purchase_ids: Optional[List[int]] = None
+    charge: Optional[ChargeIn] = None
+    notes: Optional[str] = None
+
+
+class BoxPatch(BaseModel):
+    label: Optional[str] = None
+    status: Optional[str] = None
+    requested_on: Optional[str] = None
+    shipped_on: Optional[str] = None
+    received_on: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ---------- Lookups and guards ----------
+
+
+def _row_or_404(db, sql: str, params: Dict[str, Any], what: str):
+    row = db.execute(text(sql), params).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No such {what}.")
+    return dict(row)
+
+
+def _check_credit(db, applied: int, charge_id: Optional[int] = None) -> None:
+    """Credit spent cannot exceed credit earned.
+
+    Guarded rather than trusted because the failure is silent and flattering:
+    over-applied credit inflates every allocatable pool it touches and reads as
+    a windfall exchange rate.
+    """
+    if applied <= 0:
+        return
+    bal = _credit_balance(db)
+    already = 0
+    if charge_id is not None:
+        already = db.execute(text(
+            "SELECT credit_applied_cents FROM mkt_charge WHERE charge_id = :c"),
+            {"c": charge_id}).scalar() or 0
+    available = bal["balance_cents"] + already
+    if applied > available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only ${available / 100:.2f} of store credit is available; "
+                   f"${applied / 100:.2f} was applied. Log the cancellation "
+                   f"that issued it first.")
+
+
+def _insert_purchase(db, charge_id: int, p: PurchaseIn) -> int:
+    """Create a purchase, prefilling from its captured listing where there is one."""
+    fields = p.model_dump()
+    listing = None
+    if p.listing_id:
+        listing = db.execute(text(
+            "SELECT listing_id, marketplace, external_id, listing_url, title_raw,"
+            " thumbnail_url FROM mkt_listing WHERE listing_id = :i"),
+            {"i": p.listing_id}).mappings().first()
+        if listing is None:
+            raise HTTPException(status_code=404, detail="No such listing.")
+        for k in ("marketplace", "external_id", "listing_url", "title_raw",
+                  "thumbnail_url"):
+            if not fields.get(k) or k == "marketplace":
+                fields[k] = listing[k]
+
+    currency = p.currency or marketplace_currency(db, fields["marketplace"])
+    item_minor = p.item_minor
+    if item_minor is None and listing is not None:
+        # The last observed ask, as the weight. It is what was paid in the
+        # overwhelming majority of proxy buys, and it is a weight rather than
+        # money, so an offer accepted a little under does not corrupt anything
+        # — the batch total still rules.
+        item_minor = db.execute(text(
+            "SELECT price_cents FROM mkt_sighting WHERE listing_id = :i "
+            "ORDER BY observed_at DESC LIMIT 1"), {"i": p.listing_id}).scalar()
+    if item_minor is None:
+        item_minor = 0
+
+    if p.status not in PURCHASE_STATUSES:
+        raise HTTPException(status_code=400,
+                            detail=f"status must be one of {PURCHASE_STATUSES}")
+
+    res = db.execute(text(
+        "INSERT INTO mkt_purchase (charge_id, listing_id, marketplace, external_id,"
+        " listing_url, title_raw, thumbnail_url, item_minor, proxy_fee_minor,"
+        " currency, status, ordered_on, notes) "
+        "VALUES (:c, :l, :m, :e, :u, :t, :th, :im, :pf, :cur, :st, :od, :n)"), {
+            "c": charge_id, "l": p.listing_id, "m": fields["marketplace"],
+            "e": fields.get("external_id"), "u": fields.get("listing_url"),
+            "t": fields.get("title_raw"), "th": fields.get("thumbnail_url"),
+            "im": item_minor, "pf": p.proxy_fee_minor or 0, "cur": currency,
+            "st": p.status, "od": p.ordered_on, "n": p.notes})
+    purchase_id = res.lastrowid
+
+    _seed_lines(db, purchase_id, p)
+    return purchase_id
+
+
+def _seed_lines(db, purchase_id: int, p: PurchaseIn) -> int:
+    """Give a new purchase its contents.
+
+    From the captured listing's lines where there are any — the lot analyzer's
+    decomposition is exactly this work, already done — by COPY rather than
+    reference, because capture ingest replaces a listing's lines wholesale on
+    the next sync and would erase everything the box needs.
+
+    Failing that, one line: the named card, or an unidentified one. Never zero.
+    A purchase with no lines is money that reaches no card, and its share of
+    shipping would silently land on everyone else's.
+    """
+    copied = 0
+    if p.listing_id:
+        rows = db.execute(text(
+            "SELECT line_type, item_id, collection_type_id, label, qty,"
+            " value_cents, disposition FROM mkt_listing_line "
+            "WHERE listing_id = :i ORDER BY line_id"),
+            {"i": p.listing_id}).mappings().all()
+        for r in rows:
+            db.execute(text(
+                "INSERT INTO mkt_purchase_line (purchase_id, line_type, item_id,"
+                " collection_type_id, label, qty, value_cents, disposition) "
+                "VALUES (:p, :lt, :i, :ct, :lb, :q, :v, :d)"), {
+                    "p": purchase_id, "lt": r["line_type"], "i": r["item_id"],
+                    "ct": r["collection_type_id"], "lb": r["label"],
+                    "q": r["qty"], "v": r["value_cents"], "d": r["disposition"]})
+            copied += 1
+    if copied:
+        return copied
+
+    ctype = _photocard_type_id(db)
+    db.execute(text(
+        "INSERT INTO mkt_purchase_line (purchase_id, line_type, item_id,"
+        " collection_type_id, label, qty) VALUES (:p, :lt, :i, :ct, :lb, :q)"), {
+            "p": purchase_id, "lt": "card" if p.item_id else "unidentified",
+            "i": p.item_id, "ct": ctype if p.item_id else None,
+            "lb": None if p.item_id else (p.title_raw or None),
+            "q": max(1, p.qty or 1)})
+    return 1
+
+
+# ---------- Warehouse ----------
+
+
+@router.get("/warehouse")
+def warehouse(db=Depends(get_db)):
+    """What is bought, paid for, and not yet shipped.
+
+    The resting state of a purchase, and the thing the packing request empties.
+    Days left is the 45-day storage clock; it is why the sweep always takes
+    everything and exclusion is an affordance nobody uses.
+    """
+    snap = _ledger_snapshot(db)
+    rows = [_purchase_out(p, snap) for p in snap["purchases"].values()
+            if p["box_id"] is None and p["status"] != "cancelled"]
+    rows.sort(key=lambda r: (r["days_left"] is None, -(r["days_in_warehouse"] or 0)))
+    cards = sum(ln["qty"] for r in rows for ln in r["lines"])
+    return {
+        "purchases": rows,
+        "n_purchases": len(rows),
+        "n_units": cards,
+        "items_cost_cents": sum(r["cost_cents"] or 0 for r in rows),
+        "credit": _credit_balance(db),
+        "warehouse_days": WAREHOUSE_DAYS,
+        # Cost is incomplete until a packing request lands, and saying so is the
+        # point of the `partial` rung: these cards have a real item cost and
+        # none of the shipping or duties they will still absorb.
+        "cost_rung": "partial",
+    }
+
+
+# ---------- Charges ----------
+
+
+@router.get("/purchasable")
+def purchasable(marketplace: str = "neokyo", db=Depends(get_db)):
+    """Captured listings that could be bought, for the batch-entry picker.
+
+    Buying off a capture rather than typing a title is the whole reason the
+    extension exists: the listing already carries its price, its URL, its photo
+    and — for a lot — the decomposition worked out in the analyzer. Typing it
+    again would be re-doing identification that is already done.
+
+    Excludes anything already logged as a purchase, so a batch cannot be
+    entered twice, and anything delisted, which is no longer buyable.
+    """
+    rows = db.execute(text(
+        "SELECT l.listing_id, l.title_raw, l.listing_url, l.thumbnail_url,"
+        " l.external_id, l.marketplace, l.last_seen_at,"
+        f" {UNITS_SQL} AS units,"
+        " (SELECT s.price_cents FROM mkt_sighting s"
+        "   WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS price_minor,"
+        " (SELECT s.currency FROM mkt_sighting s"
+        "   WHERE s.listing_id = l.listing_id"
+        "   ORDER BY s.observed_at DESC LIMIT 1) AS currency "
+        "FROM mkt_listing l "
+        "WHERE l.marketplace = :m AND l.delisted_at IS NULL "
+        "  AND NOT EXISTS (SELECT 1 FROM mkt_purchase p"
+        "                   WHERE p.listing_id = l.listing_id) "
+        "ORDER BY l.last_seen_at DESC LIMIT 200"), {"m": marketplace}).mappings().all()
+    return {"listings": [dict(r) for r in rows]}
+
+
+@router.get("/charges")
+def list_charges(db=Depends(get_db)):
+    snap = _ledger_snapshot(db)
+    out = []
+    for ch in sorted(snap["charges"].values(),
+                     key=lambda c: (c["paid_on"] or "", c["charge_id"]),
+                     reverse=True):
+        rows = [snap["purchases"][i] for i in ch["purchase_ids"]]
+        out.append({
+            "charge_id": ch["charge_id"], "kind": ch["kind"],
+            "paid_on": ch["paid_on"], "paid_usd_cents": ch["paid_usd_cents"],
+            "credit_applied_cents": ch["credit_applied_cents"],
+            "credit_issued_cents": ch.get("credit_issued_cents") or 0,
+            "pool_cents": ch.get("pool_cents"),
+            "box_id": ch["box_id"], "purchase_id": ch["purchase_id"],
+            "ship_usd_cents": ch["ship_usd_cents"],
+            "duties_usd_cents": ch["duties_usd_cents"],
+            "fees_usd_cents": ch["fees_usd_cents"],
+            "note": ch["note"],
+            "n_purchases": len(rows),
+            "n_cancelled": sum(1 for p in rows if p["status"] == "cancelled"),
+            "native_minor": ch.get("native_minor"),
+            "currency": ch.get("currency"),
+            # Derived, never looked up. It is what the batch actually converted
+            # at, PayPal's cut included, which is the only honest rate for it.
+            "implied_rate": ch.get("implied_rate"),
+        })
+    return {"charges": out, "credit": _credit_balance(db)}
+
+
+@router.post("/charges", status_code=201)
+def create_charge(body: ChargeIn, db=Depends(get_db)):
+    """Log a payment: a paid batch, a later domestic-shipping bill, or a packing quote."""
+    if body.kind not in ("items", "domestic_shipping", "packing"):
+        raise HTTPException(status_code=400,
+                            detail="kind must be items, domestic_shipping or packing")
+    if body.paid_usd_cents is None or body.paid_usd_cents < 0:
+        raise HTTPException(status_code=400, detail="paid_usd_cents must be >= 0")
+    if body.kind == "domestic_shipping":
+        if not body.purchase_id:
+            raise HTTPException(status_code=400,
+                                detail="A domestic-shipping charge needs a purchase_id.")
+        _row_or_404(db, "SELECT purchase_id FROM mkt_purchase WHERE purchase_id = :p",
+                    {"p": body.purchase_id}, "purchase")
+    if body.kind == "packing":
+        if not body.box_id:
+            raise HTTPException(status_code=400,
+                                detail="A packing charge needs a box_id.")
+        _row_or_404(db, "SELECT box_id FROM mkt_box WHERE box_id = :b",
+                    {"b": body.box_id}, "box")
+    _check_credit(db, body.credit_applied_cents or 0)
+
+    res = db.execute(text(
+        "INSERT INTO mkt_charge (kind, box_id, purchase_id, paid_on, paid_usd_cents,"
+        " credit_applied_cents, ship_usd_cents, duties_usd_cents, fees_usd_cents, note) "
+        "VALUES (:k, :b, :p, :d, :amt, :cr, :sh, :du, :fe, :n)"), {
+            "k": body.kind, "b": body.box_id, "p": body.purchase_id,
+            "d": body.paid_on or _today(), "amt": body.paid_usd_cents,
+            "cr": body.credit_applied_cents or 0, "sh": body.ship_usd_cents,
+            "du": body.duties_usd_cents, "fe": body.fees_usd_cents, "n": body.note})
+    charge_id = res.lastrowid
+
+    ids = []
+    if body.kind == "items":
+        for p in body.purchases:
+            ids.append(_insert_purchase(db, charge_id, p))
+    db.commit()
+    return {"ok": True, "charge_id": charge_id, "purchase_ids": ids}
+
+
+@router.patch("/charges/{charge_id}")
+def update_charge(charge_id: int, body: ChargePatch, db=Depends(get_db)):
+    _row_or_404(db, "SELECT charge_id FROM mkt_charge WHERE charge_id = :c",
+                {"c": charge_id}, "charge")
+    if body.credit_applied_cents is not None:
+        _check_credit(db, body.credit_applied_cents, charge_id)
+    sets, params = [], {"c": charge_id}
+    for field, col in (("paid_on", "paid_on"),
+                       ("paid_usd_cents", "paid_usd_cents"),
+                       ("credit_applied_cents", "credit_applied_cents"),
+                       ("ship_usd_cents", "ship_usd_cents"),
+                       ("duties_usd_cents", "duties_usd_cents"),
+                       ("fees_usd_cents", "fees_usd_cents"),
+                       ("note", "note")):
+        val = getattr(body, field)
+        if val is not None:
+            sets.append(f"{col} = :{col}")
+            params[col] = val
+    if not sets:
+        return {"ok": True, "changed": False}
+    db.execute(text(f"UPDATE mkt_charge SET {', '.join(sets)} WHERE charge_id = :c"),
+               params)
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.delete("/charges/{charge_id}")
+def delete_charge(charge_id: int, db=Depends(get_db)):
+    """Drop a charge, and everything it paid for.
+
+    Explicit child cleanup: SQLite's FK cascades never fire here, because
+    `PRAGMA foreign_keys = ON` is only issued on init_db's connection.
+    """
+    _row_or_404(db, "SELECT charge_id FROM mkt_charge WHERE charge_id = :c",
+                {"c": charge_id}, "charge")
+    pids = [r[0] for r in db.execute(text(
+        "SELECT purchase_id FROM mkt_purchase WHERE charge_id = :c"),
+        {"c": charge_id})]
+    for pid in pids:
+        db.execute(text("DELETE FROM mkt_purchase_line WHERE purchase_id = :p"),
+                   {"p": pid})
+        db.execute(text("DELETE FROM mkt_charge WHERE purchase_id = :p"), {"p": pid})
+    db.execute(text("DELETE FROM mkt_purchase WHERE charge_id = :c"), {"c": charge_id})
+    db.execute(text("DELETE FROM mkt_charge WHERE charge_id = :c"), {"c": charge_id})
+    db.commit()
+    return {"ok": True, "purchases_deleted": len(pids)}
+
+
+# ---------- Purchases ----------
+
+
+@router.get("/purchases/{purchase_id}")
+def get_purchase(purchase_id: int, db=Depends(get_db)):
+    snap = _ledger_snapshot(db)
+    p = snap["purchases"].get(purchase_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="No such purchase.")
+    return _purchase_out(p, snap)
+
+
+@router.post("/charges/{charge_id}/purchases", status_code=201)
+def add_purchase(charge_id: int, body: PurchaseIn, db=Depends(get_db)):
+    ch = _row_or_404(db, "SELECT kind FROM mkt_charge WHERE charge_id = :c",
+                     {"c": charge_id}, "charge")
+    if ch["kind"] != "items":
+        raise HTTPException(status_code=400,
+                            detail="Purchases hang off an items charge, not a "
+                                   f"{ch['kind']} one.")
+    purchase_id = _insert_purchase(db, charge_id, body)
+    db.commit()
+    return {"ok": True, "purchase_id": purchase_id}
+
+
+@router.patch("/purchases/{purchase_id}")
+def update_purchase(purchase_id: int, body: PurchasePatch, db=Depends(get_db)):
+    _row_or_404(db, "SELECT purchase_id FROM mkt_purchase WHERE purchase_id = :p",
+                {"p": purchase_id}, "purchase")
+    if body.status is not None and body.status not in PURCHASE_STATUSES:
+        raise HTTPException(status_code=400,
+                            detail=f"status must be one of {PURCHASE_STATUSES}")
+    if body.status == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Cancel through POST /purchases/{id}/cancel — a cancellation "
+                   "issues store credit, and setting the status alone would "
+                   "leave that money unaccounted for.")
+    sets, params = [], {"p": purchase_id}
+    for field in ("title_raw", "listing_url", "item_minor", "proxy_fee_minor",
+                  "status", "ordered_on", "received_on", "notes"):
+        val = getattr(body, field)
+        if val is not None:
+            sets.append(f"{field} = :{field}")
+            params[field] = val
+    if not sets:
+        return {"ok": True, "changed": False}
+    db.execute(text(f"UPDATE mkt_purchase SET {', '.join(sets)} WHERE purchase_id = :p"),
+               params)
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.post("/purchases/{purchase_id}/cancel")
+def cancel_purchase(purchase_id: int, body: CancelIn, db=Depends(get_db)):
+    """The seller did not ship. Neokyo refunds as store credit.
+
+    The purchase leaves allocation entirely rather than sitting at weight zero,
+    and the credit leaves its batch's pool to be spent again later. Whatever the
+    refund does not cover — an unrefunded PayPal fee, typically — correctly
+    stays behind and is absorbed by the survivors, because it really was spent.
+    """
+    _row_or_404(db, "SELECT purchase_id FROM mkt_purchase WHERE purchase_id = :p",
+                {"p": purchase_id}, "purchase")
+    if body.credit_issued_cents < 0:
+        raise HTTPException(status_code=400, detail="credit_issued_cents must be >= 0")
+    db.execute(text(
+        "UPDATE mkt_purchase SET status = 'cancelled', cancelled_on = :d,"
+        " credit_issued_cents = :cr WHERE purchase_id = :p"),
+        {"d": body.cancelled_on or _today(), "cr": body.credit_issued_cents,
+         "p": purchase_id})
+    db.commit()
+    return {"ok": True, "credit": _credit_balance(db)}
+
+
+@router.delete("/purchases/{purchase_id}")
+def delete_purchase(purchase_id: int, db=Depends(get_db)):
+    _row_or_404(db, "SELECT purchase_id FROM mkt_purchase WHERE purchase_id = :p",
+                {"p": purchase_id}, "purchase")
+    db.execute(text("DELETE FROM mkt_purchase_line WHERE purchase_id = :p"),
+               {"p": purchase_id})
+    db.execute(text("DELETE FROM mkt_charge WHERE purchase_id = :p"),
+               {"p": purchase_id})
+    db.execute(text("DELETE FROM mkt_purchase WHERE purchase_id = :p"),
+               {"p": purchase_id})
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- Purchase lines ----------
+
+
+def _check_line(line_type=None, disposition=None, outcome=None, qty=None):
+    if line_type is not None and line_type not in LINE_TYPES:
+        raise HTTPException(status_code=400,
+                            detail=f"line_type must be one of {LINE_TYPES}")
+    if disposition is not None and disposition not in ("keep", "flip"):
+        raise HTTPException(status_code=400,
+                            detail="disposition must be keep or flip")
+    if outcome is not None and outcome not in OUTCOMES:
+        raise HTTPException(status_code=400,
+                            detail=f"outcome must be one of {OUTCOMES}")
+    if qty is not None and qty < 1:
+        raise HTTPException(status_code=400, detail="qty must be at least 1")
+
+
+@router.post("/purchases/{purchase_id}/lines", status_code=201)
+def add_purchase_line(purchase_id: int, body: PurchaseLineIn, db=Depends(get_db)):
+    _row_or_404(db, "SELECT purchase_id FROM mkt_purchase WHERE purchase_id = :p",
+                {"p": purchase_id}, "purchase")
+    _check_line(body.line_type, body.disposition, body.outcome, body.qty)
+    ctype = _photocard_type_id(db) if body.item_id else None
+    res = db.execute(text(
+        "INSERT INTO mkt_purchase_line (purchase_id, line_type, item_id,"
+        " collection_type_id, label, qty, weight_grams, value_cents,"
+        " alloc_override_cents, disposition, outcome, notes) "
+        "VALUES (:p, :lt, :i, :ct, :lb, :q, :w, :v, :ov, :d, :o, :n)"), {
+            "p": purchase_id, "lt": body.line_type, "i": body.item_id,
+            "ct": ctype, "lb": body.label, "q": body.qty,
+            "w": body.weight_grams, "v": body.value_cents,
+            "ov": body.alloc_override_cents, "d": body.disposition,
+            "o": body.outcome, "n": body.notes})
+    db.commit()
+    return {"ok": True, "line_id": res.lastrowid}
+
+
+@router.patch("/purchases/{purchase_id}/lines/{line_id}")
+def update_purchase_line(purchase_id: int, line_id: int, body: PurchaseLinePatch,
+                         db=Depends(get_db)):
+    _check_line(body.line_type, body.disposition, body.outcome, body.qty)
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        return {"ok": True, "changed": False}
+    sets, params = [], {"l": line_id, "p": purchase_id}
+    for col, val in fields.items():
+        sets.append(f"{col} = :{col}")
+        params[col] = val
+    if "item_id" in fields:
+        sets.append("collection_type_id = :ct")
+        params["ct"] = _photocard_type_id(db) if fields["item_id"] else None
+    res = db.execute(text(
+        f"UPDATE mkt_purchase_line SET {', '.join(sets)} "
+        "WHERE line_id = :l AND purchase_id = :p"), params)
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail="No such line on that purchase.")
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.delete("/purchases/{purchase_id}/lines/{line_id}")
+def delete_purchase_line(purchase_id: int, line_id: int, db=Depends(get_db)):
+    res = db.execute(text(
+        "DELETE FROM mkt_purchase_line WHERE line_id = :l AND purchase_id = :p"),
+        {"l": line_id, "p": purchase_id})
+    if res.rowcount == 0:
+        raise HTTPException(status_code=404, detail="No such line on that purchase.")
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- Boxes ----------
+
+
+def _box_out(b: Dict[str, Any], snap: Dict[str, Any], full: bool) -> Dict[str, Any]:
+    purchases = [snap["purchases"][i] for i in b["purchase_ids"]]
+    live = [p for p in purchases if p["status"] != "cancelled"]
+    blines = b.get("_lines") or []
+    ch = snap["charges"].get(b["packing_charge_id"])
+    items_cost = sum(p["cost_cents"] or 0 for p in live)
+    box_cost = b["box_cost_cents"] or 0
+    unvalued = [ln for ln in blines if ln["_line_value_cents"] is None]
+    est_weight = [ln for ln in blines if ln["_grams_estimated"]]
+    out = {
+        "box_id": b["box_id"], "label": b["label"], "status": b["status"],
+        "requested_on": b["requested_on"], "shipped_on": b["shipped_on"],
+        "received_on": b["received_on"], "notes": b["notes"],
+        "n_purchases": len(live), "n_units": sum(ln["_qty"] for ln in blines),
+        "items_cost_cents": items_cost,
+        "box_cost_cents": b["box_cost_cents"],
+        "landed_cost_cents": items_cost + box_cost,
+        "packing_charge_id": b["packing_charge_id"],
+        "packing_charge": ({
+            "charge_id": ch["charge_id"], "paid_on": ch["paid_on"],
+            "paid_usd_cents": ch["paid_usd_cents"],
+            "credit_applied_cents": ch["credit_applied_cents"],
+            "ship_usd_cents": ch["ship_usd_cents"],
+            "duties_usd_cents": ch["duties_usd_cents"],
+            "fees_usd_cents": ch["fees_usd_cents"], "note": ch["note"],
+        } if ch else None),
+        "basis_split": b["basis_split"],
+        # `partial` until the packing quote lands: the cards have a real item
+        # cost and none of the shipping and duties they will still absorb.
+        "cost_rung": "exact" if ch else "partial",
+        # Said out loud rather than absorbed silently. An unvalued line makes
+        # the valued ones carry its share of duty, and an estimated weight does
+        # the same to shipping.
+        "warnings": {
+            "unvalued_lines": len(unvalued),
+            "estimated_weights": len(est_weight),
+            "purchases_without_lines": sum(1 for p in live if not p["lines"]),
+            "override_conflicts": sum(1 for p in live
+                                      if p.get("override_exceeds_cost")),
+        },
+    }
+    if full:
+        out["purchases"] = [_purchase_out(p, snap) for p in purchases]
+        # Residual, and it must be zero. A box a cent off its own cost invites
+        # hunting for the cent instead of reading the margin.
+        allocated = sum(ln["landed_cents"] or 0 for ln in blines)
+        out["residual_cents"] = (items_cost + box_cost) - allocated
+    return out
+
+
+@router.get("/boxes")
+def list_boxes(db=Depends(get_db)):
+    snap = _ledger_snapshot(db)
+    rows = [_box_out(b, snap, full=False) for b in snap["boxes"].values()]
+    rows.sort(key=lambda r: (r["requested_on"] or "", r["box_id"]), reverse=True)
+    return {"boxes": rows}
+
+
+@router.get("/boxes/{box_id}")
+def get_box(box_id: int, db=Depends(get_db)):
+    snap = _ledger_snapshot(db)
+    b = snap["boxes"].get(box_id)
+    if b is None:
+        raise HTTPException(status_code=404, detail="No such box.")
+    return _box_out(b, snap, full=True)
+
+
+@router.post("/boxes", status_code=201)
+def create_box(body: BoxIn, db=Depends(get_db)):
+    """The packing request. A box does not exist before this point.
+
+    Selection defaults to the entire warehouse, which is what the 45-day clock
+    makes the normal case — nothing is ever deliberately held back.
+    """
+    if body.purchase_ids is None:
+        pids = [r[0] for r in db.execute(text(
+            "SELECT purchase_id FROM mkt_purchase "
+            "WHERE box_id IS NULL AND status != 'cancelled' ORDER BY purchase_id"))]
+    else:
+        pids = list(body.purchase_ids)
+        rows = db.execute(text(
+            "SELECT purchase_id, box_id, status FROM mkt_purchase "
+            f"WHERE purchase_id IN ({','.join(str(int(i)) for i in pids) or '0'})"
+        )).mappings().all() if pids else []
+        found = {r["purchase_id"] for r in rows}
+        missing = [i for i in pids if i not in found]
+        if missing:
+            raise HTTPException(status_code=404,
+                                detail=f"No such purchase: {missing}")
+        taken = [r["purchase_id"] for r in rows if r["box_id"] is not None]
+        if taken:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Already in a box: {taken}. A purchase ships once.")
+        cancelled = [r["purchase_id"] for r in rows if r["status"] == "cancelled"]
+        if cancelled:
+            raise HTTPException(status_code=400,
+                                detail=f"Cancelled, so nothing to pack: {cancelled}")
+    if not pids:
+        raise HTTPException(status_code=400,
+                            detail="The warehouse is empty — there is nothing to pack.")
+    if body.charge is not None:
+        _check_credit(db, body.charge.credit_applied_cents or 0)
+
+    res = db.execute(text(
+        "INSERT INTO mkt_box (label, requested_on, status, notes) "
+        "VALUES (:l, :r, 'packing', :n)"), {
+            "l": body.label, "r": body.requested_on or _today(), "n": body.notes})
+    box_id = res.lastrowid
+    db.execute(text(
+        "UPDATE mkt_purchase SET box_id = :b WHERE purchase_id IN "
+        f"({','.join(str(int(i)) for i in pids)})"), {"b": box_id})
+
+    charge_id = None
+    if body.charge is not None:
+        c = body.charge
+        r = db.execute(text(
+            "INSERT INTO mkt_charge (kind, box_id, paid_on, paid_usd_cents,"
+            " credit_applied_cents, ship_usd_cents, duties_usd_cents,"
+            " fees_usd_cents, note) "
+            "VALUES ('packing', :b, :d, :amt, :cr, :sh, :du, :fe, :n)"), {
+                "b": box_id, "d": c.paid_on or _today(),
+                "amt": c.paid_usd_cents, "cr": c.credit_applied_cents or 0,
+                "sh": c.ship_usd_cents, "du": c.duties_usd_cents,
+                "fe": c.fees_usd_cents, "n": c.note})
+        charge_id = r.lastrowid
+    db.commit()
+    return {"ok": True, "box_id": box_id, "packing_charge_id": charge_id,
+            "n_purchases": len(pids)}
+
+
+@router.put("/boxes/{box_id}/charge")
+def set_packing_charge(box_id: int, body: ChargeIn, db=Depends(get_db)):
+    """Record (or correct) what Neokyo quoted for the shipment.
+
+    This is the moment the box's cards move from `partial` to `exact`.
+    """
+    _row_or_404(db, "SELECT box_id FROM mkt_box WHERE box_id = :b",
+                {"b": box_id}, "box")
+    existing = db.execute(text(
+        "SELECT charge_id FROM mkt_charge WHERE kind = 'packing' AND box_id = :b"),
+        {"b": box_id}).scalar()
+    _check_credit(db, body.credit_applied_cents or 0, existing)
+    params = {"b": box_id, "d": body.paid_on or _today(),
+              "amt": body.paid_usd_cents, "cr": body.credit_applied_cents or 0,
+              "sh": body.ship_usd_cents, "du": body.duties_usd_cents,
+              "fe": body.fees_usd_cents, "n": body.note}
+    if existing:
+        params["c"] = existing
+        db.execute(text(
+            "UPDATE mkt_charge SET paid_on = :d, paid_usd_cents = :amt,"
+            " credit_applied_cents = :cr, ship_usd_cents = :sh,"
+            " duties_usd_cents = :du, fees_usd_cents = :fe, note = :n "
+            "WHERE charge_id = :c"), params)
+        charge_id = existing
+    else:
+        charge_id = db.execute(text(
+            "INSERT INTO mkt_charge (kind, box_id, paid_on, paid_usd_cents,"
+            " credit_applied_cents, ship_usd_cents, duties_usd_cents,"
+            " fees_usd_cents, note) "
+            "VALUES ('packing', :b, :d, :amt, :cr, :sh, :du, :fe, :n)"),
+            params).lastrowid
+    db.commit()
+    return {"ok": True, "charge_id": charge_id}
+
+
+@router.patch("/boxes/{box_id}")
+def update_box(box_id: int, body: BoxPatch, db=Depends(get_db)):
+    _row_or_404(db, "SELECT box_id FROM mkt_box WHERE box_id = :b",
+                {"b": box_id}, "box")
+    if body.status is not None and body.status not in BOX_STATUSES:
+        raise HTTPException(status_code=400,
+                            detail=f"status must be one of {BOX_STATUSES}")
+    sets, params = [], {"b": box_id}
+    for field in ("label", "status", "requested_on", "shipped_on",
+                  "received_on", "notes"):
+        val = getattr(body, field)
+        if val is not None:
+            sets.append(f"{field} = :{field}")
+            params[field] = val
+    if not sets:
+        return {"ok": True, "changed": False}
+    db.execute(text(f"UPDATE mkt_box SET {', '.join(sets)} WHERE box_id = :b"),
+               params)
+    db.commit()
+    return {"ok": True, "changed": True}
+
+
+@router.post("/boxes/{box_id}/receive")
+def receive_box(box_id: int, db=Depends(get_db)):
+    """It arrived. Marks the box and its purchases received."""
+    _row_or_404(db, "SELECT box_id FROM mkt_box WHERE box_id = :b",
+                {"b": box_id}, "box")
+    when = _today()
+    db.execute(text(
+        "UPDATE mkt_box SET status = 'received', received_on = :d WHERE box_id = :b"),
+        {"d": when, "b": box_id})
+    db.execute(text(
+        "UPDATE mkt_purchase SET status = 'received', received_on = :d "
+        "WHERE box_id = :b AND status != 'cancelled'"), {"d": when, "b": box_id})
+    db.commit()
+    return {"ok": True, "received_on": when}
+
+
+@router.delete("/boxes/{box_id}")
+def delete_box(box_id: int, db=Depends(get_db)):
+    """Unpack a box back into the warehouse.
+
+    The purchases survive — they were really bought — so this returns them to
+    `box_id IS NULL` and drops only the packing charge. Explicit cleanup, as
+    always here: SQLite's FK cascades never fire in this app.
+    """
+    _row_or_404(db, "SELECT box_id FROM mkt_box WHERE box_id = :b",
+                {"b": box_id}, "box")
+    n = db.execute(text(
+        "UPDATE mkt_purchase SET box_id = NULL WHERE box_id = :b"),
+        {"b": box_id}).rowcount
+    db.execute(text("DELETE FROM mkt_charge WHERE kind = 'packing' AND box_id = :b"),
+               {"b": box_id})
+    db.execute(text("DELETE FROM mkt_box WHERE box_id = :b"), {"b": box_id})
+    db.commit()
+    return {"ok": True, "purchases_returned_to_warehouse": n}

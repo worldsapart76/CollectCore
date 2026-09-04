@@ -4,8 +4,10 @@
 Neokyo capture **BUILT + VERIFIED** 2026-08-30 (buy side, JPY). The **v2
 market workspace** — card grid, lot analyzer, wanted-sourcing — is DESIGNED
 2026-08-30 and supersedes the card-first comp view as the destination; the v1
-comp view survives as its drill-down. Ledger designed, not built.
-All four sources have capture parsers as of 2026-08-30.
+comp view survives as its drill-down. The **ledger's buy side** — charges,
+purchases, warehouse, boxes, and per-card landed cost — is **BUILT 2026-09-03**
+against the real Neokyo flow; the sell side (`mkt_sale`, outcomes, sell-through)
+is still designed only. All four sources have capture parsers as of 2026-08-30.
 **Scope:** admin only. A new `mkt_*` table namespace, a new SPA route, and a
 browser extension. **No** photocard, catalog, `/pcs/`, or `/guest/` behavior
 changes.
@@ -807,13 +809,52 @@ in a spreadsheet: one Neokyo box holding some cards to keep and some to flip,
 shared shipping across both, containing a lot that decomposes into eight cards
 and an album.
 
+## The Neokyo purchase flow — REVISED 2026-09-03 against real use
+
+The earlier object list assumed a box is a container you open, buy into, and
+close. **That is not how Neokyo works**, and the difference is not cosmetic —
+it relocates where the exact money lives.
+
+The real sequence:
+
+1. **Buy requests** are placed per listing. No money moves.
+2. **A batch is paid** — several buy requests at once, via PayPal. One USD
+   amount is charged, covering item prices plus Neokyo's per-item fees plus
+   PayPal's cut, converted at that moment's rate. **This is the only exact USD
+   figure on the item side, and it is per BATCH, never per card.**
+3. Occasionally, **a separate domestic-shipping bill** arrives later against a
+   single purchase — its own charge, on its own day, at its own rate.
+4. Steps 1–3 repeat over weeks. Bought items sit in the **warehouse**, under a
+   **45-day clock**, belonging to no shipment.
+5. **A packing request** is made. Neokyo comes back with international
+   shipping, duties, and the related PayPal fees for the whole box, in USD as of
+   that day. **A box comes into existence here, by selection from the warehouse
+   pool — and this is the moment cost becomes complete.**
+
+Two consequences the original design got wrong:
+
+- **The box cannot hold "the FX rate snapshot at payment."** There are many
+  payments at many rates, and the box's own payment happens *last*. FX belongs
+  to a charge, not to a shipment.
+- **Purchases cannot hang off a box.** They exist for weeks before any box
+  does. A purchase's resting state is *in the warehouse*, unassigned, and it is
+  the packing request that claims it.
+
 ## Objects
 
-- **Box** — a Neokyo consolidated shipment. International shipping,
-  consolidation/repack fee, insurance, customs, plus the **FX rate snapshot at
-  payment**.
-- **Purchase** — one listing bought. Item price, per-item Neokyo fees, optional
-  source URL, optional link back to the buy shortlist.
+- **Charge** — one PayPal payment: an exact USD amount on an exact day. Three
+  kinds — `items` (a paid batch of buy requests), `domestic_shipping` (the
+  occasional later bill against one purchase), `packing` (international
+  shipping + duties + fees for a whole box). Everything that is truly known
+  about money is on this object.
+- **Purchase** — one listing bought. Native item price and per-item proxy fee
+  as *weights*, source URL, optional link to the captured `mkt_listing`, and a
+  status. Belongs to exactly one `items` charge; belongs to a box only once
+  packed.
+- **Warehouse** — not a table. Purchases with no box: bought, paid for,
+  physically at Neokyo, not yet shipped. Carries the 45-day clock.
+- **Box** — a consolidated shipment, **created at packing** by selecting from
+  the warehouse. Holds its packing charge and the dates.
 - **Line** — what is inside a purchase. Same structure as capture-side lines: a
   card link, a non-card component, or an unidentified card; each with a label,
   quantity, and allocation weights.
@@ -823,6 +864,69 @@ and an album.
 `date_listed` and `date_sold` are two columns, and they mean **sell-through and
 days-to-sell accumulate on their own** from the first real sale. No separate
 measurement exercise is needed to produce them.
+
+### The charge holds the money; the purchase holds the weight
+
+Per-card USD is **never** re-derived from `mkt_fx_rate`. The batch's exact USD
+total is allocated across its purchases by native item price, which distributes
+the PayPal fee and the FX spread proportionally and reconciles to the cent.
+
+This is the opposite of the sighting model, where the native amount is the
+record and USD is derived — and deliberately so. A sighting observes a price on
+a page; a charge *is* a payment. Converting ¥ item prices at a looked-up rate
+and calling the sum the batch cost would silently drop PayPal's cut and
+disagree with the bank by a few percent, in the direction that makes every flip
+look better than it was.
+
+The implied rate falls out of the division instead of being an input —
+`implied_rate()` in `market.py` already does exactly this for Neokyo's own
+on-page USD conversion.
+
+### Box membership is per-purchase, decided at packing
+
+Not per-batch. Batches are paid weeks apart and any of them can be split across
+shipments; Neokyo lets items stay in the warehouse. If the box hung off the
+batch, one held-back item would mis-allocate an entire shipment's shipping and
+duties.
+
+In practice the packing sweep takes **everything** in the warehouse, every
+time — the 45-day clock means nothing is ever deliberately held back. So the
+default is "select all" and exclusion is a rarely-used affordance, not a step.
+
+### Cost completeness is a state, not a boolean
+
+Between paying a batch and requesting packing, the item cost is known exactly
+and the box cost is not known at all. `effective_basis()` currently hardcodes
+`estimated: True`; it gains a rung:
+
+| Rung | Means |
+|---|---|
+| `exact` | Purchase in a **closed box** — items charge and packing charge both landed |
+| `partial` | Purchase paid, **still in the warehouse** — item cost real, box costs pending |
+| `estimated` | Cost tier or manual figure. Today's only rung |
+| `unknown` | No basis at all |
+
+`partial` is worth showing and must not read as finished. A card whose batch was
+paid yesterday has a real number attached that is nonetheless missing every
+shipping and duty dollar it will eventually absorb.
+
+### Cancellations return store credit, so cost moves rather than vanishing
+
+A seller not shipping cancels the buy request **after** the batch is paid, and
+Neokyo refunds as **store credit**, not to PayPal.
+
+- The cancelled purchase leaves allocation **entirely** — not weight zero, but
+  excluded. It absorbs no box cost and produces no card.
+- The credit it issues is recorded, and a later batch that consumes credit has
+  its allocatable total set to **`paid_usd + credit_applied`**.
+
+That second rule is the one that bites if missed. Booking only the PayPal
+amount makes a credit-funded batch look cheap, understating the basis of every
+card in it and reporting an implied FX rate that reads as a windfall. The money
+was really spent; it was spent earlier, on something that never came.
+
+Credit balance is **derived** — credits issued minus credits applied — never a
+stored counter that can drift out of agreement with the rows underneath it.
 
 ## Allocation — three levels, two bases
 
@@ -1083,8 +1187,10 @@ The ledger objects already carry the inputs — Box holds international shipping
 consolidation/repack fee, insurance and customs plus the FX snapshot; Purchase
 holds item price and per-item proxy fees. Two gaps against real Neokyo use:
 
-- **JP domestic shipping** is not in the field list. Usually included in the
-  listing, so low priority, but it exists.
+- **JP domestic shipping** is not in the field list. **CLOSED 2026-09-03** —
+  it is a `domestic_shipping` charge against a single purchase, billed
+  separately and later, at its own FX date. Usually included in the listing, so
+  it stays occasional.
 - **Customs/duties need a value-based allocation driver.** They scale with
   declared value, so they cannot split by weight or evenly the way parcel
   shipping does. The allocation model already supports value-driven drivers;
@@ -1744,12 +1850,162 @@ sweep `tbl_photocard_*`. Nothing here reaches `/pcs/`.
 Endpoints: `GET /market/cost-tiers`, `PUT /market/cost-tiers/{id}`,
 `GET /market/cost-basis/preview`, `POST /market/cost-basis/assign`.
 
-### Ledger tables
+### Ledger tables — AS BUILT 2026-09-03
 
-`mkt_box`, `mkt_purchase`, `mkt_purchase_line`, `mkt_sale`, `mkt_shortlist` are
-**designed above but not built.** The column sketches earlier in this document
-stand; expect the same listing/sighting-style split to shake out during
-construction.
+`mkt_sale` and `mkt_shortlist` remain sketches. The buy side is built, in
+`schema.sql` and `backend/routers/market.py`, and matches what follows.
+
+```sql
+-- One PayPal payment. The only object that holds money known to be exact.
+CREATE TABLE mkt_charge (
+    charge_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind                 TEXT NOT NULL,   -- items | domestic_shipping | packing
+    -- Set for 'packing' at creation. NULL on 'items' and
+    -- 'domestic_shipping' forever: those are paid before any box exists, and
+    -- their purchases reach a box individually.
+    box_id               INTEGER,
+    -- 'domestic_shipping' only: the single purchase being billed.
+    purchase_id          INTEGER,
+    paid_on              TEXT NOT NULL,   -- ISO date; the FX moment
+    paid_usd_cents       INTEGER NOT NULL,
+    -- Neokyo store credit consumed by this charge, from earlier cancellations.
+    -- Allocatable total is paid + credit, never paid alone.
+    credit_applied_cents INTEGER NOT NULL DEFAULT 0,
+    -- 'packing' only, and optional: the quote's own split. Duties allocate by
+    -- value while shipping allocates by weight, so a lumped total cannot be
+    -- distributed correctly. Left NULL, the whole charge falls back to weight
+    -- and the box says so.
+    ship_usd_cents       INTEGER,
+    duties_usd_cents     INTEGER,
+    fees_usd_cents       INTEGER,
+    note                 TEXT,
+    created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One listing bought.
+CREATE TABLE mkt_purchase (
+    purchase_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    charge_id       INTEGER NOT NULL,     -- the 'items' batch that paid for it
+    box_id          INTEGER,              -- NULL = in the warehouse
+    -- Optional link to a captured listing; NULL for hand-entered purchases.
+    -- LEFT JOIN it.
+    listing_id      INTEGER,
+    marketplace     TEXT NOT NULL DEFAULT 'neokyo',
+    external_id     TEXT,                 -- with marketplace, the image key
+    listing_url     TEXT,
+    title_raw       TEXT,
+    -- Allocation WEIGHT, not money: minor units of `currency`, per the
+    -- module-wide rule. ¥2500 is 2500.
+    item_minor      INTEGER NOT NULL,
+    proxy_fee_minor INTEGER NOT NULL DEFAULT 0,
+    currency        TEXT NOT NULL DEFAULT 'JPY',
+    status          TEXT NOT NULL DEFAULT 'paid',
+                    -- requested | paid | received | cancelled
+    ordered_on      TEXT,
+    received_on     TEXT,
+    -- Cancelled purchases are EXCLUDED from allocation, not zero-weighted, and
+    -- the refund becomes store credit against a later charge.
+    cancelled_on    TEXT,
+    credit_issued_cents INTEGER,
+    notes           TEXT
+);
+
+-- Contents of a purchase. Deliberately a SEPARATE table from
+-- mkt_listing_line, seeded by copy from it when a captured listing is bought.
+--
+-- Not a reference, because the two have different lifetimes: capture ingest
+-- REPLACES a listing's 'capture' lines wholesale on every sync (see
+-- mkt_listing_line.source), which would erase outcomes, allocation overrides
+-- and weights the moment the extension next saw that listing. A purchase line
+-- is also a historical record -- what was in the box -- and must not change
+-- because a seller edited the page.
+CREATE TABLE mkt_purchase_line (
+    line_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id        INTEGER NOT NULL,
+    line_type          TEXT NOT NULL DEFAULT 'card',  -- card|non_card|unidentified
+    item_id            INTEGER,           -- nullable; LEFT JOIN
+    collection_type_id INTEGER,
+    label              TEXT,
+    qty                INTEGER NOT NULL DEFAULT 1,
+    weight_grams       INTEGER,           -- for the shipping basis; NULL = class default
+    value_cents        INTEGER,           -- for the duties/value basis; NULL = ladder
+    -- Pulls the line out of the weighted sweep at a fixed amount; the
+    -- remainder redistributes across the still-weighted rows. Same
+    -- tier-XOR-custom shape used throughout the module.
+    alloc_override_cents INTEGER,
+    outcome            TEXT,              -- kept|listed|sold|unsold|filler
+    disposition        TEXT,              -- keep|flip; NULL = derive from library
+    notes              TEXT
+);
+
+-- A consolidated shipment. Created AT PACKING, never before.
+CREATE TABLE mkt_box (
+    box_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    label        TEXT,
+    requested_on TEXT,
+    shipped_on   TEXT,
+    received_on  TEXT,
+    status       TEXT NOT NULL DEFAULT 'packing',  -- packing|paid|shipped|received
+    notes        TEXT
+);
+```
+
+**No FK cascades.** Per the module-wide rule, deleting a box must explicitly
+null out its purchases' `box_id` and drop its packing charge; deleting a
+purchase must drop its lines.
+
+Per-card landed cost is **derived on read**, never denormalized — the same
+discipline `effective_basis()` already keeps. Editing a packing quote reprices
+the whole box with no backfill.
+
+### Ledger endpoints — as built
+
+| Route | Purpose |
+|---|---|
+| `GET /market/warehouse` | Unboxed purchases, days left on the 45-day clock, credit balance |
+| `POST /market/charges` | Log a paid batch (`kind=items`) with its purchases, or a later `domestic_shipping` bill |
+| `PATCH · DELETE /market/purchases/{id}` | Correct or remove a purchase |
+| `POST /market/purchases/{id}/cancel` | Cancel + issue store credit |
+| `GET · POST · PATCH · DELETE /market/purchases/{id}/lines` | Decompose a purchase; seeded from the listing's lines |
+| `POST /market/boxes` | Packing request: select warehouse purchases (default all) + record the packing charge |
+| `GET /market/boxes` · `GET /market/boxes/{id}` | Allocation, residual, per-card landed cost |
+| `PUT /market/boxes/{id}/charge` | Record or correct the packing quote — the moment `partial` becomes `exact` |
+| `POST /market/boxes/{id}/receive` | Mark received |
+| `DELETE /market/boxes/{id}` | Unpack: purchases return to the warehouse, only the quote is dropped |
+| `GET /market/purchasable` | Captured listings not yet bought, for the batch-entry picker |
+
+`effective_basis()`, `/market/grid` and `/market/summary` all resolve a logged
+purchase ahead of any tier, and carry the rung with the figure. Two knock-on
+changes fell out of that: the grid's scope gained bought cards (a purchase is
+market data even with no comps), and `GET /market/comps/{item_id}` no longer
+404s for one — otherwise the grid would list rows it could not open.
+
+### Ledger UI — as built
+
+Two tabs beside Cards and Lots, because the warehouse and a shipped box are
+different moments and only the second one knows what it cost.
+
+**Warehouse** — everything bought, paid for and unshipped, with the storage
+clock counting down. *Log a paid batch* opens one form for the whole payment:
+the date, the exact USD PayPal took, credit applied if any, and the rows. Rows
+are picked from captured Neokyo listings wherever possible — the capture already
+carries price, photo, URL and, for a lot, the decomposition worked out in the
+analyzer — or typed by hand. **The per-row share is shown live, before saving**,
+along with the implied rate, so the split is inspectable rather than discovered
+later. Per row: *+ domestic* for the occasional separate shipping bill, and
+*Cancelled* which asks for the store credit issued. *Request packing* empties
+the warehouse into a new box.
+
+**Boxes** — the shipment list, then one box: item cost, shipping/duties/fees,
+landed, and the rung. The packing quote is entered as its own split (total,
+shipping, duties, fees) because the parts allocate differently. The line table
+shows each card's item share, box share, landed and margin, grouped by
+purchase. Warnings are said out loud rather than absorbed: unvalued lines,
+defaulted weights, purchases with no contents, overrides exceeding their cost.
+
+Verified end to end 2026-09-03 against a scratch copy of the dev DB — 37 checks
+covering the weighted split, the credit round trip, both allocation bases, the
+residual, and the basis rungs in `comps`, `grid` and `summary`.
 
 ### Images — stored, not hotlinked (reverses the earlier deferral)
 
@@ -2449,12 +2705,17 @@ Steps 1 and 2 are both **first cuts to be reviewed against real captured
 lots.** Where the analyzer turns out to be more machinery than the decision
 needs, cut it.
 
-- **Ledger** — box → purchase → line → outcome → sale. Now also the home of
-  **per-copy cost basis**, which is step 3 of the v2 build. **Deferred by
-  decision 2026-08-30**, pending enough collected data to judge whether the
-  current shape of the analysis is sufficient — it only sharpens `paid` for
-  cards held in multiples, and card-level basis is honest meanwhile because the
-  grid says so.
+- **Ledger, buy side — BUILT 2026-09-03.** charge → purchase → line → box,
+  with per-card landed cost feeding the basis everywhere. Re-specified first
+  against the real Neokyo flow (see Part 2): the object chain gained
+  `mkt_charge` and lost the box-as-container assumption.
+- **Ledger, sell side — still designed only.** `mkt_sale`, line outcomes,
+  sell-through and days-to-sell. `mkt_purchase_line.outcome` exists and accepts
+  `kept|listed|sold|unsold|filler`; nothing writes it yet.
+- **Per-copy cost basis** — still card-level. It needs `tbl_photocard_copies`
+  linked to purchase lines, and only sharpens `paid` for cards held in
+  multiples; the responses say `basis_is_per_card` rather than implying a
+  precision they do not have.
 
 ### Declined 2026-08-30 — not gaps, decisions
 
@@ -2500,6 +2761,19 @@ this document entirely: it is superseded by detail-page capture, not deferred.
 5. **Est. grams per line type** — a small default table (card 5g, album 300g,
    photobook 500g) is enough to start; refine against a real box's actual
    shipping charge.
+6. **Is a buy request logged before it is paid?** The schema carries
+   `status = 'requested'`, but entry is far cheaper at payment time: one screen,
+   one exact USD total, every purchase in the batch at once. Logging at request
+   time means a second visit to each row and a pile of unpaid purchases that may
+   never be paid. Default is **log at payment**; `requested` stays in the enum
+   for a shortlist-to-purchase path later.
+7. **What drives the duties allocation?** Duties scale with declared value, and
+   the assumption is declared value = item price, making the existing item-price
+   weight serve both. Worth confirming against a real Neokyo packing quote —
+   proxies sometimes declare under.
+8. **Does a purchase ever split across two boxes?** Assumed no: a listing ships
+   whole. If a multi-item listing were ever partially packed, `box_id` would
+   have to move from the purchase down to the line.
 
 ---
 
@@ -2680,3 +2954,41 @@ this document entirely: it is superseded by detail-page capture, not deferred.
   **not** timestamps, seller, or shipping payer. Listing age therefore accrues
   from repeated observation rather than being read at capture; enrich is
   needed for buy decisions, not for comps.
+- **2026-09-03** — **The ledger's buy side is re-specified against the real
+  Neokyo flow.** A box is not a container bought into; it is created at packing
+  by selection from the warehouse. `mkt_charge` is added as the object that
+  holds exact money — a batch is paid via PayPal in one USD amount at one FX
+  moment, weeks before any box exists, so FX moved from the box to the charge
+  and purchases now rest unassigned in the warehouse until packed.
+- **2026-09-03** — **Per-card USD is allocated from the charge, never converted
+  from the item price.** The batch total is the record and native prices are
+  weights, which distributes PayPal's cut and the FX spread proportionally and
+  reconciles to the cent. This inverts the sighting model on purpose: a
+  sighting observes a price, a charge *is* a payment.
+- **2026-09-03** — **Cancellations refund as Neokyo store credit, so a
+  credit-funded batch allocates `paid + credit_applied`.** Booking only the
+  PayPal amount would understate every card in that batch and report the
+  implied FX rate as a windfall. The cancelled purchase is excluded from
+  allocation outright rather than zero-weighted.
+- **2026-09-03** — **Cost completeness becomes a four-rung state** —
+  `exact` (box closed) / `partial` (paid, in warehouse) / `estimated` (tier) /
+  `unknown` — replacing `effective_basis()`'s hardcoded `estimated: True`. A
+  card paid for yesterday must not read as fully costed while its shipping and
+  duties are still unquoted.
+- **2026-09-03** — **`mkt_purchase_line` is a separate table seeded by copy
+  from `mkt_listing_line`, not a reference.** Capture ingest replaces a
+  listing's lines wholesale on every sync, which would erase outcomes and
+  allocation overrides; a purchase line is also a historical record of what was
+  in the box and must not change because a seller edited the page.
+- **2026-09-03** — **The ledger's buy side is built.** `mkt_charge`,
+  `mkt_purchase`, `mkt_purchase_line` and `mkt_box`, the three-level allocation
+  engine, Warehouse and Boxes tabs. A logged purchase now outranks a cost tier
+  in `effective_basis()`, `/market/grid` and `/market/summary`.
+- **2026-09-03** — **The grid's scope gained bought cards**, and
+  `GET /market/comps/{item_id}` stopped 404ing for a card with a logged
+  purchase and no sightings. A purchase is market data; without the second
+  change the grid would list rows that could not be opened.
+- **2026-09-03** — **Batch entry picks from captures rather than retyping.**
+  `GET /market/purchasable` lists Neokyo listings not yet bought; picking one
+  carries its price, photo, URL and lot decomposition into the purchase, so
+  identification already done in the analyzer is not done twice.

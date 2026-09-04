@@ -6,6 +6,66 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-09-03 (US CDT) — The ledger's buy side: how Neokyo purchases get logged
+
+Started as a question — "how am I supposed to log actual Neokyo purchases?" —
+whose honest answer was **you can't**. The ledger was step 3 of the v2 build and
+`market.py` said so in two places (`real logged purchase -> exact (ledger; not
+built yet)`). The only real number available was a hand-entered manual cost
+basis, still flagged an estimate.
+
+**The designed model was wrong, not just unbuilt.** Part 2 had Box → Purchase →
+Line with "the FX rate snapshot at payment" on the box. The real Neokyo flow has
+two payment moments weeks apart at two different rates, and the box's own is
+*last*: buy requests → a PayPal batch is paid (one exact USD total, one FX
+moment) → items sit in the warehouse under a 45-day clock → a packing request
+quotes shipping, duties and fees for the whole shipment. **A box does not exist
+until packing**, so purchases cannot hang off one; their resting state is the
+warehouse.
+
+Re-specified, then built:
+
+- **`mkt_charge` is the new object** and the only place exact money lives. Three
+  kinds: `items` (a paid batch), `domestic_shipping` (the occasional later bill
+  against one purchase), `packing` (a box's quote).
+- **The charge holds the money; the purchase holds the weight.** Per-card USD is
+  allocated *down* from the batch total by native price, never converted *up*
+  from the yen — converting drops PayPal's cut and the FX spread silently, in
+  the flattering direction. The implied rate is an output.
+- **Cancellations refund as store credit**, so a credit-funded batch allocates
+  `paid + credit_applied`, and credit issued inside a batch leaves that batch's
+  pool. The cancelled purchase is excluded outright, not zero-weighted.
+- **Three-level allocation**, each reconciling exactly: charge → purchases →
+  lines, plus the packing charge → lines with **two bases** (shipping by weight,
+  duties and fees by value).
+- **Cost completeness became a four-rung state** — `exact` / `partial` /
+  `estimated` / `unknown` — replacing `effective_basis()`'s hardcoded
+  `estimated: True`. A logged purchase now outranks a cost tier in
+  `effective_basis()`, `/market/grid` and `/market/summary`.
+- **`mkt_purchase_line` is a copy of the listing's lines, not a reference** —
+  capture ingest replaces a listing's lines wholesale on every sync and would
+  otherwise erase outcomes and allocation overrides.
+- **UI:** Warehouse and Boxes tabs. Batch entry is one form for the whole
+  payment, with rows picked from captured Neokyo listings (`GET
+  /market/purchasable`) so identification already done in the lot analyzer is
+  not done twice, and the per-row share shown live before saving.
+
+Verified end to end against a scratch copy of the dev DB — 37 checks over the
+weighted split, the credit round trip, both allocation bases, the residual and
+the rungs in `comps`/`grid`/`summary`.
+
+Two knock-on changes: the grid's scope gained bought cards (a purchase is market
+data even with no comps), and `GET /market/comps/{item_id}` stopped 404ing for
+one, or the grid would have listed rows it could not open.
+
+**Next.** Not committed or deployed yet — `frontend_dist` is rebuilt and the
+tree is dirty. The sell side (`mkt_sale`, line outcomes, sell-through,
+days-to-sell) is still designed only; `mkt_purchase_line.outcome` accepts values
+but nothing writes it. Per-copy basis still needs copies linked to purchase
+lines. Open questions 6-8 on the plan doc: whether buy requests get logged
+before payment (currently no), whether declared value really equals item price
+for duties, and whether a purchase could ever split across two boxes.
+
 ### 2026-09-01 (US CDT) — Listing photos served from the extension, not hosted
 
 Started as a question about the capture extension's ✓ state and ended somewhere

@@ -1648,3 +1648,181 @@ export async function assignCostBasis(eraCutoff) {
   const res = await fetch(`${API}/market/cost-basis/assign${q}`, { method: 'POST' });
   return handleJsonResponse(res, 'Failed to assign cost basis');
 }
+
+// ── The ledger — what was actually bought ───────────────────────────────────
+//
+// Money and weights are different things here, and the API keeps them apart:
+// `paid_usd_cents` on a charge is exact USD from a PayPal receipt, while
+// `item_minor` on a purchase is a WEIGHT in the marketplace's own minor units
+// (¥2500 is 2500, not 250000). Per-card cost is allocated down from the charge
+// and never converted up from the yen.
+
+// Purchases bought, paid for, and not yet shipped. Carries the 45-day storage
+// clock, the store-credit balance, and each purchase's allocated item cost.
+export async function getWarehouse() {
+  const res = await fetch(`${API}/market/warehouse`);
+  return handleJsonResponse(res, 'Failed to load the warehouse');
+}
+
+export async function listCharges() {
+  const res = await fetch(`${API}/market/charges`);
+  return handleJsonResponse(res, 'Failed to load charges');
+}
+
+// One PayPal payment. `kind: 'items'` is a paid batch of buy requests and may
+// carry its purchases inline; `domestic_shipping` needs a purchase_id;
+// `packing` needs a box_id (though POST /boxes creates that one for you).
+export async function createCharge(body) {
+  const res = await fetch(`${API}/market/charges`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to log the payment');
+}
+
+export async function updateCharge(chargeId, body) {
+  const res = await fetch(`${API}/market/charges/${chargeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to update the payment');
+}
+
+// Drops the charge and everything it paid for. The batch is the unit of entry,
+// so this is how a mistyped batch is undone.
+export async function deleteCharge(chargeId) {
+  const res = await fetch(`${API}/market/charges/${chargeId}`, { method: 'DELETE' });
+  return handleJsonResponse(res, 'Failed to delete the payment');
+}
+
+export async function getPurchase(purchaseId) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}`);
+  return handleJsonResponse(res, 'Failed to load the purchase');
+}
+
+// Add a buy request to a batch already logged. Pass `listing_id` to prefill
+// from a captured listing — title, URL, thumbnail, last observed price, and its
+// lot decomposition all come across.
+export async function addPurchase(chargeId, body) {
+  const res = await fetch(`${API}/market/charges/${chargeId}/purchases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to add the purchase');
+}
+
+export async function updatePurchase(purchaseId, body) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to update the purchase');
+}
+
+// The seller did not ship. Neokyo refunds as store credit, so the amount has to
+// be recorded: it leaves this batch's pool and comes back as `credit_applied`
+// on a later one.
+export async function cancelPurchase(purchaseId, body) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to cancel the purchase');
+}
+
+export async function deletePurchase(purchaseId) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}`, { method: 'DELETE' });
+  return handleJsonResponse(res, 'Failed to delete the purchase');
+}
+
+export async function addPurchaseLine(purchaseId, body) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}/lines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to add the line');
+}
+
+export async function updatePurchaseLine(purchaseId, lineId, body) {
+  const res = await fetch(`${API}/market/purchases/${purchaseId}/lines/${lineId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to update the line');
+}
+
+export async function deletePurchaseLine(purchaseId, lineId) {
+  const res = await fetch(
+    `${API}/market/purchases/${purchaseId}/lines/${lineId}`, { method: 'DELETE' });
+  return handleJsonResponse(res, 'Failed to delete the line');
+}
+
+export async function listBoxes() {
+  const res = await fetch(`${API}/market/boxes`);
+  return handleJsonResponse(res, 'Failed to load boxes');
+}
+
+export async function getBox(boxId) {
+  const res = await fetch(`${API}/market/boxes/${boxId}`);
+  return handleJsonResponse(res, 'Failed to load the box');
+}
+
+// The packing request. Omit `purchase_ids` to take the whole warehouse, which
+// is the normal case — the 45-day clock means nothing gets held back. `charge`
+// is optional: a box can exist before Neokyo comes back with the quote.
+export async function createBox(body) {
+  const res = await fetch(`${API}/market/boxes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to create the box');
+}
+
+// What Neokyo quoted for the shipment. This is the moment the box's cards move
+// from a partial cost to an exact one, so the split matters: shipping allocates
+// by weight, duties and fees by value.
+export async function setBoxCharge(boxId, body) {
+  const res = await fetch(`${API}/market/boxes/${boxId}/charge`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to save the packing quote');
+}
+
+export async function updateBox(boxId, body) {
+  const res = await fetch(`${API}/market/boxes/${boxId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleJsonResponse(res, 'Failed to update the box');
+}
+
+export async function receiveBox(boxId) {
+  const res = await fetch(`${API}/market/boxes/${boxId}/receive`, { method: 'POST' });
+  return handleJsonResponse(res, 'Failed to mark the box received');
+}
+
+// Unpacks the box: its purchases go back to the warehouse rather than being
+// deleted, because they really were bought.
+export async function deleteBox(boxId) {
+  const res = await fetch(`${API}/market/boxes/${boxId}`, { method: 'DELETE' });
+  return handleJsonResponse(res, 'Failed to delete the box');
+}
+
+// Captured listings that could be bought, for the batch-entry picker. Excludes
+// anything already logged as a purchase or since delisted.
+export async function getPurchasable(marketplace = 'neokyo') {
+  const res = await fetch(
+    `${API}/market/purchasable?marketplace=${encodeURIComponent(marketplace)}`);
+  return handleJsonResponse(res, 'Failed to load purchasable listings');
+}

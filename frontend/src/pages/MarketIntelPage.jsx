@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button, Alert } from "../components/primitives";
 import {
   getMarketGrid, getMarketComps, setListingOutcome,
@@ -8,6 +8,9 @@ import {
   listCostTiers, updateCostTier, previewCostBasis, assignCostBasis, setItemBasis,
   listFeeComponents, createFeeComponent, updateFeeComponent,
   deleteFeeComponent, setOfferDiscount, setBoxSize,
+  getWarehouse, listCharges, createCharge, updateCharge, cancelPurchase,
+  getPurchasable, createBox, listBoxes, getBox, setBoxCharge, receiveBox,
+  deleteBox,
 } from "../api";
 import { useListingImage } from "../marketImages";
 
@@ -1301,6 +1304,13 @@ export default function MarketIntelPage() {
   const [lots, setLots] = useState(null);
   const [lotId, setLotId] = useState(null);
   const [lot, setLot] = useState(null);
+  // Which box is open in the Boxes tab, and a counter the ledger views watch to
+  // reload. A packing request changes BOTH tabs at once — the warehouse empties
+  // as the box appears — so one shared signal beats two refresh callbacks that
+  // can be wired up in only one direction.
+  const [boxId, setBoxId] = useState(null);
+  const [ledgerKey, setLedgerKey] = useState(0);
+  const bumpLedger = () => setLedgerKey((k) => k + 1);
   const [fx, setFx] = useState(null);
   // Loaded for the Fees tab, which has no card to read it off. The card overlay
   // gets the same figure back inside its own payload, so the two can never show
@@ -1448,10 +1458,32 @@ export default function MarketIntelPage() {
         items={[
           { key: "cards", label: "Cards" },
           { key: "lots", label: "Lots", badge: lots?.length || null },
+          // What was actually bought, as opposed to what things go for. Two
+          // tabs and not one, because the warehouse and a shipped box are
+          // different moments: only the second one knows what it cost.
+          { key: "warehouse", label: "Warehouse" },
+          { key: "boxes", label: "Boxes" },
           { key: "fees", label: "Fees & shipping" },
           { key: "basis", label: "Cost basis" },
         ]}
       />
+
+      {view === "warehouse" && (
+        <WarehouseView
+          onError={setError}
+          refreshKey={ledgerKey}
+          onPacked={(id) => { setBoxId(id); setView("boxes"); bumpLedger(); }}
+        />
+      )}
+
+      {view === "boxes" && (
+        <BoxesView
+          onError={setError}
+          boxId={boxId}
+          onSelect={setBoxId}
+          refreshKey={ledgerKey}
+        />
+      )}
 
       {view === "fees" && (
         <>
@@ -2519,3 +2551,792 @@ function CardDetail({ detail, onChanged }) {
     </div>
   );
 }
+
+// ───────────────────────── The ledger ───────────────────────────────────────
+//
+// Design: docs/photocard_market_intel_plan.md -> Part 2. Two views, because the
+// Neokyo flow has two moments where money is exactly known and they are weeks
+// apart: a PayPal BATCH is paid for a handful of buy requests, the items then
+// sit in the WAREHOUSE, and a packing request turns whatever is there into a
+// BOX with shipping and duties quoted that day.
+//
+// Entry happens at PAYMENT, never at buy-request time: one screen, one exact
+// total, the whole batch at once. Logging requests first would mean a second
+// visit to every row and a pile of purchases that may never be paid.
+
+const DEFAULT_GRAMS_HINT = "card 5g, non-card 300g";
+
+// Dollars in, cents out. Returns undefined for anything unparseable so a
+// mistyped field is rejected rather than silently becoming zero — a zero here
+// is a real cost of nothing, which is a different claim.
+function dollarsToCents(str) {
+  if (str == null) return undefined;
+  const t = String(str).trim().replace(/^\$/, "").replace(/,/g, "");
+  if (!t) return undefined;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n * 100);
+}
+
+// Native minor units — ¥2500 is 2500, and there is no dividing by 100. The
+// same trap that turned a ¥350 fee into "$350.00" one layer up.
+function minorOrUndef(str, exponent) {
+  if (str == null) return undefined;
+  const t = String(str).trim().replace(/[¥$,]/g, "");
+  if (!t) return undefined;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n * 10 ** exponent);
+}
+
+const inp = {
+  padding: "3px 6px", fontSize: 12, border: "1px solid #ccc", borderRadius: 4,
+};
+
+function Field({ label, hint, children, width }) {
+  return (
+    <label style={{ display: "block", width }}>
+      <div style={{ fontSize: 11, color: "#666", marginBottom: 2 }}>{label}</div>
+      {children}
+      {hint && <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>{hint}</div>}
+    </label>
+  );
+}
+
+// One PayPal batch, entered in a single pass.
+//
+// Rows may be picked from captured listings or typed by hand. Picking is the
+// better path by a distance: the capture already carries the price, the photo,
+// the URL and — for a lot — the decomposition worked out in the analyzer, so
+// the cards it contains are identified without a second round of matching.
+function BatchForm({ credit, onSaved, onCancel, onError }) {
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState("");
+  const [creditUsed, setCreditUsed] = useState("");
+  const [note, setNote] = useState("");
+  const [rows, setRows] = useState([]);
+  const [pick, setPick] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getPurchasable("neokyo")
+      .then((d) => setPick(d.listings || []))
+      .catch(() => setPick([]));
+  }, []);
+
+  const picked = new Set(rows.map((r) => r.listing_id).filter(Boolean));
+  const available = (pick || []).filter((l) => !picked.has(l.listing_id));
+
+  // The weights, shown so the split is inspectable BEFORE it is committed. A
+  // batch total divided by prices nobody checked is exactly the number that
+  // gets believed and is wrong.
+  const totalWeight = rows.reduce(
+    (a, r) => a + (minorOrUndef(r.price, 0) || 0) + (minorOrUndef(r.fee, 0) || 0), 0);
+  const cents = dollarsToCents(amount);
+  const creditCents = dollarsToCents(creditUsed) || 0;
+  const pool = cents == null ? null : cents + creditCents;
+
+  function addFromListing(l) {
+    setRows((rs) => [...rs, {
+      listing_id: l.listing_id,
+      title: l.title_raw || `listing ${l.listing_id}`,
+      price: l.price_minor == null ? "" : String(l.price_minor),
+      fee: "",
+      units: l.units,
+      thumb: l,
+    }]);
+  }
+
+  function addBlank() {
+    setRows((rs) => [...rs, { title: "", price: "", fee: "" }]);
+  }
+
+  function patch(i, key, val) {
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [key]: val } : r)));
+  }
+
+  async function save() {
+    if (cents == null) return onError("Enter the USD amount PayPal charged.");
+    if (!rows.length) return onError("A batch needs at least one purchase.");
+    setBusy(true);
+    try {
+      await createCharge({
+        kind: "items",
+        paid_on: paidOn,
+        paid_usd_cents: cents,
+        credit_applied_cents: creditCents,
+        note: note || null,
+        purchases: rows.map((r) => ({
+          listing_id: r.listing_id || null,
+          marketplace: "neokyo",
+          title_raw: r.title || null,
+          item_minor: minorOrUndef(r.price, 0) ?? 0,
+          proxy_fee_minor: minorOrUndef(r.fee, 0) ?? 0,
+          ordered_on: paidOn,
+        })),
+      });
+      onSaved();
+    } catch (e) {
+      onError(e.message || "Failed to log the batch");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ border: "1px solid #cbd5e1", borderRadius: 6, padding: 12,
+                  marginBottom: 12, background: "#fbfdff" }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap",
+                    alignItems: "flex-start", marginBottom: 10 }}>
+        <Field label="Paid on" hint="the FX moment">
+          <input type="date" value={paidOn} style={inp}
+                 onChange={(e) => setPaidOn(e.target.value)} />
+        </Field>
+        <Field label="USD charged" hint="exactly what PayPal took">
+          <input value={amount} placeholder="0.00" style={{ ...inp, width: 90 }}
+                 onChange={(e) => setAmount(e.target.value)} />
+        </Field>
+        {credit?.balance_cents > 0 && (
+          <Field label="Store credit used"
+                 hint={`${usd(credit.balance_cents)} available`}>
+            <input value={creditUsed} placeholder="0.00"
+                   style={{ ...inp, width: 90 }}
+                   onChange={(e) => setCreditUsed(e.target.value)} />
+          </Field>
+        )}
+        <Field label="Note" width={220}>
+          <input value={note} style={{ ...inp, width: "100%" }}
+                 onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <select
+          value=""
+          style={{ ...inp, maxWidth: 460 }}
+          onChange={(e) => {
+            const l = available.find((x) => x.listing_id === Number(e.target.value));
+            if (l) addFromListing(l);
+          }}
+        >
+          <option value="">
+            {pick === null ? "Loading captures…"
+              : available.length ? `Add from a capture (${available.length})`
+              : "No unpurchased Neokyo captures"}
+          </option>
+          {available.map((l) => (
+            <option key={l.listing_id} value={l.listing_id}>
+              {money(l.price_minor, l.currency)} · {(l.title_raw || "").slice(0, 70)}
+              {l.units > 1 ? ` · ${l.units} cards` : ""}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" onClick={addBlank}>Add blank row</Button>
+      </div>
+
+      {rows.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12,
+                        marginBottom: 8 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>listing</th>
+              <th style={th}>¥ price</th>
+              <th style={th}>¥ proxy fee</th>
+              <th style={th}>share</th>
+              <th style={th} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const w = (minorOrUndef(r.price, 0) || 0) + (minorOrUndef(r.fee, 0) || 0);
+              const share = pool != null && totalWeight
+                ? Math.round((pool * w) / totalWeight) : null;
+              return (
+                <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ ...td, textAlign: "left" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {r.thumb && <ListingThumb listing={r.thumb} size={28} />}
+                      {r.listing_id ? (
+                        <span>
+                          {r.title}
+                          {r.units > 1 && (
+                            <span style={{ color: "#999" }}> · {r.units} cards</span>
+                          )}
+                        </span>
+                      ) : (
+                        <input value={r.title} placeholder="what it was"
+                               style={{ ...inp, width: 280 }}
+                               onChange={(e) => patch(i, "title", e.target.value)} />
+                      )}
+                    </div>
+                  </td>
+                  <td style={td}>
+                    <input value={r.price} style={{ ...inp, width: 70, textAlign: "right" }}
+                           onChange={(e) => patch(i, "price", e.target.value)} />
+                  </td>
+                  <td style={td}>
+                    <input value={r.fee} placeholder="0"
+                           style={{ ...inp, width: 60, textAlign: "right" }}
+                           onChange={(e) => patch(i, "fee", e.target.value)} />
+                  </td>
+                  <td style={{ ...td, color: "#0369a1" }}>{usd(share)}</td>
+                  <td style={td}>
+                    <button
+                      onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                      title="Remove"
+                      style={{ border: "1px solid #ddd", borderRadius: 4,
+                               background: "#fff", cursor: "pointer" }}
+                    >✕</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* The whole point, stated before saving: the yen prices are WEIGHTS and
+          the USD total is the record. PayPal's cut and the FX spread ride along
+          inside the difference between them. */}
+      {pool != null && totalWeight > 0 && (
+        <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
+          {usd(pool)} split across {money(totalWeight, "JPY")} of yen prices —
+          an implied {((pool / 100) / totalWeight).toFixed(5)} USD/¥, the
+          PayPal cut included. The yen figures are weights; the dollar total is
+          the record.
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button size="sm" variant="primary" disabled={busy} onClick={save}>
+          Log the batch
+        </Button>
+        <Button size="sm" disabled={busy} onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+// What is bought, paid for, and not yet shipped.
+function WarehouseView({ onError, onPacked, refreshKey }) {
+  const [data, setData] = useState(null);
+  const [charges, setCharges] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    setData(await getWarehouse());
+    setCharges(await listCharges());
+  }
+
+  useEffect(() => {
+    refresh().catch((e) => onError(e.message || "Failed to load the warehouse"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  async function run(fn) {
+    setBusy(true);
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      onError(e.message || "That failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function requestPacking() {
+    const label = window.prompt(
+      "Packing request — label for this box?",
+      new Date().toLocaleString(undefined, { month: "short", year: "numeric" }));
+    if (label == null) return;
+    run(async () => {
+      const box = await createBox({ label: label || null });
+      onPacked(box.box_id);
+    });
+  }
+
+  function cancel(p) {
+    const raw = window.prompt(
+      `${p.title_raw || "This purchase"}\n\n` +
+      "Cancelled by the seller. How much store credit did Neokyo issue?\n" +
+      "(Its share of the batch was " + usd(p.cost_cents) + ". Anything the " +
+      "refund does not cover stays in the batch and is absorbed by the rest — " +
+      "it really was spent.)",
+      p.cost_cents == null ? "" : (p.cost_cents / 100).toFixed(2));
+    if (raw == null) return;
+    const cents = dollarsToCents(raw);
+    if (cents == null) return onError("Enter the credit amount in dollars.");
+    run(() => cancelPurchase(p.purchase_id, { credit_issued_cents: cents }));
+  }
+
+  function domestic(p) {
+    const raw = window.prompt(
+      `${p.title_raw || "This purchase"}\n\n` +
+      "Separate JP domestic shipping bill — USD charged?");
+    if (raw == null) return;
+    const cents = dollarsToCents(raw);
+    if (cents == null) return onError("Enter the amount in dollars.");
+    run(() => createCharge({
+      kind: "domestic_shipping", purchase_id: p.purchase_id,
+      paid_usd_cents: cents,
+    }));
+  }
+
+  if (!data) return <div style={{ color: "#666" }}>Loading…</div>;
+
+  const soonest = data.purchases.reduce(
+    (a, p) => (p.days_left != null && (a == null || p.days_left < a) ? p.days_left : a),
+    null);
+
+  return (
+    <>
+      <div style={statRow}>
+        <Stat label="in the warehouse" value={data.n_purchases || null}
+              hint={`${data.n_units} card${data.n_units === 1 ? "" : "s"}`} />
+        <Stat label="item cost so far" value={usd(data.items_cost_cents)}
+              hint="no shipping or duties yet" />
+        <Stat label="store credit"
+              value={data.credit.balance_cents ? usd(data.credit.balance_cents) : null}
+              hint={data.credit.balance_cents ? "from cancellations" : "none"} />
+        {/* The 45-day clock is why the packing sweep always takes everything:
+            there is no such thing as leaving something for the next box. */}
+        <Stat label="storage clock"
+              value={soonest == null ? null : `${soonest}d left`}
+              tone={soonest != null && soonest < 10 ? "#b45309" : undefined}
+              hint={`${data.warehouse_days}-day limit`} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+        <Button size="sm" variant="primary" onClick={() => setAdding(true)}
+                disabled={adding}>
+          Log a paid batch
+        </Button>
+        <Button size="sm" disabled={busy || !data.n_purchases}
+                onClick={requestPacking}>
+          Request packing →
+        </Button>
+        <span style={{ fontSize: 11, color: "#999" }}>
+          Packing takes everything here and creates the box.
+        </span>
+      </div>
+
+      {adding && (
+        <BatchForm
+          credit={data.credit}
+          onCancel={() => setAdding(false)}
+          onError={onError}
+          onSaved={() => { setAdding(false); refresh().catch(() => {}); }}
+        />
+      )}
+
+      {data.n_purchases === 0 && !adding && (
+        <div style={{ color: "#666", fontSize: 13 }}>
+          Nothing waiting. Log a batch when you pay for a set of buy requests.
+        </div>
+      )}
+
+      {data.n_purchases > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>purchase</th>
+              <th style={th}>native</th>
+              <th style={th}>item cost</th>
+              <th style={th}>domestic</th>
+              <th style={th}>days left</th>
+              <th style={th} />
+            </tr>
+          </thead>
+          <tbody>
+            {data.purchases.map((p) => (
+              <tr key={p.purchase_id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                <td style={{ ...td, textAlign: "left" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <ListingThumb listing={p} size={30} />
+                    <div>
+                      <div>
+                        {p.listing_url ? (
+                          <a href={p.listing_url} target="_blank" rel="noreferrer">
+                            {p.title_raw || `purchase ${p.purchase_id}`}
+                          </a>
+                        ) : (p.title_raw || `purchase ${p.purchase_id}`)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#999" }}>
+                        {p.lines.map((l) => l.label).join(" · ") || "no contents"}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td style={td}>{money(p.item_minor, p.currency)}</td>
+                <td style={td}>{usd(p.cost_cents)}</td>
+                <td style={td}>{usd(p.domestic_cents)}</td>
+                <td style={{ ...td, color: p.days_left != null && p.days_left < 10
+                                    ? "#b45309" : "inherit" }}>
+                  {p.days_left == null ? "—" : p.days_left}
+                </td>
+                <td style={td}>
+                  <Button size="sm" disabled={busy} onClick={() => domestic(p)}
+                          style={{ marginRight: 4 }}>
+                    + domestic
+                  </Button>
+                  <Button size="sm" disabled={busy} onClick={() => cancel(p)}>
+                    Cancelled
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Batches, so a mistyped total can be found and corrected. The charge is
+          the only place exact money lives, so it is the only place to fix it. */}
+      {charges?.charges?.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            Payments
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left" }}>paid on</th>
+                <th style={{ ...th, textAlign: "left" }}>kind</th>
+                <th style={th}>charged</th>
+                <th style={th}>credit</th>
+                <th style={th}>pool</th>
+                <th style={th}>items</th>
+                <th style={th}>implied rate</th>
+                <th style={th} />
+              </tr>
+            </thead>
+            <tbody>
+              {charges.charges.map((c) => (
+                <tr key={c.charge_id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ ...td, textAlign: "left" }}>{c.paid_on}</td>
+                  <td style={{ ...td, textAlign: "left" }}>
+                    {c.kind.replace("_", " ")}
+                    {c.note && <span style={{ color: "#999" }}> · {c.note}</span>}
+                  </td>
+                  <td style={td}>{usd(c.paid_usd_cents)}</td>
+                  <td style={td}>
+                    {c.credit_applied_cents ? usd(c.credit_applied_cents) : "—"}
+                  </td>
+                  <td style={td}>{usd(c.pool_cents)}</td>
+                  <td style={td}>
+                    {c.n_purchases || "—"}
+                    {c.n_cancelled > 0 && (
+                      <span style={{ color: "#b45309" }}> ({c.n_cancelled} cancelled)</span>
+                    )}
+                  </td>
+                  <td style={{ ...td, color: "#666" }}>
+                    {c.implied_rate ? c.implied_rate.toFixed(5) : "—"}
+                  </td>
+                  <td style={td}>
+                    <Button
+                      size="sm" disabled={busy}
+                      onClick={() => {
+                        const raw = window.prompt(
+                          "USD actually charged for this payment?",
+                          (c.paid_usd_cents / 100).toFixed(2));
+                        if (raw == null) return;
+                        const cents = dollarsToCents(raw);
+                        if (cents == null) return onError("Enter dollars.");
+                        run(() => updateCharge(c.charge_id, { paid_usd_cents: cents }));
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Consolidated shipments, and the per-card landed cost that falls out of them.
+function BoxesView({ onError, boxId, onSelect, refreshKey }) {
+  const [boxes, setBoxes] = useState(null);
+  const [box, setBox] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    listBoxes().then((d) => setBoxes(d.boxes || []))
+      .catch((e) => onError(e.message || "Failed to load boxes"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (!boxId) return setBox(null);
+    getBox(boxId).then(setBox)
+      .catch((e) => onError(e.message || "Failed to load the box"));
+  }, [boxId, refreshKey, onError]);
+
+  async function run(fn) {
+    setBusy(true);
+    try {
+      await fn();
+      setBoxes((await listBoxes()).boxes || []);
+      if (boxId) setBox(await getBox(boxId));
+    } catch (e) {
+      onError(e.message || "That failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The packing quote. Entered as its own split rather than one total because
+  // the parts allocate differently: shipping by weight, duties and fees by
+  // value. Lumped together, a heavy cheap item pays duty it does not owe.
+  function editQuote(b) {
+    const cur = b.packing_charge || {};
+    const ask = (label, cents) => window.prompt(label,
+      cents == null ? "" : (cents / 100).toFixed(2));
+    const total = ask("Total USD Neokyo charged for the shipment:",
+                      cur.paid_usd_cents);
+    if (total == null) return;
+    const cents = dollarsToCents(total);
+    if (cents == null) return onError("Enter the total in dollars.");
+    const ship = ask("Of that, international shipping (allocates by weight):",
+                     cur.ship_usd_cents);
+    if (ship == null) return;
+    const duties = ask("Duties (allocates by value):", cur.duties_usd_cents);
+    if (duties == null) return;
+    const fees = ask("PayPal / other fees (allocates by value):",
+                     cur.fees_usd_cents);
+    if (fees == null) return;
+    run(() => setBoxCharge(b.box_id, {
+      kind: "packing",
+      paid_usd_cents: cents,
+      ship_usd_cents: dollarsToCents(ship) ?? null,
+      duties_usd_cents: dollarsToCents(duties) ?? null,
+      fees_usd_cents: dollarsToCents(fees) ?? null,
+    }));
+  }
+
+  if (boxes === null) return <div style={{ color: "#666" }}>Loading…</div>;
+
+  if (!boxId) {
+    if (!boxes.length) {
+      return (
+        <div style={{ color: "#666", fontSize: 13 }}>
+          No boxes yet. A box is created by a packing request in the Warehouse —
+          it does not exist before then.
+        </div>
+      );
+    }
+    return (
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>box</th>
+            <th style={{ ...th, textAlign: "left" }}>status</th>
+            <th style={th}>purchases</th>
+            <th style={th}>cards</th>
+            <th style={th}>items</th>
+            <th style={th}>shipping etc.</th>
+            <th style={th}>landed</th>
+            <th style={{ ...th, textAlign: "left" }}>cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {boxes.map((b) => (
+            <tr
+              key={b.box_id}
+              onClick={() => onSelect(b.box_id)}
+              style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}
+            >
+              <td style={{ ...td, textAlign: "left" }}>
+                {b.label || `box ${b.box_id}`}
+                <span style={{ color: "#999" }}> · {b.requested_on}</span>
+              </td>
+              <td style={{ ...td, textAlign: "left" }}>{b.status}</td>
+              <td style={td}>{b.n_purchases}</td>
+              <td style={td}>{b.n_units}</td>
+              <td style={td}>{usd(b.items_cost_cents)}</td>
+              <td style={td}>{usd(b.box_cost_cents)}</td>
+              <td style={td}>{usd(b.landed_cost_cents)}</td>
+              <td style={{ ...td, textAlign: "left",
+                           color: b.cost_rung === "exact" ? "#166534" : "#b45309" }}>
+                {b.cost_rung}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  if (!box) return <div style={{ color: "#666" }}>Loading…</div>;
+
+  const w = box.warnings || {};
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <Button size="sm" onClick={() => onSelect(null)}>← All boxes</Button>
+        <strong style={{ fontSize: 14 }}>{box.label || `box ${box.box_id}`}</strong>
+        <span style={{ fontSize: 12, color: "#666" }}>
+          requested {box.requested_on} · {box.status}
+        </span>
+      </div>
+
+      <div style={statRow}>
+        <Stat label="items" value={usd(box.items_cost_cents)}
+              hint={`${box.n_purchases} purchases, ${box.n_units} cards`} />
+        <Stat label="shipping, duties, fees" value={usd(box.box_cost_cents)}
+              hint={box.packing_charge ? `paid ${box.packing_charge.paid_on}`
+                                       : "not quoted yet"} />
+        <Stat label="landed" value={usd(box.landed_cost_cents)} />
+        <Stat label="per card"
+              value={box.n_units ? usd(Math.round(box.landed_cost_cents / box.n_units))
+                                 : null}
+              hint="average; the table has the real split" />
+        <Stat label="cost basis" value={box.cost_rung}
+              tone={box.cost_rung === "exact" ? "#166534" : "#b45309"}
+              hint={box.cost_rung === "exact" ? "off the receipts"
+                                              : "no packing quote yet"} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <Button size="sm" variant="primary" disabled={busy}
+                onClick={() => editQuote(box)}>
+          {box.packing_charge ? "Edit packing quote" : "Enter packing quote"}
+        </Button>
+        {box.status !== "received" && (
+          <Button size="sm" disabled={busy}
+                  onClick={() => run(() => receiveBox(box.box_id))}>
+            Mark received
+          </Button>
+        )}
+        <Button
+          size="sm" disabled={busy}
+          onClick={() => {
+            if (!window.confirm(
+              "Unpack this box? Its purchases go back to the warehouse — they " +
+              "really were bought — and only the packing quote is discarded."))
+              return;
+            run(async () => { await deleteBox(box.box_id); onSelect(null); });
+          }}
+        >
+          Unpack
+        </Button>
+      </div>
+
+      {/* Said out loud rather than absorbed silently: an unvalued line makes the
+          valued ones carry its duty, and a guessed weight does the same to
+          shipping. Both are fixable by typing the number in. */}
+      {(w.unvalued_lines > 0 || w.estimated_weights > 0
+        || w.purchases_without_lines > 0 || w.override_conflicts > 0) && (
+        <Alert tone="warn" style={{ marginBottom: 10, fontSize: 12 }}>
+          {w.unvalued_lines > 0 && (
+            <div>
+              {w.unvalued_lines} line{w.unvalued_lines === 1 ? " has" : "s have"} no
+              value, so the valued lines are absorbing their share of duties.
+            </div>
+          )}
+          {w.estimated_weights > 0 && (
+            <div>
+              {w.estimated_weights} line{w.estimated_weights === 1 ? "" : "s"} using a
+              default weight ({DEFAULT_GRAMS_HINT}). Type a real one for anything
+              heavy — a photobook under-absorbing shipping pushes it onto every card.
+            </div>
+          )}
+          {w.purchases_without_lines > 0 && (
+            <div>
+              {w.purchases_without_lines} purchase
+              {w.purchases_without_lines === 1 ? " has" : "s have"} no contents, so
+              their cost reaches no card.
+            </div>
+          )}
+          {w.override_conflicts > 0 && (
+            <div>
+              {w.override_conflicts} purchase
+              {w.override_conflicts === 1 ? " has" : "s have"} fixed line amounts
+              adding up past what it cost.
+            </div>
+          )}
+        </Alert>
+      )}
+
+      {box.basis_split && (
+        <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
+          {usd(box.basis_split.by_weight_cents)} allocated by weight
+          {box.basis_split.by_value_cents > 0 && (
+            <> · {usd(box.basis_split.by_value_cents)} by{" "}
+              {box.basis_split.value_basis === "value"
+                ? "value" : "weight (nothing in the box is valued)"}</>
+          )}
+          {box.residual_cents !== 0 && (
+            <span style={{ color: "#b91c1c" }}>
+              {" "}· {usd(box.residual_cents)} unallocated
+            </span>
+          )}
+        </div>
+      )}
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: "left" }}>line</th>
+            <th style={th}>qty</th>
+            <th style={th}>value</th>
+            <th style={th}>item</th>
+            <th style={th}>ship + duty</th>
+            <th style={th}>landed</th>
+            <th style={th}>per card</th>
+            <th style={th}>margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {box.purchases.map((p) => (
+            <Fragment key={p.purchase_id}>
+              <tr style={{ background: "#f8fafc" }}>
+                <td colSpan={8} style={{ ...td, textAlign: "left", fontSize: 11,
+                                         color: "#475569" }}>
+                  {p.title_raw || `purchase ${p.purchase_id}`}
+                  {" · "}{money(p.item_minor, p.currency)}
+                  {" → "}{usd(p.cost_cents)}
+                  {p.status === "cancelled" && (
+                    <span style={{ color: "#b45309" }}> · cancelled</span>
+                  )}
+                </td>
+              </tr>
+              {p.lines.map((l) => (
+                <tr key={l.line_id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ ...td, textAlign: "left", paddingLeft: 16 }}>
+                    {l.label}
+                    {l.wanted && (
+                      <span style={{ color: "#0369a1", fontSize: 10 }}> wanted</span>
+                    )}
+                    {l.weight_estimated && (
+                      <span style={{ color: "#999", fontSize: 10 }}> · est. weight</span>
+                    )}
+                  </td>
+                  <td style={td}>{l.qty}</td>
+                  <td style={{ ...td, color: l.value_source === "manual"
+                                       ? "inherit" : "#999" }}>
+                    {usd(l.value_cents)}
+                  </td>
+                  <td style={td}>{usd(l.item_cost_cents)}</td>
+                  <td style={td}>{usd(l.box_cost_cents)}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{usd(l.landed_cents)}</td>
+                  <td style={td}>{usd(l.landed_per_unit_cents)}</td>
+                  <td style={{ ...td, color: l.margin_cents == null ? "#999"
+                                      : l.margin_cents >= 0 ? "#166534" : "#b91c1c" }}>
+                    {usd(l.margin_cents)}
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+

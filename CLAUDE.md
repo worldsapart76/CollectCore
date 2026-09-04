@@ -181,13 +181,12 @@ reconstructing the steps.
 
 Plan docs are authoritative — read before starting; don't duplicate decisions here.
 
-- **Photocard market intel** — capture **BUILT** (Mercari US both sides, Neokyo
-  buy side); comps, fees and cost basis live. `docs/photocard_market_intel_plan.md`.
-  **Next: the v2 market workspace** — card grid (paid / buy / sell + flip and arb
-  margins), lot analyzer with value-weighted allocation, wanted-sourcing view.
-  It supersedes the card-first comp view as the entry point; that view stays as
-  the drill-down. The resale ledger (box → purchase → line) is step 3 and owns
-  per-copy cost basis. Admin-only, `mkt_*` tables, no `/pcs/` dependency.
+- **Photocard market intel** — capture, comps, fees, the v2 workspace (card
+  grid + lot analyzer) and the **ledger's buy side** are all BUILT.
+  `docs/photocard_market_intel_plan.md`. **Still designed only:** the sell side
+  (`mkt_sale`, line outcomes, sell-through) and per-copy cost basis, which
+  stays card-level until copies are linked to purchase lines. Admin-only,
+  `mkt_*` tables, no `/pcs/` dependency.
 - **Listing tracker** — cross-module price/listing tracking.
   `docs/listing_tracker_design_plan_v3.md` + `_dev_plan.md`. Phase 0A done.
   **Superseded for photocards** by the market-intel plan (which drops the

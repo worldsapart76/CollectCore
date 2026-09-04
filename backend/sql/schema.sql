@@ -2282,3 +2282,148 @@ CREATE TABLE IF NOT EXISTS mkt_item_cost (
     FOREIGN KEY (cost_tier_id) REFERENCES mkt_cost_tier(cost_tier_id)
 );
 CREATE INDEX IF NOT EXISTS idx_mkt_item_cost_tier ON mkt_item_cost(cost_tier_id);
+
+-- ── The ledger — what was actually bought ────────────────────────────────────
+--
+-- Design: docs/photocard_market_intel_plan.md -> Part 2. The shape follows the
+-- real Neokyo flow, which is NOT "open a box and buy into it":
+--
+--   buy requests -> a PayPal BATCH is paid (exact USD, one FX moment)
+--                -> items sit in the WAREHOUSE under a 45-day clock
+--                -> a packing request creates a BOX from the warehouse pool,
+--                   and quotes shipping + duties + fees in USD that day
+--
+-- Money that is exactly known lives on mkt_charge and nowhere else. Native item
+-- prices are allocation WEIGHTS, never converted and summed into a total --
+-- that would silently drop PayPal's cut and the FX spread, in the flattering
+-- direction.
+
+-- One PayPal payment: an exact USD amount on an exact day.
+CREATE TABLE IF NOT EXISTS mkt_charge (
+    charge_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind                 TEXT NOT NULL,   -- items|domestic_shipping|packing
+    -- Set for 'packing' at creation. NULL on 'items' and 'domestic_shipping'
+    -- forever: those are paid before any box exists, and their purchases reach
+    -- a box individually.
+    box_id               INTEGER,
+    -- 'domestic_shipping' only: the single purchase being billed.
+    purchase_id          INTEGER,
+    paid_on              TEXT NOT NULL,   -- ISO date; the FX moment
+    paid_usd_cents       INTEGER NOT NULL,
+    -- Neokyo store credit consumed by this charge, from earlier cancellations.
+    -- The allocatable pool is paid + credit, never paid alone: booking only
+    -- what PayPal took would understate every card in a credit-funded batch
+    -- and report the implied FX rate as a windfall.
+    credit_applied_cents INTEGER NOT NULL DEFAULT 0,
+    -- 'packing' only, and optional: the quote's own split, USD cents. Duties
+    -- allocate by VALUE while shipping allocates by WEIGHT, so a lumped total
+    -- cannot be distributed correctly. Left NULL the whole charge falls back
+    -- to weight, and the box says so rather than implying precision.
+    ship_usd_cents       INTEGER,
+    duties_usd_cents     INTEGER,
+    fees_usd_cents       INTEGER,
+    note                 TEXT,
+    created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CHECK (kind IN ('items', 'domestic_shipping', 'packing'))
+);
+CREATE INDEX IF NOT EXISTS idx_mkt_charge_box  ON mkt_charge(box_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_charge_purc ON mkt_charge(purchase_id);
+
+-- A consolidated shipment. Created AT PACKING, never before -- there is no
+-- such thing as an empty box waiting to be filled.
+CREATE TABLE IF NOT EXISTS mkt_box (
+    box_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    label        TEXT,
+    requested_on TEXT,
+    shipped_on   TEXT,
+    received_on  TEXT,
+    status       TEXT NOT NULL DEFAULT 'packing',  -- packing|shipped|received
+    notes        TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One listing bought.
+CREATE TABLE IF NOT EXISTS mkt_purchase (
+    purchase_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    charge_id       INTEGER NOT NULL,     -- the 'items' batch that paid for it
+    box_id          INTEGER,              -- NULL = still in the warehouse
+    -- Optional link to a captured listing; NULL for hand-entered purchases.
+    -- LEFT JOIN it.
+    listing_id      INTEGER,
+    marketplace     TEXT NOT NULL DEFAULT 'neokyo',
+    -- With marketplace, the key the capture extension's local photo store is
+    -- looked up by -- same contract as mkt_listing.
+    external_id     TEXT,
+    listing_url     TEXT,
+    title_raw       TEXT,
+    thumbnail_url   TEXT,
+    -- Allocation WEIGHT, not money. MINOR units of `currency`, per the
+    -- module-wide rule: 2500 yen is 2500, and dividing by 100 to display is a
+    -- USD assumption that has already cost this module a 100x bug once.
+    item_minor      INTEGER NOT NULL DEFAULT 0,
+    proxy_fee_minor INTEGER NOT NULL DEFAULT 0,
+    currency        TEXT NOT NULL DEFAULT 'JPY',
+    status          TEXT NOT NULL DEFAULT 'paid',
+                    -- requested|paid|received|cancelled
+    ordered_on      TEXT,
+    received_on     TEXT,
+    -- A cancelled purchase is EXCLUDED from allocation, not zero-weighted, and
+    -- the refund arrives as Neokyo store credit rather than back on the card.
+    -- credit_issued_cents leaves its own charge's pool and re-enters a later
+    -- charge as credit_applied_cents; the difference between the refund and
+    -- the purchase's share (an unrefunded PayPal fee, typically) correctly
+    -- stays behind and is absorbed by the survivors, because it was really
+    -- spent.
+    cancelled_on    TEXT,
+    credit_issued_cents INTEGER,
+    notes           TEXT,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (charge_id) REFERENCES mkt_charge(charge_id),
+    FOREIGN KEY (box_id)    REFERENCES mkt_box(box_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mkt_purchase_charge ON mkt_purchase(charge_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_purchase_box    ON mkt_purchase(box_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_purchase_lst    ON mkt_purchase(listing_id);
+
+-- Contents of a purchase. Deliberately a SEPARATE table from mkt_listing_line,
+-- seeded by COPY from it when a captured listing is bought.
+--
+-- Not a reference, because the two have different lifetimes: capture ingest
+-- REPLACES a listing's 'capture' lines wholesale on every sync, which would
+-- erase outcomes, weights and allocation overrides the next time the extension
+-- saw that page. A purchase line is also a historical record -- what was in the
+-- box -- and must not change because a seller edited the listing.
+CREATE TABLE IF NOT EXISTS mkt_purchase_line (
+    line_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id        INTEGER NOT NULL,
+    line_type          TEXT NOT NULL DEFAULT 'card',  -- card|non_card|unidentified
+    -- Nullable on purpose. LEFT JOIN it, and scope by collection_type_id:
+    -- item ids are global across all 8 modules.
+    item_id            INTEGER,
+    collection_type_id INTEGER,
+    label              TEXT,
+    qty                INTEGER NOT NULL DEFAULT 1,
+    -- Shipping basis. NULL takes the class default (card 5g, non-card 300g),
+    -- which is a guess and says so; a real album or photobook should be typed
+    -- in, because a heavy line under-absorbing shipping pushes its share onto
+    -- every card in the box.
+    weight_grams       INTEGER,
+    -- Value basis, USD cents, per unit and NET of selling fees. Overrides the
+    -- value ladder, and is the only way a non-card line ever carries value at
+    -- all -- an unvalued line makes the valued ones absorb its share, which the
+    -- box reports rather than doing quietly.
+    value_cents        INTEGER,
+    -- Pulls this line out of the weighted sweep at a fixed amount; the
+    -- remainder redistributes across the still-weighted rows. Same
+    -- tier-XOR-custom shape used everywhere else in the module.
+    alloc_override_cents INTEGER,
+    outcome            TEXT,    -- kept|listed|sold|unsold|filler
+    disposition        TEXT,    -- keep|flip; NULL = derive from the library
+    notes              TEXT,
+
+    FOREIGN KEY (purchase_id) REFERENCES mkt_purchase(purchase_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mkt_pline_purchase ON mkt_purchase_line(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_mkt_pline_item     ON mkt_purchase_line(item_id);
