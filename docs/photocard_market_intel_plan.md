@@ -2012,6 +2012,14 @@ it and prefills the price on click, visibly and with an *unlink* control; with
 several it stays unlinked and offers them on the row, because choosing a listing
 for you when there is a choice is how the wrong price lands.
 
+**Every capture is shown by its native listing id**, not by price and card
+count. `external_id` is the last `/product/` segment of the Neokyo URL — the
+same id that appears on the order page — so it is the one field the two screens
+share and the only one that can tell two listings of the same card apart. A
+price and a card count cannot. It leads in both dropdowns, appears under the
+price on a single-capture search hit, links out to the listing once attached to
+a row, and shows on the warehouse row for matching against Neokyo's own list.
+
 Two escape hatches remain: *Add something not in the library*, for a lot or a
 non-card item, and a collapsed *browse captures* for a Japanese-titled lot the
 card search cannot name.
@@ -3020,3 +3028,8 @@ this document entirely: it is superseded by detail-page capture, not deferred.
   the library and returns any live captures alongside each card, so a single
   capture still links itself and prefills the price; several stay unlinked
   rather than guessed at.
+- **2026-09-03** — **Captures are identified by `external_id`, everywhere they
+  are offered.** The card-scoped dropdown listed price and card count, which
+  cannot distinguish two listings of the same card. The native listing id can,
+  and it is what the Neokyo order page shows, so it leads every capture the UI
+  offers and links out where there is room.

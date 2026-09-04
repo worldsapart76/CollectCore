@@ -2843,12 +2843,15 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
                     : "no captures"}
                 </div>
               </div>
-              {/* The price is only shown when there is exactly one, because
-                  that is the only case where clicking the row also settles
-                  which listing it came from. */}
+              {/* Price and listing id are only shown when there is exactly
+                  one, because that is the only case where clicking the row also
+                  settles which listing it came from. */}
               {card.captures.length === 1 && (
-                <span style={{ fontSize: 12, color: "#0369a1" }}>
+                <span style={{ fontSize: 12, color: "#0369a1", textAlign: "right" }}>
                   {money(card.captures[0].price_minor, card.captures[0].currency)}
+                  <div style={{ fontSize: 9, color: "#999" }}>
+                    {card.captures[0].external_id}
+                  </div>
                 </span>
               )}
             </div>
@@ -2873,8 +2876,10 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
             </option>
             {available.map((l) => (
               <option key={l.listing_id} value={l.listing_id}>
-                {money(l.price_minor, l.currency)} · {(l.title_raw || "").slice(0, 70)}
+                {l.external_id || `#${l.listing_id}`}
+                {" · "}{money(l.price_minor, l.currency)}
                 {l.units > 1 ? ` · ${l.units} cards` : ""}
+                {" · "}{(l.title_raw || "").slice(0, 60)}
               </option>
             ))}
           </select>
@@ -2923,7 +2928,13 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
                             <div style={{ fontSize: 10, color: "#999" }}>
                               {r.listing_id ? (
                                 <>
-                                  from a capture{" "}
+                                  {r.thumb?.listing_url ? (
+                                    <a href={r.thumb.listing_url} target="_blank"
+                                       rel="noreferrer">
+                                      {r.thumb.external_id || "capture"}
+                                    </a>
+                                  ) : (r.thumb?.external_id || "capture")}
+                                  {" "}
                                   <button
                                     onClick={() => linkCapture(i, null)}
                                     style={{ border: "none", background: "none",
@@ -2943,9 +2954,15 @@ function BatchForm({ credit, onSaved, onCancel, onError }) {
                                   <option value="">
                                     {r.card.captures.length} live listings — link one?
                                   </option>
+                                  {/* The native listing id leads, because it is
+                                      the only thing here that also appears on
+                                      the Neokyo order page. A price and a card
+                                      count cannot tell two listings of the same
+                                      card apart; `m1234…` matches exactly. */}
                                   {r.card.captures.map((cp) => (
                                     <option key={cp.listing_id} value={cp.listing_id}>
-                                      {money(cp.price_minor, cp.currency)}
+                                      {cp.external_id || `#${cp.listing_id}`}
+                                      {" · "}{money(cp.price_minor, cp.currency)}
                                       {cp.units > 1 ? ` · ${cp.units} cards` : ""}
                                     </option>
                                   ))}
@@ -3155,6 +3172,10 @@ function WarehouseView({ onError, onPacked, refreshKey }) {
                         ) : (p.title_raw || `purchase ${p.purchase_id}`)}
                       </div>
                       <div style={{ fontSize: 10, color: "#999" }}>
+                        {/* The native listing id, so a warehouse row can be
+                            matched against Neokyo's own order list — the one
+                            identifier the two screens share. */}
+                        {p.external_id && <span>{p.external_id} · </span>}
                         {p.lines.map((l) => l.label).join(" · ") || "no contents"}
                       </div>
                     </div>
