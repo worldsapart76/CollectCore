@@ -6,6 +6,39 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-09-08 (US CDT) — Trade pages show the viewer's spare copies
+
+A trade page can be generated from any selection, including a **want** list — and
+that is the case the badges didn't serve. Viewing someone's want list told you
+"you own this / you want this / you don't own this", which is the wrong question:
+what matters is **do I have a spare I'd part with**. Owning a card says nothing
+about willingness to trade it.
+
+Added a second badge rather than a fifth tone on the existing one, because the
+two facts are orthogonal — the same split the library grid already makes
+(primary letter bottom-left vs. the `T×n` secondary). A card can be Owned with
+two trade spares, or held *only* as trade copies. Folding "for trade" into the
+ownership badge would have forced a false precedence between them.
+
+- **`/admin/trade-ownership` and `/pcs/trade-ownership` response shape changed**
+  from `{cid: "owned"}` to `{cid: {"status": ..., "trade_copies": n}}`. Both
+  endpoints count copies at status `trade`; `pending_outgoing` is deliberately
+  **not** counted — those are already promised to someone.
+- **`TradePage.jsx` normalizes both shapes** (`normalizeEntry`). The frozen WASM
+  `/guest/` tier still returns the old string map and was left alone per the
+  no-new-functionality freeze, so a WASM guest sees ownership badges but no
+  spare-copy counts. One-line SQL change in `probeGuestOwnership` if that ever
+  becomes wanted.
+- Badge renders bottom-left of the image, red (`#dc2626`, matching
+  `--badge-trade`), reading `2 for trade`. Front cells only — backs are the same
+  card shown twice.
+
+Note: the shape change means a trade page left open across the deploy loses its
+badges until refresh. Self-healing; not worth contorting the API for.
+
+**Next:** session notes are over the 3-5 entry cap (7 dated entries, four of them
+2026-08-30) — due for a collapse into the "Completed to date" block.
+
 ### 2026-09-03 (US CDT) — The ledger's buy side: how Neokyo purchases get logged
 
 Started as a question — "how am I supposed to log actual Neokyo purchases?" —

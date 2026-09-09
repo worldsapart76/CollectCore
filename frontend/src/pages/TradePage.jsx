@@ -68,7 +68,25 @@ const BADGE_TONES = {
   not_in_catalog: { bg: "#a16207", fg: "#fff", label: "Not in catalog" },
 };
 
+// Spare-copies badge, bottom-left. Deliberately a SECOND badge rather than a
+// fifth tone on the one above: "for trade" is a possession fact about specific
+// copies and is orthogonal to the standing owned/wanted/don't-own read, exactly
+// as the library grid splits them (primary letter vs. the T×n secondary). A
+// card can be Owned with two spares, or held only as trade copies. Red matches
+// --badge-trade in the app theme; this page carries its own light palette
+// because it renders for logged-out viewers with no app CSS.
+const TRADE_TONE = { bg: "#dc2626", fg: "#fff" };
+
 const TRADE_PER_ROW_KEY = "trade.mobileCardsPerRow";
+
+// The three ownership probes return {cid: {status, trade_copies}}, except the
+// frozen WASM /guest/ tier, which still returns the original {cid: "owned"}
+// string map. Fold both into one shape so the render path stays single-branch.
+function normalizeEntry(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "string") return { status: raw, tradeCopies: 0 };
+  return { status: raw.status || "in_catalog", tradeCopies: raw.trade_copies || 0 };
+}
 
 async function probeGuestOwnership(catalogItemIds) {
   // Only the legacy WASM /guest/ build has local SQLite to probe. The guard is
@@ -182,9 +200,10 @@ export default function TradePage() {
     return () => { cancelled = true; };
   }, [slug]);
 
-  const badgeFor = useMemo(() => {
+  const entryFor = useMemo(() => {
     if (!ownership || viewerMode === "unauth" || viewerMode === "loading") return () => null;
-    return (catalog_item_id) => ownership[catalog_item_id] || "not_in_catalog";
+    return (catalog_item_id) =>
+      normalizeEntry(ownership[catalog_item_id]) || { status: "not_in_catalog", tradeCopies: 0 };
   }, [ownership, viewerMode]);
 
   if (viewerMode === "loading") {
@@ -216,9 +235,10 @@ export default function TradePage() {
   // grid row (matching the 4-col PDF layout the trade page replaces).
   const cells = [];
   for (const card of cards) {
-    const status = badgeFor(card.catalog_item_id);
-    cells.push({ card, side: "front", status });
-    if (card.back_url) cells.push({ card, side: "back", status: null });
+    const entry = entryFor(card.catalog_item_id);
+    cells.push({ card, side: "front", status: entry?.status ?? null, tradeCopies: entry?.tradeCopies || 0 });
+    // Backs carry no badges — they're the same card, shown twice.
+    if (card.back_url) cells.push({ card, side: "back", status: null, tradeCopies: 0 });
   }
 
   return (
@@ -249,7 +269,7 @@ export default function TradePage() {
       </header>
 
       <div style={gridStyle}>
-        {cells.map(({ card, side, status }, i) => {
+        {cells.map(({ card, side, status, tradeCopies }, i) => {
           const url = side === "front" ? card.front_url : card.back_url;
           const tone = status ? BADGE_TONES[status] : null;
           const captionLines = (card.caption || []).slice();
@@ -266,6 +286,14 @@ export default function TradePage() {
                     title={BADGE_LABELS[status]}
                   >
                     {tone.label}
+                  </span>
+                )}
+                {tradeCopies > 0 && (
+                  <span
+                    style={{ ...styles.tradeBadge, background: TRADE_TONE.bg, color: TRADE_TONE.fg }}
+                    title={`You have ${tradeCopies} ${tradeCopies === 1 ? "copy" : "copies"} of this card marked for trade.`}
+                  >
+                    {tradeCopies} for trade
                   </span>
                 )}
               </div>
@@ -340,6 +368,16 @@ const styles = {
   badge: {
     position: "absolute",
     top: 6,
+    left: 6,
+    padding: "2px 6px",
+    borderRadius: 3,
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: 0.2,
+  },
+  tradeBadge: {
+    position: "absolute",
+    bottom: 6,
     left: 6,
     padding: "2px 6px",
     borderRadius: 3,

@@ -305,9 +305,18 @@ def admin_me():
 @router.get("/admin/trade-ownership")
 def trade_ownership(ids: str, db=Depends(get_db)):
     """For a comma-separated list of catalog_item_ids, return the admin's
-    ownership state per id: 'owned' | 'wanted' | 'in_catalog'. Cards not
-    found in the admin's library are absent from the result (which the
-    trade page renders as 'Not yet in your catalog')."""
+    ownership state per id. Cards not found in the admin's library are absent
+    from the result (which the trade page renders as 'Not yet in your catalog').
+
+    Shape: {catalog_item_id: {"status": ..., "trade_copies": n}} where status is
+    'owned' | 'wanted' | 'in_catalog'.
+
+    `trade_copies` counts copies sitting at ownership status `trade` — spares
+    the viewer could offer back. It is deliberately a SEPARATE axis from
+    `status`, exactly as the library grid treats it (Trade lives in the
+    secondary badge slot, never the primary one): a card can be owned with two
+    trade spares, or held only as trade copies. `pending_outgoing` copies are
+    NOT counted — those are already promised to someone else."""
     cat_ids = [x.strip() for x in ids.split(",") if x.strip()]
     if not cat_ids:
         return {}
@@ -318,7 +327,8 @@ def trade_ownership(ids: str, db=Depends(get_db)):
             f"""
             SELECT i.catalog_item_id,
                    MAX(CASE WHEN os.status_code = 'owned'  THEN 1 ELSE 0 END) AS is_owned,
-                   MAX(CASE WHEN os.status_code = 'wanted' THEN 1 ELSE 0 END) AS is_wanted
+                   MAX(CASE WHEN os.status_code = 'wanted' THEN 1 ELSE 0 END) AS is_wanted,
+                   SUM(CASE WHEN os.status_code = 'trade'  THEN 1 ELSE 0 END) AS trade_copies
             FROM tbl_items i
             LEFT JOIN tbl_photocard_copies pc ON pc.item_id = i.item_id
             LEFT JOIN lkup_ownership_statuses os ON pc.ownership_status_id = os.ownership_status_id
@@ -331,11 +341,12 @@ def trade_ownership(ids: str, db=Depends(get_db)):
     ).fetchall()
 
     result = {}
-    for cid, is_owned, is_wanted in rows:
+    for cid, is_owned, is_wanted, trade_copies in rows:
         if is_owned:
-            result[cid] = "owned"
+            status = "owned"
         elif is_wanted:
-            result[cid] = "wanted"
+            status = "wanted"
         else:
-            result[cid] = "in_catalog"
+            status = "in_catalog"
+        result[cid] = {"status": status, "trade_copies": int(trade_copies or 0)}
     return result

@@ -738,10 +738,11 @@ def pcs_delete_trade(slug: str, email: str = Depends(require_user), db=Depends(g
 @router.get("/trade-ownership")
 def pcs_trade_ownership(ids: str, email: str = Depends(require_user), db=Depends(get_db)):
     """Per-card ownership for the CALLER over a comma-separated catalog_item_id
-    list: 'owned' | 'wanted' | 'in_catalog'. Ids not in the catalog are absent
-    (the trade page renders those as 'not in your catalog'). Mirrors
-    /admin/trade-ownership but scoped to the /pcs user's own copies, so a /pcs
-    viewer sees their own library badges on a shared trade page."""
+    list. Ids not in the catalog are absent (the trade page renders those as
+    'not in your catalog'). Mirrors /admin/trade-ownership but scoped to the
+    /pcs user's own copies, so a /pcs viewer sees their own library badges on a
+    shared trade page — same response shape:
+    {catalog_item_id: {"status": 'owned'|'wanted'|'in_catalog', "trade_copies": n}}."""
     user_id = _get_or_create_user(db, email)
     cat_ids = [x.strip() for x in ids.split(",") if x.strip()]
     if not cat_ids:
@@ -754,7 +755,8 @@ def pcs_trade_ownership(ids: str, email: str = Depends(require_user), db=Depends
             f"""
             SELECT i.catalog_item_id,
                    MAX(CASE WHEN os.status_code = 'owned'  THEN 1 ELSE 0 END) AS is_owned,
-                   MAX(CASE WHEN os.status_code = 'wanted' THEN 1 ELSE 0 END) AS is_wanted
+                   MAX(CASE WHEN os.status_code = 'wanted' THEN 1 ELSE 0 END) AS is_wanted,
+                   SUM(CASE WHEN os.status_code = 'trade'  THEN 1 ELSE 0 END) AS trade_copies
             FROM tbl_items i
             LEFT JOIN pcs_card_copies pc
                    ON pc.catalog_item_id = i.catalog_item_id AND pc.user_id = :uid
@@ -768,8 +770,9 @@ def pcs_trade_ownership(ids: str, email: str = Depends(require_user), db=Depends
         params,
     ).fetchall()
     result = {}
-    for cid, is_owned, is_wanted in rows:
-        result[cid] = "owned" if is_owned else ("wanted" if is_wanted else "in_catalog")
+    for cid, is_owned, is_wanted, trade_copies in rows:
+        status = "owned" if is_owned else ("wanted" if is_wanted else "in_catalog")
+        result[cid] = {"status": status, "trade_copies": int(trade_copies or 0)}
     return result
 
 
