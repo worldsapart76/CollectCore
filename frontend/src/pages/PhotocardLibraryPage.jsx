@@ -780,6 +780,7 @@ const styles = {
     padding: "3px 8px",
     fontSize: 12,
     background: "var(--bg-base)",
+    color: "var(--text-primary)",
     border: "none",
     borderRight: "1px solid var(--border-input)",
     cursor: "pointer",
@@ -802,6 +803,7 @@ const styles = {
     border: "1px solid var(--border-input)",
     borderRadius: 3,
     background: "var(--bg-base)",
+    color: "var(--text-primary)",
   },
   primaryBtn: {
     background: "var(--btn-primary-bg)",
