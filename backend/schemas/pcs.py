@@ -52,7 +52,10 @@ class PcsCardBookPayload(BaseModel):
     """Options for the offline card book PDF. No user id: the caller's identity
     comes from Cloudflare Access, never from the request body."""
     member_ids: Optional[list[int]] = None
-    card_filter: str = "all"
+    # `mine` (this user's annotated cards), not `all`: a friend with two cards
+    # should not be handed the whole 11.8k-card catalog, and the /pcs/ library
+    # page already defaults to the same scope.
+    card_filter: str = "mine"
     page: str = "phone"
 
 

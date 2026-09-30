@@ -167,7 +167,7 @@ export async function savePcsTradeDefaults(defaults) {
  *  own statuses, to carry where there's no signal. A POST returning a file
  *  can't be driven by a plain link, so this fetches the body and clicks an
  *  object URL, same as the admin export. */
-export async function exportPcsCardBook({ cardFilter = "all", page = "phone" } = {}) {
+export async function exportPcsCardBook({ cardFilter = "mine", page = "phone" } = {}) {
   const res = await req(
     "/pcs/export/photocard-book.pdf",
     jsonBody("POST", { card_filter: cardFilter, page }),

@@ -207,8 +207,29 @@ and generate on wifi.
 6. **Carry it for a real day before departure** and adjust thumbnail size or
    grid density based on how it reads on the phone.
 
+## Fixed after first real /pcs/ use (2026-09-30)
+
+A friend account with two cards downloaded a 90MB, 1,601-page book of the whole
+catalog, and the confirmation said "0 cards, 0 pages".
+
+- **Scope.** `/pcs/` defaulted to `all`. It now defaults to a new **`mine`**
+  filter (cards the user has actually marked), matching what their library page
+  already shows; the full catalog is a separate, confirm-gated menu entry. Two
+  cards now produce a 4-page book instead of 11,828.
+- **The zeros were CORS.** Every SPA is served from `collectcoreapp.com` but
+  calls `api.collectcoreapp.com`, so custom response headers are invisible to JS
+  unless named in `Access-Control-Expose-Headers`. Added in `main.py`. This had
+  also been silently breaking the **trade CSV's** row count and the download
+  filename.
+- **`lomo_fanmade` had no mark**, so a card the user holds read as "you don't
+  have this". It now has its own LOMO mark rather than counting as HAVE: a
+  fan-printed copy is not the official card, and folding it into HAVE could talk
+  you out of one you still want. Flip it into `HELD_CODES` if that judgement is
+  wrong.
+
 ## Open
 
 - Thumbnail size/grid density are guesses until step 6 of the checklist.
 - Whether `/pcs/` books should be rate-limited or cached per user, once there
   are real users.
+- Whether `lomo_fanmade` should count as held (currently its own mark).

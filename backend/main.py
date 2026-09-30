@@ -40,6 +40,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Every SPA is served from collectcoreapp.com but calls
+    # api.collectcoreapp.com, so EVERY response is cross-origin and a custom
+    # header is invisible to JS unless it is named here. Without this the
+    # download helpers read null and report "0 cards, 0 pages" for a file that
+    # downloaded perfectly — which is exactly what the card book did.
+    expose_headers=[
+        "Content-Disposition",
+        "X-Exported-Rows",
+        "X-Book-Cards",
+        "X-Book-Pages",
+        "X-Book-Missing-Thumbs",
+    ],
 )
 
 # ---------- SPA fallback (host- + path-based routing) ----------

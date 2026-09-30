@@ -32,7 +32,10 @@ PHOTOCARDS_CODE = "photocards"
 HELD_CODES = ("owned", "pending_incoming")
 
 # Shared with the routers so admin and /pcs/ validate identically.
-CARD_FILTERS = ("all", "hide_not_wanted", "wanted_only", "owned_only")
+# `mine` = cards this person has actually annotated. It is the /pcs/ default:
+# a friend with two cards should not be handed the whole 11.8k-card, 90MB
+# catalog, and their library page already defaults to the same scope.
+CARD_FILTERS = ("all", "mine", "hide_not_wanted", "wanted_only", "owned_only")
 PAGE_SIZES = ("a4", "phone")
 
 @dataclass
@@ -78,6 +81,12 @@ MARKS = {
     "held": ((22, 101, 52), "HAVE"),
     "wanted": ((30, 64, 175), "WANT"),
     "trade": ((180, 83, 9), "TRADE"),
+    # lomo_fanmade is "an unofficial fan-printed card, held INSTEAD of Owned"
+    # (db.py migration note). It gets its own mark rather than counting as
+    # HAVE: you do hold something, but not the official card, so folding it
+    # into HAVE could talk you out of a card you still want. Leaving it blank
+    # was worse — it read as "you don't have this" for a card you do.
+    "lomo_fanmade": ((109, 40, 217), "LOMO"),
     "not_wanted": ((120, 113, 108), "NO"),
 }
 
@@ -112,7 +121,7 @@ class Card:
     def mark(self) -> Optional[tuple]:
         if self.held:
             return MARKS["held"]
-        for code in ("wanted", "trade", "not_wanted"):
+        for code in ("lomo_fanmade", "wanted", "trade", "not_wanted"):
             if code in self.codes:
                 return MARKS[code]
         return None
@@ -236,6 +245,8 @@ def origin_order(conn) -> dict[int, tuple]:
 
 
 def _keep(card: Card, card_filter: str) -> bool:
+    if card_filter == "mine":
+        return bool(card.codes)
     if card_filter == "wanted_only":
         return "wanted" in card.codes
     if card_filter == "owned_only":
@@ -411,6 +422,7 @@ class _Book:
         for key, note in (("held", "owned, or bought and on its way"),
                           ("wanted", "on the wishlist"),
                           ("trade", "held as a spare for trading"),
+                          ("lomo_fanmade", "unofficial fan-printed copy"),
                           ("not_wanted", "decided against")):
             rgb, label = MARKS[key]
             pdf.set_fill_color(*rgb)

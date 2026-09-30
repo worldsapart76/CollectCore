@@ -61,16 +61,28 @@ export default function PcsMenuItems({ itemClassName }) {
     }
   }
 
-  // The card book is a PDF of the catalog marked with this user's own
-  // statuses — something to save to their phone and use with no connection.
-  async function handleCardBook() {
+  // The card book is a PDF to save to a phone and use with no connection.
+  // `mine` covers the cards you've marked; `all` is the whole catalog, which
+  // is a ~90MB download and only worth it as a shopping reference.
+  async function handleCardBook(cardFilter) {
     if (bookBusy) return;
+    if (cardFilter === "all" && !window.confirm(
+      "The full catalog is a large download (roughly 90 MB) and is best done " +
+      "on wifi. Carry on?",
+    )) return;
+
     setBookBusy(true);
     try {
-      const info = await exportPcsCardBook();
+      const info = await exportPcsCardBook({ cardFilter });
+      const size = `${(info.bytes / 1e6).toFixed(1)} MB`;
+      // The counts come from response headers, which are only readable when
+      // the API exposes them cross-origin — fall back to the size alone
+      // rather than claiming "0 cards".
+      const counts = Number.isFinite(info.cards) && info.cards > 0
+        ? `${info.cards} cards over ${info.pages} pages (${size})`
+        : size;
       window.alert(
-        `Saved your card book: ${info.cards} cards over ${info.pages} pages ` +
-        `(${(info.bytes / 1e6).toFixed(0)} MB).\n\n` +
+        `Saved your card book: ${counts}.\n\n` +
         "Keep it in your phone's Files app and it works with no signal.",
       );
     } catch (err) {
@@ -89,16 +101,27 @@ export default function PcsMenuItems({ itemClassName }) {
         {me?.email ? `Signed in as ${me.email}` : "Signed in"}
       </div>
 
-      {/* Offline card book — a large download, so best done on wifi. */}
+      {/* Offline card book. Two scopes: your own cards (small), or the whole
+          catalog as a shopping reference (large — best on wifi). */}
       <div
         className={itemClassName}
         role="button"
         tabIndex={0}
-        onClick={handleCardBook}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleCardBook(); }}
+        onClick={() => handleCardBook("mine")}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleCardBook("mine"); }}
         style={{ cursor: bookBusy ? "default" : "pointer" }}
       >
-        {bookBusy ? "Building card book…" : "Download card book (PDF)"}
+        {bookBusy ? "Building card book…" : "Download my card book (PDF)"}
+      </div>
+      <div
+        className={itemClassName}
+        role="button"
+        tabIndex={0}
+        onClick={() => handleCardBook("all")}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleCardBook("all"); }}
+        style={{ cursor: bookBusy ? "default" : "pointer" }}
+      >
+        Download full catalog book (PDF)
       </div>
 
       {/* One-time migration off the old browser-local /guest/ tier. */}
