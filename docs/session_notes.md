@@ -6,6 +6,50 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-09-29 (US CDT) — Offline card book (PDF), all four phases
+
+Two weeks in Korea + Japan from 10-02, shopping in person with unreliable signal
+and a metered plan. The brainstorm started at an offline SPA — service worker,
+snapshot in IndexedDB, image pre-cache, a synced purchase list, a bulk review
+screen writing statuses back — and the user pared it down three times. What
+survived is **a PDF**, because the requirement was only (a) don't burn roaming
+data and (b) don't be without the card list.
+
+Measuring killed half the design: `GET /photocards` is **155 KB gzipped** (prod
+gzips at the edge — 163 KB → 12 KB on `/catalog/delta`), and images carry
+one-year immutable cache headers, so **(a) needed no code at all**. The app is
+already frugal. Full design + measurements: `docs/photocard_offline_card_book_plan.md`.
+
+Built and deployed, all four phases:
+- **`pdf_thumbs.py`** — one small JPEG per front at `DATA_ROOT/pdf_thumbs/`, so
+  generation is a byte-copy instead of ~11.8k R2 fetches. Keyed on a **hash of
+  the image URL**, not `catalog_version`: prod holds both the old unversioned R2
+  key and `_replace_image`'s `_v{n}` one. `POST /admin/build-pdf-thumbs` is
+  **chunked** — one sweep can't survive Cloudflare's ~100s cap.
+- **`pdf_card_book.py`** + `POST /export/photocard-book.pdf` — bookmarked by
+  member then origin, held/wanted/trade/not-wanted marks, snapshot date on every
+  page. Unit cards repeat under each member; imageless cards render as an empty
+  frame rather than vanishing.
+- **Publish Photocard Images** now writes each thumbnail from bytes it already
+  resized, so the cache never goes cold.
+- **`POST /pcs/export/photocard-book.pdf`** — same generator, statuses scoped to
+  the caller's `user_id`, catalog cards only.
+
+Three things worth remembering:
+- **An A4 page is wrong for a phone** — each tile shrinks to a sixth of the
+  screen. Looking at a rendered page produced the `phone` preset (95×185mm, 3
+  columns), now the default. 1,337 pages vs 530, and far more readable.
+- **Source images are already small** (~200px avg), so the resize caps width and
+  never upscales, and small JPEGs are stored byte-for-byte.
+- **`--limit` first applied to the SQL query**, so chunked calls would have
+  re-processed the same cached rows forever. It caps outstanding work now.
+
+Prod run confirmed by the user: thumbnails built, PDF looks good.
+
+**Next:** thumbnail size and grid density are still guesses — tune after the trip
+if the book reads poorly in a shop. `/pcs/` book is untested by a real friend
+account. Roadmap in `CLAUDE.md` still calls `/pcs/` "not built"; it is live.
+
 ### 2026-09-08 (US CDT) — Trade pages show the viewer's spare copies
 
 A trade page can be generated from any selection, including a **want** list — and
