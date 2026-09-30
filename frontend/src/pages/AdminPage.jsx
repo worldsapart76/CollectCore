@@ -15,6 +15,7 @@ import {
   mergeLookupRows,
   patchLookupRow,
   prepareBackup,
+  buildPdfThumbs,
   commitCatalogDrafts,
   publishAdminImagesToR2,
   publishCatalogToR2,
@@ -112,6 +113,11 @@ function AdminPageImpl() {
   const [draftsError, setDraftsError] = useState(null);
 
   // ── Admin (non-photocard) cover image publish ────────────────────────────────
+  // ── Offline card book: thumbnail cache ───────────────────────────────────────
+  const [thumbsStatus, setThumbsStatus] = useState(null);
+  const [thumbsInfo, setThumbsInfo] = useState(null);
+  const [thumbsError, setThumbsError] = useState(null);
+
   const [adminPublishStatus, setAdminPublishStatus] = useState(null);
   const [adminPublishInfo, setAdminPublishInfo] = useState(null);
   const [adminPublishError, setAdminPublishError] = useState(null);
@@ -236,6 +242,26 @@ function AdminPageImpl() {
     } catch (e) {
       setDraftsError(e.message || "Publish failed.");
       setDraftsStatus("error");
+    }
+  }
+
+  // Loops the chunked endpoint until nothing is outstanding. Stops early when a
+  // pass builds nothing: everything still missing is failing (a dead image URL),
+  // and another pass would retry the same failures forever.
+  async function handleBuildPdfThumbs() {
+    setThumbsStatus("working"); setThumbsError(null); setThumbsInfo(null);
+    let builtTotal = 0;
+    try {
+      for (;;) {
+        const info = await buildPdfThumbs({ limit: 300 });
+        builtTotal += info.built;
+        setThumbsInfo({ ...info, builtTotal });
+        if (info.remaining === 0 || info.built === 0) break;
+      }
+      setThumbsStatus("done");
+    } catch (e) {
+      setThumbsError(e.message || "Thumbnail build failed.");
+      setThumbsStatus("error");
     }
   }
 
@@ -541,6 +567,49 @@ function AdminPageImpl() {
                 ))}
             </ul>
           )}
+
+          {/* Offline card book thumbnails */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Offline Card Book Thumbnails</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            Builds the small thumbnail of every photocard front that the
+            offline card book PDF is made from. Without this cache, generating
+            the PDF would re-download the whole library and time out.
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>When to run this:</strong> once to fill the cache, then
+            after adding or replacing card images. Cards already cached are
+            skipped, so re-running is cheap. The first run fetches the whole
+            library and takes a while — leave the page open.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={handleBuildPdfThumbs}
+              disabled={thumbsStatus === "working"}
+              style={{ padding: "5px 14px", cursor: thumbsStatus === "working" ? "default" : "pointer" }}
+            >
+              {thumbsStatus === "working" ? "Building…" : "Build Thumbnails"}
+            </button>
+            {thumbsStatus === "working" && thumbsInfo && (
+              <span style={{ color: "#444", fontSize: "0.9rem" }}>
+                Built {thumbsInfo.builtTotal}, {thumbsInfo.remaining} to go…
+              </span>
+            )}
+            {thumbsStatus === "done" && thumbsInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                Cache ready: {thumbsInfo.builtTotal} built this run,
+                {" "}{(thumbsInfo.bytes / 1e6).toFixed(0)} MB total.
+                {thumbsInfo.remaining > 0 && (
+                  <span style={{ color: "#9b1c1c" }}>
+                    {" "}{thumbsInfo.remaining} card(s) have an unreadable image and were skipped.
+                  </span>
+                )}
+              </span>
+            )}
+            {thumbsStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{thumbsError}</span>
+            )}
+          </div>
 
           {/* Guest seed */}
           <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />

@@ -12,6 +12,9 @@ frontend/node_modules/
 /images/
 /data/
 /exports/
+# Offline card book thumbnail cache — generated from the card images, and in
+# prod it lives on the Railway volume at /data/pdf_thumbs/.
+/pdf_thumbs/
 
 # API keys and secrets (never commit)
 backend/.env

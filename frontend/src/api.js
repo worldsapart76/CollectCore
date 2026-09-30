@@ -860,6 +860,18 @@ export async function commitCatalogDrafts() {
   return handleJsonResponse(res, "Publish new cards to catalog failed.");
 }
 
+// Offline card book: fill the thumbnail cache one chunk at a time. The caller
+// loops — see AdminPage — because the first run pulls ~11.8k images from R2 and
+// a single sweep would hit Cloudflare's ~100s proxy timeout.
+export async function buildPdfThumbs({ limit = 300, force = false } = {}) {
+  const res = await fetch(`${API}/admin/build-pdf-thumbs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit, force }),
+  });
+  return handleJsonResponse(res, "Thumbnail build failed.");
+}
+
 // --- Admin: Unused Lookup Cleanup ---
 
 export async function scanUnusedLookups() {

@@ -554,6 +554,35 @@ def publish_admin_images():
         raise HTTPException(status_code=500, detail=f"Publish failed: {exc}")
 
 
+class PdfThumbsPayload(BaseModel):
+    limit: int = 300
+    force: bool = False
+
+
+@router.post("/admin/build-pdf-thumbs")
+def build_pdf_thumbs(payload: PdfThumbsPayload):
+    """
+    Fill the offline card book's thumbnail cache, one chunk per call.
+
+    Chunked rather than one long sweep because Cloudflare kills a proxied
+    request at ~100s and the first run has ~11.8k images to pull from R2. The
+    caller loops until `remaining` hits 0, or until a pass reports `built: 0`,
+    which means every row still outstanding is failing (a dead image URL) and
+    looping again would just retry the same failures forever.
+
+    Idempotent: cached thumbnails are skipped, so a re-run after new cards are
+    added only fetches the new ones. See docs/photocard_offline_card_book_plan.md.
+    """
+    from pdf_thumbs import build_all
+
+    limit = max(1, min(2000, payload.limit))
+    try:
+        counts = build_all(limit=limit, force=payload.force, verbose=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Thumbnail build failed: {exc}")
+    return {"ok": True, **counts}
+
+
 # ---------- Admin: card index (capture extension) ----------
 
 
