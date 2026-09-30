@@ -310,3 +310,70 @@ def export_photocard_trades(payload: TradeExportPayload, db=Depends(get_db)):
             "X-Exported-Rows": str(exported),
         },
     )
+
+
+# ---------- Offline card book (PDF) ----------
+
+
+class CardBookPayload(BaseModel):
+    member_ids: List[int] | None = None
+    # all | hide_not_wanted | wanted_only | owned_only
+    card_filter: str = "all"
+    # a4 | phone — phone pages are shaped like a phone screen so fit-to-width
+    # shows tiles big enough to identify a card without pinch-zooming.
+    page: str = "a4"
+
+
+@router.post("/export/photocard-book.pdf")
+def export_photocard_book(payload: CardBookPayload):
+    """
+    The offline card book: the whole library as one PDF, to carry where there is
+    no signal. Bookmarked by member then source origin; every card marked with
+    whether it is held.
+
+    Built from the thumbnail cache (Admin -> Offline Card Book Thumbnails), so
+    it returns in seconds. Cards with no cached thumbnail render as an empty
+    frame rather than being dropped — an imageless card still answers "do I
+    already have this?".
+
+    See docs/photocard_offline_card_book_plan.md.
+    """
+    from db import raw_connect
+    from pdf_card_book import BookOptions, build_book, load_admin_statuses
+
+    if payload.card_filter not in ("all", "hide_not_wanted", "wanted_only", "owned_only"):
+        raise HTTPException(status_code=400, detail="Unknown card_filter.")
+    if payload.page not in ("a4", "phone"):
+        raise HTTPException(status_code=400, detail="Unknown page size.")
+
+    conn = raw_connect()
+    try:
+        statuses = load_admin_statuses(conn)
+        data, summary = build_book(
+            conn,
+            statuses,
+            BookOptions(
+                member_ids=payload.member_ids,
+                card_filter=payload.card_filter,
+                page=payload.page,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Card book failed: {exc}")
+    finally:
+        conn.close()
+
+    filename = f"photocard_book_{datetime.now().strftime('%Y%m%d')}.pdf"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Length": str(len(data)),
+            # Surfaced so the UI can report what it just built without parsing
+            # the PDF back apart.
+            "X-Book-Cards": str(summary["cards"]),
+            "X-Book-Pages": str(summary["pages"]),
+            "X-Book-Missing-Thumbs": str(summary["missing_thumbs"]),
+        },
+    )

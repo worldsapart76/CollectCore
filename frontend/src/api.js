@@ -291,6 +291,37 @@ export async function exportPhotocardTradesCsv(itemIds) {
   return { rows: Number.isNaN(rows) ? null : rows, filename };
 }
 
+/** Download the offline card book PDF — the library as a file to carry where
+ *  there is no signal. Same synthetic-click trick as the trade CSV above. */
+export async function exportPhotocardBookPdf({ memberIds = null, cardFilter = "all", page = "a4" } = {}) {
+  const res = await fetch(`${API}/export/photocard-book.pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ member_ids: memberIds, card_filter: cardFilter, page }),
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || "Failed to export card book");
+  }
+  const info = {
+    cards: Number(res.headers.get("X-Book-Cards")),
+    pages: Number(res.headers.get("X-Book-Pages")),
+    missingThumbs: Number(res.headers.get("X-Book-Missing-Thumbs")),
+  };
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename=([^;]+)/)?.[1]?.trim() || "photocard_book.pdf";
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return { ...info, filename, bytes: blob.size };
+}
+
 // --- Photocard Copies ---
 
 export async function createPhotocardCopy(itemId, { ownershipStatusId, notes = null }) {

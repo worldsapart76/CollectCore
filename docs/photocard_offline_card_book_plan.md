@@ -118,7 +118,20 @@ library; the exact figure lands after the prod run.
 - **Incremental:** *Publish Photocard Images* should write the thumbnail for each
   card it publishes (Phase 3), so the cache stays warm.
 
-### 2. Generator
+### 2. Generator — BUILT 2026-09-29
+
+`backend/pdf_card_book.py` + `POST /export/photocard-book.pdf`, driven by
+**Admin → Offline Card Book (PDF)**.
+
+**Two page presets, added after seeing a real page.** An A4 page on a phone
+shrinks each tile to about a sixth of the screen, so reading the book means
+pinch-zooming every row. `phone` (95×185mm, 3 columns) makes fit-to-width show
+tiles big enough to identify a card; `a4` (6 columns) stays for printing and
+desktop. **Phone is the UI default.** Measured on dev (10,024 cards, 2,800
+thumbnails cached): a4 = 530 pages, phone = 1,337 pages, both ~2.5s.
+
+Generation is fast enough that the `prepare` → token → `download` fallback is
+not needed: the full book renders in seconds because embedding is a byte-copy.
 
 `backend/pdf_card_book.py`, pure function of (cards, status-per-card, options)
 → PDF bytes. New dependency: **fpdf2** (pure Python, small, supports outlines).
@@ -152,8 +165,9 @@ and generate on wifi.
 1. ~~**Thumbnail cache + backfill script.**~~ **Done 2026-09-27** — module, CLI,
    chunked admin endpoint and the admin button. Still to do on prod: deploy,
    click Build Thumbnails, and record the real count and cache size.
-2. **Generator + admin endpoint + modal.** *Trip-critical — this is the part
-   needed by 2026-10-02.*
+2. ~~**Generator + admin endpoint + modal.**~~ **Done 2026-09-29.** Options are
+   card filter + page size; member selection is supported by the endpoint
+   (`member_ids`) but not exposed, since the decision was one book for everyone.
 3. **Hook into Publish Photocard Images** so the cache stays warm.
 4. **`/pcs/` endpoint + menu entry.** After the trip.
 

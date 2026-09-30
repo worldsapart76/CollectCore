@@ -16,6 +16,7 @@ import {
   patchLookupRow,
   prepareBackup,
   buildPdfThumbs,
+  exportPhotocardBookPdf,
   commitCatalogDrafts,
   publishAdminImagesToR2,
   publishCatalogToR2,
@@ -117,6 +118,13 @@ function AdminPageImpl() {
   const [thumbsStatus, setThumbsStatus] = useState(null);
   const [thumbsInfo, setThumbsInfo] = useState(null);
   const [thumbsError, setThumbsError] = useState(null);
+
+  // ── Offline card book: the PDF itself ────────────────────────────────────────
+  const [bookFilter, setBookFilter] = useState("all");
+  const [bookPage, setBookPage] = useState("phone");
+  const [bookStatus, setBookStatus] = useState(null);
+  const [bookInfo, setBookInfo] = useState(null);
+  const [bookError, setBookError] = useState(null);
 
   const [adminPublishStatus, setAdminPublishStatus] = useState(null);
   const [adminPublishInfo, setAdminPublishInfo] = useState(null);
@@ -262,6 +270,18 @@ function AdminPageImpl() {
     } catch (e) {
       setThumbsError(e.message || "Thumbnail build failed.");
       setThumbsStatus("error");
+    }
+  }
+
+  async function handleDownloadBook() {
+    setBookStatus("working"); setBookError(null); setBookInfo(null);
+    try {
+      const info = await exportPhotocardBookPdf({ cardFilter: bookFilter, page: bookPage });
+      setBookInfo(info);
+      setBookStatus("done");
+    } catch (e) {
+      setBookError(e.message || "Card book failed.");
+      setBookStatus("error");
     }
   }
 
@@ -608,6 +628,65 @@ function AdminPageImpl() {
             )}
             {thumbsStatus === "error" && (
               <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{thumbsError}</span>
+            )}
+          </div>
+
+          {/* Offline card book PDF */}
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" }} />
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 6px" }}>Offline Card Book (PDF)</h3>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            The whole library as one PDF to carry where there's no signal —
+            bookmarked by member, then by source origin, with every card marked
+            as held or not. Save it to Files on your phone and it works with no
+            connection at all.
+          </p>
+          <p style={{ color: "#555", fontSize: "0.9rem", margin: "0 0 10px" }}>
+            <strong>Before you go:</strong> run Build Thumbnails above first, and
+            download this over wifi — it's roughly 90 MB. It's a snapshot, so the
+            date it was made is printed on every page.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ fontSize: "0.9rem", color: "#444" }}>
+              Cards:{" "}
+              <select value={bookFilter} onChange={(e) => setBookFilter(e.target.value)}>
+                <option value="all">All cards</option>
+                <option value="hide_not_wanted">Hide Not Wanted</option>
+                <option value="wanted_only">Wanted only</option>
+                <option value="owned_only">Owned only</option>
+              </select>
+            </label>
+            <label style={{ fontSize: "0.9rem", color: "#444" }}>
+              Page:{" "}
+              <select value={bookPage} onChange={(e) => setBookPage(e.target.value)}>
+                <option value="phone">Phone-sized</option>
+                <option value="a4">A4 (print)</option>
+              </select>
+            </label>
+            <button
+              onClick={handleDownloadBook}
+              disabled={bookStatus === "working"}
+              style={{ padding: "5px 14px", cursor: bookStatus === "working" ? "default" : "pointer" }}
+            >
+              {bookStatus === "working" ? "Building…" : "Download Card Book"}
+            </button>
+            {bookStatus === "working" && (
+              <span style={{ color: "#444", fontSize: "0.9rem" }}>
+                Building the PDF — this takes a moment.
+              </span>
+            )}
+            {bookStatus === "done" && bookInfo && (
+              <span style={{ color: "#166534", fontSize: "0.9rem" }}>
+                {bookInfo.cards} cards over {bookInfo.pages} pages
+                {" "}({(bookInfo.bytes / 1e6).toFixed(0)} MB).
+                {bookInfo.missingThumbs > 0 && (
+                  <span style={{ color: "#9b1c1c" }}>
+                    {" "}{bookInfo.missingThumbs} card(s) had no cached thumbnail — run Build Thumbnails.
+                  </span>
+                )}
+              </span>
+            )}
+            {bookStatus === "error" && (
+              <span style={{ color: "#9b1c1c", fontSize: "0.9rem" }}>{bookError}</span>
             )}
           </div>
 

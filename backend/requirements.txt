@@ -3,6 +3,8 @@ uvicorn==0.40.0
 sqlalchemy==2.0.45
 pydantic==2.12.5
 pillow==12.1.1
+# Offline card book PDF (pdf_card_book.py). Pure Python, no system deps.
+fpdf2==2.8.9
 python-multipart==0.0.21
 anyio==4.12.0
 h11==0.16.0
