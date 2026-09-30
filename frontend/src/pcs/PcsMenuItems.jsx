@@ -5,11 +5,12 @@
 // import a friend's old /guest/ "Download Backup" file into their /pcs account.
 
 import { useEffect, useRef, useState } from "react";
-import { getMe, importGuestBackup } from "./pcsData";
+import { exportPcsCardBook, getMe, importGuestBackup } from "./pcsData";
 
 export default function PcsMenuItems({ itemClassName }) {
   const [me, setMe] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [bookBusy, setBookBusy] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -60,6 +61,25 @@ export default function PcsMenuItems({ itemClassName }) {
     }
   }
 
+  // The card book is a PDF of the catalog marked with this user's own
+  // statuses — something to save to their phone and use with no connection.
+  async function handleCardBook() {
+    if (bookBusy) return;
+    setBookBusy(true);
+    try {
+      const info = await exportPcsCardBook();
+      window.alert(
+        `Saved your card book: ${info.cards} cards over ${info.pages} pages ` +
+        `(${(info.bytes / 1e6).toFixed(0)} MB).\n\n` +
+        "Keep it in your phone's Files app and it works with no signal.",
+      );
+    } catch (err) {
+      window.alert(`Card book failed: ${err?.message || err}`);
+    } finally {
+      setBookBusy(false);
+    }
+  }
+
   return (
     <>
       <div
@@ -67,6 +87,18 @@ export default function PcsMenuItems({ itemClassName }) {
         style={{ cursor: "default", opacity: 0.75, fontSize: 12, lineHeight: 1.4 }}
       >
         {me?.email ? `Signed in as ${me.email}` : "Signed in"}
+      </div>
+
+      {/* Offline card book — a large download, so best done on wifi. */}
+      <div
+        className={itemClassName}
+        role="button"
+        tabIndex={0}
+        onClick={handleCardBook}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleCardBook(); }}
+        style={{ cursor: bookBusy ? "default" : "pointer" }}
+      >
+        {bookBusy ? "Building card book…" : "Download card book (PDF)"}
       </div>
 
       {/* One-time migration off the old browser-local /guest/ tier. */}

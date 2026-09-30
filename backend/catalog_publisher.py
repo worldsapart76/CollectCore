@@ -251,6 +251,23 @@ def publish_pending(limit: Optional[int] = None) -> dict:
                 )
                 pending_writes.append((hosted_url, att_id))
 
+                # Keep the offline card book's thumbnail cache warm while the
+                # bytes are already in hand — otherwise the next book build
+                # would fetch this image back out of R2 just to shrink it.
+                # Fronts only: the book has no backs. Never fatal; a miss just
+                # means Build Thumbnails picks it up later.
+                if atype == "front":
+                    try:
+                        from pdf_thumbs import make_thumb_bytes, thumb_path
+
+                        dest = thumb_path(item_id, hosted_url)
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        tmp = dest.with_suffix(".tmp")
+                        tmp.write_bytes(make_thumb_bytes(body))
+                        tmp.replace(dest)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("pdf thumb skipped item=%d: %s", item_id, exc)
+
             if not needs_assign and not pending_writes:
                 continue
 

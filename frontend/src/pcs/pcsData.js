@@ -162,3 +162,32 @@ export async function savePcsTradeDefaults(defaults) {
     "Failed to save trade defaults",
   );
 }
+
+/** Download this user's offline card book PDF — the catalog marked with their
+ *  own statuses, to carry where there's no signal. A POST returning a file
+ *  can't be driven by a plain link, so this fetches the body and clicks an
+ *  object URL, same as the admin export. */
+export async function exportPcsCardBook({ cardFilter = "all", page = "phone" } = {}) {
+  const res = await req(
+    "/pcs/export/photocard-book.pdf",
+    jsonBody("POST", { card_filter: cardFilter, page }),
+  );
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || "Failed to build card book");
+  }
+  const info = {
+    cards: Number(res.headers.get("X-Book-Cards")),
+    pages: Number(res.headers.get("X-Book-Pages")),
+  };
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `photocard_book_${new Date().toISOString().slice(0, 10)}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return { ...info, bytes: blob.size };
+}

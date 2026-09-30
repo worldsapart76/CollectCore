@@ -48,6 +48,14 @@ class PcsTradeCreate(BaseModel):
     catalog_item_ids: list[str] = []
 
 
+class PcsCardBookPayload(BaseModel):
+    """Options for the offline card book PDF. No user id: the caller's identity
+    comes from Cloudflare Access, never from the request body."""
+    member_ids: Optional[list[int]] = None
+    card_filter: str = "all"
+    page: str = "phone"
+
+
 class PcsTradeDefaults(BaseModel):
     # Field names avoid the Python `from` keyword; the frontend adapter maps
     # to/from its {from, to, notes} shape.

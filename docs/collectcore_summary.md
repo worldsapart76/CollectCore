@@ -281,8 +281,21 @@ its own query and never sees prices.
   copy notes, so a server-side "all trade copies" query would be blind to it).
   One row per distinct card that has ≥1 `trade` copy; unpriced cards export a
   blank price rather than being dropped. `utf-8-sig` for Excel on Windows.
+- POST /export/photocard-book.pdf — **offline card book**: the library as one
+  PDF to carry where there is no signal, bookmarked by member then source
+  origin, each card marked held (`owned`/`pending_incoming`) or not. Body
+  `{member_ids?, card_filter, page}`; `page` is `phone` (95×185mm, 3 columns,
+  the default in the UI) or `a4` (6 columns, for printing). Built from the
+  thumbnail cache, so it returns in seconds. `POST /pcs/export/photocard-book.pdf`
+  is the same generator scoped to one user's own `pcs_card_copies` and to
+  catalog cards. See `docs/photocard_offline_card_book_plan.md`.
+- POST /admin/build-pdf-thumbs — fills that thumbnail cache
+  (`DATA_ROOT/pdf_thumbs/`), chunked (`{limit, force}` → `{built, remaining}`)
+  because a full ~11.8k sweep cannot survive Cloudflare's ~100s proxy cap.
+  Driven by Admin → Offline Card Book Thumbnails.
 - ~~POST /export/photocards~~ — PDF export, retired 2026-05-09 in favor of
-  trade pages
+  trade pages (the card book above is a different thing: a whole-library
+  offline reference, not a per-card export)
 
 ### Books
 - GET /books

@@ -31,6 +31,10 @@ PHOTOCARDS_CODE = "photocards"
 
 HELD_CODES = ("owned", "pending_incoming")
 
+# Shared with the routers so admin and /pcs/ validate identically.
+CARD_FILTERS = ("all", "hide_not_wanted", "wanted_only", "owned_only")
+PAGE_SIZES = ("a4", "phone")
+
 @dataclass
 class Geometry:
     """Page shape and grid.
@@ -86,6 +90,8 @@ class BookOptions:
     # a4 = printable/desktop; phone = phone-shaped page, so fit-to-width in a
     # phone PDF viewer shows tiles big enough to identify a card.
     page: str = "a4"
+    # /pcs/ users only see committed catalog cards; admin also sees drafts.
+    catalog_only: bool = False
     title: str = "Photocard Card Book"
 
 
@@ -114,8 +120,13 @@ class Card:
 
 # ---------- data ----------
 
-def load_cards(conn, statuses: dict[int, set]) -> tuple[list[Card], dict[int, list], list[tuple]]:
-    """Returns (cards, members_by_item, members) using a raw sqlite3 connection."""
+def load_cards(conn, statuses: dict[int, set],
+               catalog_only: bool = False) -> tuple[list[Card], dict[int, list], list[tuple]]:
+    """Returns (cards, members_by_item, members) using a raw sqlite3 connection.
+
+    `catalog_only` scopes to committed catalog cards, which is what /pcs/ users
+    can see; the admin book also includes not-yet-published drafts.
+    """
     photocards_id = conn.execute(
         "SELECT collection_type_id FROM lkup_collection_types WHERE collection_type_code = ?",
         (PHOTOCARDS_CODE,),
@@ -132,6 +143,9 @@ def load_cards(conn, statuses: dict[int, set]) -> tuple[list[Card], dict[int, li
         LEFT JOIN lkup_photocard_source_origins so ON so.source_origin_id = p.source_origin_id
         LEFT JOIN tbl_attachments a ON a.item_id = i.item_id
         WHERE i.collection_type_id = ?
+        """
+        + ("  AND i.catalog_item_id IS NOT NULL\n" if catalog_only else "")
+        + """
         GROUP BY i.item_id
         """,
         (photocards_id,),
@@ -179,6 +193,29 @@ def load_admin_statuses(conn) -> dict[int, set]:
         FROM tbl_photocard_copies c
         JOIN lkup_ownership_statuses s ON s.ownership_status_id = c.ownership_status_id
         """
+    ):
+        out.setdefault(item_id, set()).add(code)
+    return out
+
+
+def load_pcs_statuses(conn, user_id: int) -> dict[int, set]:
+    """Status codes per card from ONE /pcs/ user's own copies.
+
+    pcs_card_copies is keyed by catalog_item_id (the stable cross-tier
+    contract), so it joins back to item_id here rather than the generator
+    knowing anything about tiers. Scoped to the caller's user_id — never a
+    client-supplied one.
+    """
+    out: dict[int, set] = {}
+    for item_id, code in conn.execute(
+        """
+        SELECT i.item_id, s.status_code
+        FROM pcs_card_copies p
+        JOIN tbl_items i ON i.catalog_item_id = p.catalog_item_id
+        JOIN lkup_ownership_statuses s ON s.ownership_status_id = p.ownership_status_id
+        WHERE p.user_id = ?
+        """,
+        (user_id,),
     ):
         out.setdefault(item_id, set()).add(code)
     return out
@@ -398,7 +435,7 @@ def build_book(conn, statuses: dict[int, set], options: Optional[BookOptions] = 
     from fpdf import FPDF
 
     options = options or BookOptions()
-    cards, members_by_item, members = load_cards(conn, statuses)
+    cards, members_by_item, members = load_cards(conn, statuses, options.catalog_only)
     okeys = origin_order(conn)
 
     cards = [c for c in cards if _keep(c, options.card_filter)]

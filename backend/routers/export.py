@@ -339,11 +339,17 @@ def export_photocard_book(payload: CardBookPayload):
     See docs/photocard_offline_card_book_plan.md.
     """
     from db import raw_connect
-    from pdf_card_book import BookOptions, build_book, load_admin_statuses
+    from pdf_card_book import (
+        CARD_FILTERS,
+        PAGE_SIZES,
+        BookOptions,
+        build_book,
+        load_admin_statuses,
+    )
 
-    if payload.card_filter not in ("all", "hide_not_wanted", "wanted_only", "owned_only"):
+    if payload.card_filter not in CARD_FILTERS:
         raise HTTPException(status_code=400, detail="Unknown card_filter.")
-    if payload.page not in ("a4", "phone"):
+    if payload.page not in PAGE_SIZES:
         raise HTTPException(status_code=400, detail="Unknown page size.")
 
     conn = raw_connect()

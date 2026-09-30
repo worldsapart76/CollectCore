@@ -168,8 +168,14 @@ and generate on wifi.
 2. ~~**Generator + admin endpoint + modal.**~~ **Done 2026-09-29.** Options are
    card filter + page size; member selection is supported by the endpoint
    (`member_ids`) but not exposed, since the decision was one book for everyone.
-3. **Hook into Publish Photocard Images** so the cache stays warm.
-4. **`/pcs/` endpoint + menu entry.** After the trip.
+3. ~~**Hook into Publish Photocard Images.**~~ **Done 2026-09-29** —
+   `catalog_publisher.publish_pending` writes the thumbnail from the bytes it
+   already resized, so publishing never leaves the cache cold. Fronts only;
+   failures are logged, never fatal (Build Thumbnails picks them up).
+4. ~~**`/pcs/` endpoint + menu entry.**~~ **Done 2026-09-29** —
+   `POST /pcs/export/photocard-book.pdf` + "Download card book (PDF)" in the
+   /pcs/ menu. Same generator; only the status source differs, scoped to the
+   caller's `user_id` from Cloudflare Access and to catalog cards.
 
 ## Gotchas
 

@@ -14,12 +14,14 @@ import json
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 
 from auth import is_admin, require_user
 from constants import PHOTOCARD_COLLECTION_TYPE_ID
 from dependencies import get_db
 from schemas.pcs import (
+    PcsCardBookPayload,
     PcsCopyCreate,
     PcsCopyUpdate,
     PcsGuestBackupImport,
@@ -820,3 +822,71 @@ def pcs_put_trade_defaults(
     )
     db.commit()
     return {"ok": True}
+
+
+# ---------- Offline card book (PDF) ----------
+
+
+@router.post("/export/photocard-book.pdf")
+def pcs_export_photocard_book(
+    payload: PcsCardBookPayload,
+    email: str = Depends(require_user),
+    db=Depends(get_db),
+):
+    """
+    This user's own offline card book: the catalog as one PDF, marked with
+    THEIR statuses, to carry where there is no signal.
+
+    Same generator as the admin book (backend/pdf_card_book.py) — only the
+    status source differs, and it is scoped to the caller's user_id resolved
+    from Cloudflare Access. Catalog cards only: admin drafts are not theirs to
+    see. See docs/photocard_offline_card_book_plan.md.
+    """
+    from datetime import datetime
+
+    from db import raw_connect
+    from pdf_card_book import (
+        CARD_FILTERS,
+        PAGE_SIZES,
+        BookOptions,
+        build_book,
+        load_pcs_statuses,
+    )
+
+    if payload.card_filter not in CARD_FILTERS:
+        raise HTTPException(status_code=400, detail="Unknown card_filter.")
+    if payload.page not in PAGE_SIZES:
+        raise HTTPException(status_code=400, detail="Unknown page size.")
+
+    user_id = _get_or_create_user(db, email)
+
+    conn = raw_connect()
+    try:
+        statuses = load_pcs_statuses(conn, user_id)
+        data, summary = build_book(
+            conn,
+            statuses,
+            BookOptions(
+                member_ids=payload.member_ids,
+                card_filter=payload.card_filter,
+                page=payload.page,
+                catalog_only=True,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Card book failed: {exc}")
+    finally:
+        conn.close()
+
+    filename = f"photocard_book_{datetime.now().strftime('%Y%m%d')}.pdf"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Length": str(len(data)),
+            "X-Book-Cards": str(summary["cards"]),
+            "X-Book-Pages": str(summary["pages"]),
+            "X-Book-Missing-Thumbs": str(summary["missing_thumbs"]),
+        },
+    )
