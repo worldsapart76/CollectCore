@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import Modal from "../primitives/Modal";
 import { bulkUpdatePhotocards, createPhotocardCopy } from "../../api";
+import { originLabel } from "../photocard/photocardFiltering";
 
 /**
  * Offer to mark placed-but-uncollected cards as Wanted, after a binder save.
@@ -111,7 +112,7 @@ export default function WantedSweepModal({
           <li key={card.item_id} style={styles.listItem}>
             {card.members?.join(", ") || `#${card.item_id}`}
             <span style={styles.sub}>
-              {[card.source_origin, card.version].filter(Boolean).join(" · ")}
+              {[originLabel(card), card.version].filter(Boolean).join(" · ")}
             </span>
           </li>
         ))}

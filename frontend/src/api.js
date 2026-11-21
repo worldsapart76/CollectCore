@@ -152,6 +152,16 @@ export async function fetchPhotocardSourceOrigins(groupId, categoryId) {
   return handleJsonResponse(res, "Failed to fetch photocard source origins");
 }
 
+// Every origin in a group across ALL categories, each with category_name --
+// feeds the "Also in" (secondary origin) pickers. Admin-only: /pcs/ and the
+// guest tier never edit cards.
+export async function fetchPhotocardGroupOrigins(groupId) {
+  const res = await fetch(
+    `${API}/photocards/source-origins?group_id=${encodeURIComponent(groupId)}`
+  );
+  return handleJsonResponse(res, "Failed to fetch photocard source origins");
+}
+
 export async function createPhotocardSourceOrigin({ groupId, categoryId, sourceOriginName }) {
   const res = await fetch(`${API}/photocards/source-origins`, {
     method: "POST",
@@ -220,17 +230,20 @@ export async function updatePhotocard(itemId, {
   version = null,
   memberIds,
   isSpecial = false,
+  secondaryOriginIds, // undefined = leave the card's secondaries untouched
 }) {
+  const body = {
+    top_level_category_id: topLevelCategoryId,
+    source_origin_id: sourceOriginId,
+    version,
+    member_ids: memberIds,
+    is_special: isSpecial,
+  };
+  if (secondaryOriginIds !== undefined) body.secondary_origin_ids = secondaryOriginIds;
   const res = await fetch(`${API}/photocards/${encodeURIComponent(itemId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      top_level_category_id: topLevelCategoryId,
-      source_origin_id: sourceOriginId,
-      version,
-      member_ids: memberIds,
-      is_special: isSpecial,
-    }),
+    body: JSON.stringify(body),
   });
   return handleJsonResponse(res, "Failed to update photocard");
 }

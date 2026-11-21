@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchPhotocardMembers,
   fetchPhotocardSourceOrigins,
+  fetchPhotocardGroupOrigins,
   fetchOwnershipStatuses,
   bulkUpdatePhotocards,
   bulkDeletePhotocards,
@@ -18,6 +19,8 @@ import { Modal } from "../primitives";
  *   - Category: always editable
  *   - Version: editable only if all selected cards share the same group
  *   - Members: editable only if all selected cards share the same group
+ *   - Also in (secondary origins): add or remove one origin; single group only,
+ *     but categories may be mixed -- secondaries cross categories on purpose
  *
  * Props:
  *   selectedCards  — array of photocard objects currently selected
@@ -61,6 +64,13 @@ export default function PhotocardBulkEdit({
 
   const [updateIsSpecial, setUpdateIsSpecial] = useState(false);
   const [bulkIsSpecial, setBulkIsSpecial] = useState(false);
+
+  // Secondary origins: add/remove ONE origin across the selection. Add/remove
+  // rather than replace -- the selected cards may hold different secondaries.
+  const [updateSecondary, setUpdateSecondary] = useState(false);
+  const [secondaryAction, setSecondaryAction] = useState("add"); // "add" | "remove"
+  const [secondaryOriginId, setSecondaryOriginId] = useState("");
+  const [groupOrigins, setGroupOrigins] = useState([]);
 
 
   const [saving, setSaving] = useState(false);
@@ -114,6 +124,30 @@ export default function PhotocardBulkEdit({
       .catch(() => {});
   }, [canEditSourceOrigin, sharedGroupId, sharedCategoryId]);
 
+  useEffect(() => {
+    if (!sharedGroupId) {
+      setGroupOrigins([]);
+      return;
+    }
+    fetchPhotocardGroupOrigins(sharedGroupId).then(setGroupOrigins).catch(() => {});
+  }, [sharedGroupId]);
+
+  // Remove offers only origins some selected card actually holds as a
+  // secondary; Add offers every origin in the group.
+  const secondaryOptions = useMemo(() => {
+    if (secondaryAction === "add") return groupOrigins;
+    const held = new Set(
+      selectedCards.flatMap((c) => (c.secondary_origins || []).map((o) => o.source_origin_id))
+    );
+    return groupOrigins.filter((o) => held.has(o.source_origin_id));
+  }, [secondaryAction, groupOrigins, selectedCards]);
+
+  useEffect(() => {
+    if (!secondaryOptions.some((o) => String(o.source_origin_id) === secondaryOriginId)) {
+      setSecondaryOriginId("");
+    }
+  }, [secondaryOptions, secondaryOriginId]);
+
   function toggleMember(memberId) {
     const id = String(memberId);
     setSelectedMemberIds((prev) =>
@@ -124,8 +158,14 @@ export default function PhotocardBulkEdit({
   async function handleSave() {
     setError("");
 
-    if (!updateOwnership && !updateCategory && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial) {
+    const doSecondary = updateSecondary && singleGroup;
+    if (!updateOwnership && !updateCategory && !updateVersion && !updateMembers && !updateSourceOrigin && !updateIsSpecial && !doSecondary) {
       setError("No fields selected to update.");
+      return;
+    }
+
+    if (doSecondary && !secondaryOriginId) {
+      setError("Choose an origin for Also in.");
       return;
     }
 
@@ -169,11 +209,23 @@ export default function PhotocardBulkEdit({
     if (updateIsSpecial) {
       fields.is_special = bulkIsSpecial;
     }
+    if (doSecondary) {
+      const key = secondaryAction === "add" ? "secondary_origins_add" : "secondary_origins_remove";
+      fields[key] = [Number(secondaryOriginId)];
+    }
 
     setSaving(true);
     try {
       const itemIds = selectedCards.map((c) => c.item_id);
-      await bulkUpdatePhotocards(itemIds, fields);
+      const result = await bulkUpdatePhotocards(itemIds, fields);
+      const skipped = result?.secondary_origins?.skipped || 0;
+      if (skipped > 0) {
+        // Not an error: those cards already have this origin as their primary.
+        window.alert(
+          `Also in: added to ${result.secondary_origins.added} card(s). ` +
+          `${skipped} skipped because it is already their source origin.`
+        );
+      }
       onSaved();
     } catch (err) {
       setError(err.message || "Failed to bulk update");
@@ -239,24 +291,43 @@ export default function PhotocardBulkEdit({
       {error && <div style={styles.errorBox}>{error}</div>}
 
       <div style={styles.body}>
-        {/* Ownership */}
+        {/* Card Type — first, as on the card modal (beside Group) */}
         <BulkRow
-          label="Ownership"
-          enabled={updateOwnership}
-          onToggle={() => setUpdateOwnership((p) => !p)}
+          label="Card Type"
+          enabled={updateIsSpecial}
+          onToggle={() => setUpdateIsSpecial((p) => !p)}
         >
-          <select
-            value={ownershipStatusId}
-            onChange={(e) => setOwnershipStatusId(e.target.value)}
-            style={styles.select}
-            disabled={!updateOwnership}
-          >
-            {ownershipStatuses.map((s) => (
-              <option key={s.ownership_status_id} value={s.ownership_status_id}>
-                {s.status_name}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
+            <button
+              type="button"
+              onClick={() => setBulkIsSpecial(false)}
+              style={{
+                padding: "3px 10px",
+                fontSize: "var(--text-sm)",
+                cursor: "pointer",
+                border: "none",
+                borderRight: "1px solid var(--border-input)",
+                background: !bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                color: !bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
+              }}
+            >
+              Regular
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkIsSpecial(true)}
+              style={{
+                padding: "3px 10px",
+                fontSize: "var(--text-sm)",
+                cursor: "pointer",
+                border: "none",
+                background: bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                color: bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
+              }}
+            >
+              ★ Special
+            </button>
+          </div>
         </BulkRow>
 
         {/* Category */}
@@ -277,6 +348,82 @@ export default function PhotocardBulkEdit({
               </option>
             ))}
           </select>
+        </BulkRow>
+
+        {/* Source Origin — requires single group + single category */}
+        <BulkRow
+          label="Source Origin"
+          enabled={updateSourceOrigin && canEditSourceOrigin}
+          onToggle={() => canEditSourceOrigin && setUpdateSourceOrigin((p) => !p)}
+          disabled={!canEditSourceOrigin}
+          disabledReason="Requires all cards to share the same group and category"
+        >
+          <select
+            value={sourceOriginId}
+            onChange={(e) => setSourceOriginId(e.target.value)}
+            style={styles.select}
+            disabled={!updateSourceOrigin}
+          >
+            <option value="0">— None —</option>
+            {sourceOrigins.map((o) => (
+              <option key={o.source_origin_id} value={o.source_origin_id}>
+                {o.source_origin_name}
+              </option>
+            ))}
+          </select>
+        </BulkRow>
+
+        {/* Also in (secondary origins) — single group, any categories */}
+        <BulkRow
+          label="Also in"
+          enabled={updateSecondary && singleGroup}
+          onToggle={() => singleGroup && setUpdateSecondary((p) => !p)}
+          disabled={!singleGroup}
+          disabledReason="Requires all cards to be from the same group"
+        >
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
+              {["add", "remove"].map((action, i) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={() => setSecondaryAction(action)}
+                  style={{
+                    padding: "3px 10px",
+                    fontSize: "var(--text-sm)",
+                    cursor: "pointer",
+                    border: "none",
+                    borderRight: i === 0 ? "1px solid var(--border-input)" : "none",
+                    background: secondaryAction === action ? "var(--btn-primary-bg)" : "var(--bg-surface)",
+                    color: secondaryAction === action ? "var(--btn-primary-text)" : "var(--text-primary)",
+                  }}
+                >
+                  {action === "add" ? "Add" : "Remove"}
+                </button>
+              ))}
+            </div>
+            <select
+              value={secondaryOriginId}
+              onChange={(e) => setSecondaryOriginId(e.target.value)}
+              style={{ ...styles.select, width: "auto", flex: 1, minWidth: 140 }}
+            >
+              <option value="">
+                {secondaryOptions.length ? "— Choose origin —" : "— None on these cards —"}
+              </option>
+              {groupByCategory(secondaryOptions, sharedCategoryId).map((g) => (
+                <optgroup key={g.id} label={g.name}>
+                  {g.items.map((o) => (
+                    <option key={o.source_origin_id} value={o.source_origin_id}>
+                      {o.source_origin_name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div style={styles.hint}>
+            Cards show up under this origin too, without being duplicated.
+          </div>
         </BulkRow>
 
         {/* Version — single group only */}
@@ -320,71 +467,48 @@ export default function PhotocardBulkEdit({
           </div>
         </BulkRow>
 
-        {/* Source Origin — requires single group + single category */}
+        {/* Ownership — last, matching the card modal where Copies close the form */}
         <BulkRow
-          label="Source Origin"
-          enabled={updateSourceOrigin && canEditSourceOrigin}
-          onToggle={() => canEditSourceOrigin && setUpdateSourceOrigin((p) => !p)}
-          disabled={!canEditSourceOrigin}
-          disabledReason="Requires all cards to share the same group and category"
+          label="Ownership"
+          enabled={updateOwnership}
+          onToggle={() => setUpdateOwnership((p) => !p)}
         >
           <select
-            value={sourceOriginId}
-            onChange={(e) => setSourceOriginId(e.target.value)}
+            value={ownershipStatusId}
+            onChange={(e) => setOwnershipStatusId(e.target.value)}
             style={styles.select}
-            disabled={!updateSourceOrigin}
+            disabled={!updateOwnership}
           >
-            <option value="0">— None —</option>
-            {sourceOrigins.map((o) => (
-              <option key={o.source_origin_id} value={o.source_origin_id}>
-                {o.source_origin_name}
+            {ownershipStatuses.map((s) => (
+              <option key={s.ownership_status_id} value={s.ownership_status_id}>
+                {s.status_name}
               </option>
             ))}
           </select>
         </BulkRow>
 
-        {/* Card Type */}
-        <BulkRow
-          label="Card Type"
-          enabled={updateIsSpecial}
-          onToggle={() => setUpdateIsSpecial((p) => !p)}
-        >
-          <div style={{ display: "flex", border: "1px solid var(--border-input)", borderRadius: "var(--radius-sm)", overflow: "hidden", width: "fit-content" }}>
-            <button
-              type="button"
-              onClick={() => setBulkIsSpecial(false)}
-              style={{
-                padding: "3px 10px",
-                fontSize: "var(--text-sm)",
-                cursor: "pointer",
-                border: "none",
-                borderRight: "1px solid var(--border-input)",
-                background: !bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
-                color: !bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
-              }}
-            >
-              Regular
-            </button>
-            <button
-              type="button"
-              onClick={() => setBulkIsSpecial(true)}
-              style={{
-                padding: "3px 10px",
-                fontSize: "var(--text-sm)",
-                cursor: "pointer",
-                border: "none",
-                background: bulkIsSpecial ? "var(--btn-primary-bg)" : "var(--bg-surface)",
-                color: bulkIsSpecial ? "var(--btn-primary-text)" : "var(--text-primary)",
-              }}
-            >
-              ★ Special
-            </button>
-          </div>
-        </BulkRow>
-
       </div>
     </Modal>
   );
+}
+
+/** Rows arrive ordered by category from the endpoint; bucket them for
+ *  <optgroup>. With `awayFromCategoryId` (the selection's shared category) the
+ *  OTHER categories come first -- the usual "also in" is the opposite kind
+ *  (album <-> tour), and listing the cards' own category first buried it. */
+function groupByCategory(origins, awayFromCategoryId) {
+  const out = [];
+  for (const o of origins) {
+    const last = out[out.length - 1];
+    if (last && last.id === o.top_level_category_id) last.items.push(o);
+    else out.push({ id: o.top_level_category_id, name: o.category_name, items: [o] });
+  }
+  if (awayFromCategoryId == null) return out;
+  const away = String(awayFromCategoryId);
+  return [
+    ...out.filter((g) => String(g.id) !== away),
+    ...out.filter((g) => String(g.id) === away),
+  ];
 }
 
 function BulkRow({ label, enabled, onToggle, disabled, disabledReason, children }) {

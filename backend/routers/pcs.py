@@ -144,6 +144,33 @@ def pcs_photocards(email: str = Depends(require_user), db=Depends(get_db)):
         m = r._mapping
         members_by_item.setdefault(m["item_id"], []).append(m["member_name"])
 
+    # Secondary source origins per item_id -- same shape as admin's
+    # _attach_secondary_origins, so the shared filtering code sees one format.
+    ph, params = _in_clause(item_ids, "it")
+    secondary_by_item: dict = {}
+    for r in db.execute(
+        text(
+            f"""
+            SELECT x.item_id, so.source_origin_id, so.source_origin_name,
+                   so.top_level_category_id, c.category_name
+            FROM xref_photocard_secondary_origins x
+            JOIN lkup_photocard_source_origins so ON so.source_origin_id = x.source_origin_id
+            LEFT JOIN lkup_top_level_categories c
+                   ON c.top_level_category_id = so.top_level_category_id
+            WHERE x.item_id IN ({ph})
+            ORDER BY so.source_origin_name
+            """
+        ),
+        params,
+    ):
+        m = r._mapping
+        secondary_by_item.setdefault(m["item_id"], []).append({
+            "source_origin_id": m["source_origin_id"],
+            "source_origin_name": m["source_origin_name"],
+            "top_level_category_id": m["top_level_category_id"],
+            "category_name": m["category_name"],
+        })
+
     # Front/back image URLs per item_id.
     ph, params = _in_clause(item_ids, "it")
     atts_by_item: dict = {}
@@ -217,6 +244,7 @@ def pcs_photocards(email: str = Depends(require_user), db=Depends(get_db)):
             "notes": r["notes"],
             "source_origin_id": r["source_origin_id"],
             "source_origin": r["source_origin"],
+            "secondary_origins": secondary_by_item.get(r["item_id"], []),
             "version": r["version"],
             "members": members_by_item.get(r["item_id"], []),
             "front_image_path": att.get("front"),

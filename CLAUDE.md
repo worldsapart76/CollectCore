@@ -50,6 +50,12 @@ live in `docs/collectcore_summary.md` → Key Schema Decisions / Known Shortcuts
   date all 11,323 cards. `start_date` means *when the line started shipping*
   (tours and collab series span months), not a release date. Age is a **prior
   where comps are thin, never an override of a real comp**.
+- A photocard has **one primary origin** (`source_origin_id`) plus optional
+  **secondary origins** (`xref_photocard_secondary_origins`) — for tour sets
+  whose backs read an album. Filtering, search, display and the card book treat
+  them all as membership; **sort, trade captions/CSV and market stay
+  primary-only.** Writes go through the helpers in `routers/photocards.py`
+  (no self-reference, same group). See the plan doc.
 - **Nothing new goes on `tbl_photocard_details`** without checking the guest
   paths: `catalog.py` (`SELECT *`) and `seed_builder.py` (PRAGMA-driven copy)
   reflect that table, so a new column ships to the catalog delta and the guest
@@ -112,6 +118,7 @@ high-efficiency batch actions, two-panel layout (left filter sidebar + content).
 | `docs/image_handling.md` | Photocard image pipeline, R2 conventions, render helpers |
 | `docs/photocard_triage_statuses_plan.md` | **Authoritative** — Undecided/Not Wanted triage statuses: decision-vs-possession split, co-occurrence rules, sweep semantics |
 | `docs/photocard_binder_designer_plan.md` | **Authoritative** — Binder Designer: layouts, spread/mirroring, one-binder-per-card rule, fit-to-space sizing, Wanted sweep |
+| `docs/photocard_secondary_source_origins_plan.md` | **Authoritative** — a card in two source origins (primary + "Also in"): model, invariants, what stays primary-only |
 | `docs/photocard_market_library_integration_plan.md` | **Authoritative** — money vocabulary (cost / list price / sell price / net proceeds), library↔market integration, price-tier removal, open defects |
 | `docs/photocard_pricing_and_trade_export_plan.md` | **Superseded** — price tiers removed 2026-08-31. Still the reference for trade CSV export + Mercari title rules |
 | `docs/new_module_checklist.md` | Reference-only checklist if a new module is ever added |

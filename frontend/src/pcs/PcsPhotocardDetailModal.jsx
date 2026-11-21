@@ -312,6 +312,12 @@ export default function PcsPhotocardDetailModal({
             <Field label="Member" value={currentCard.members.join(", ")} />
           )}
           {currentCard?.source_origin && <Field label="Source" value={currentCard.source_origin} />}
+          {(currentCard?.secondary_origins?.length || 0) > 0 && (
+            <Field
+              label="Also in"
+              value={currentCard.secondary_origins.map((o) => o.source_origin_name).join(", ")}
+            />
+          )}
           {currentCard?.version && <Field label="Version" value={currentCard.version} />}
           {currentCard?.is_special && <Field label="Type" value="Special" />}
         </div>

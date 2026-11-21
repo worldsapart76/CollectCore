@@ -29,6 +29,20 @@
   - member_id
 - Replaces single-member field
 
+### xref_photocard_secondary_origins
+- A card's **secondary** source origins — origins it is ALSO in, beyond its
+  primary (`tbl_photocard_details.source_origin_id`). Built for Non-Album tour
+  sets whose backs read an album (Dominate cards also in Hollow).
+- Fields: item_id, source_origin_id — `UNIQUE (item_id, source_origin_id)`
+- Side table on purpose: `catalog.py` / `seed_builder.py` never see it, so the
+  frozen WASM `/guest/` tier doesn't get it; `/pcs/` reads it live
+- API invariants: never holds the card's own primary; same group as the card
+  (category unrestricted); a primary moved onto a secondary drops that row;
+  lookup merge strips any resulting self-reference
+- Filtering / search / display / card book: card is in every origin. Sort,
+  trade captions, trade CSV, market: primary only.
+  See `docs/photocard_secondary_source_origins_plan.md`
+
 ### lkup_collection_types
 - New lookup
 - Examples: photocard, book
@@ -224,19 +238,28 @@ All three collection modules are fully implemented.
 - PUT /settings/{key}
 
 ### Photocards
-- GET /photocards
+- GET /photocards — each card carries `secondary_origins:
+  [{source_origin_id, source_origin_name, top_level_category_id, category_name}]`
+  (also on GET /photocards/{id} and the `/pcs/` card list)
 - POST /photocards
 - GET /photocards/{id}
-- PUT /photocards/{id}
+- PUT /photocards/{id} — optional `secondary_origin_ids`: omitted = leave the
+  card's secondaries alone, a list = replace them (cross-group id → 400)
 - DELETE /photocards/{id}
 - PATCH /photocards/bulk — ownership changes are row-scoped to the decision row;
   response adds `ownership: {updated, skipped}` when ownership was in the payload,
   and `pricing: {updated, replaced_custom}` when `price_tier_id` was
   (`price_tier_id: 0` unprices, matching the `source_origin_id > 0` sentinel)
+  Also `secondary_origins_add` / `secondary_origins_remove` (lists of origin
+  ids; add/remove, never replace) → response `secondary_origins: {added,
+  removed, skipped}` (skipped = the origin is already that card's primary, or
+  in another group)
 - POST /photocards/bulk-delete
 - GET /photocards/groups
 - GET /photocards/groups/{group_id}/members
-- GET /photocards/source-origins
+- GET /photocards/source-origins — `?group_id&category_id`; omit
+  `category_id` for every active origin in the group across categories, each
+  with `top_level_category_id` + `category_name` (the "Also in" pickers)
 - POST /photocards/source-origins
 - PUT /photocards/{id}/price — `{price_cents}` sets a **custom** price and
   clears the tier; `null` unprices. Separate from PUT /photocards/{id} because
@@ -317,6 +340,9 @@ its own query and never sees prices.
 - `member` is no longer a scalar field — stored in `xref_photocard_members`
 - Categories and ownership resolve through shared lookup tables
 - Source origins are scoped by `group_id` + `top_level_category_id`
+- A card has ONE primary origin (`source_origin_id`) plus optional secondary
+  origins (`xref_photocard_secondary_origins`). It is found under all of them;
+  anything needing one answer (sort, captions, market, ship date) uses the primary
 - `format` field: module-specific (not on `tbl_items`). Each module handles
   format via its own copy/edition sub-table or field.
 - Tags: book-specific tags implemented (`lkup_book_tags`). Cross-collection

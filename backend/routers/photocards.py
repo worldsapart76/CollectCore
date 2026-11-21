@@ -67,6 +67,167 @@ def _attach_copies(db, cards):
     return cards
 
 
+# ---------- Secondary source origins ----------
+# A card's primary origin is tbl_photocard_details.source_origin_id; any further
+# origins it is ALSO found under live in xref_photocard_secondary_origins.
+# Invariants (the DB can't express them, so every write path goes through here):
+#   1. a card's secondary list never contains its own primary;
+#   2. moving the primary onto a current secondary deletes that secondary row;
+#   3. a secondary must be in the card's group (category is unrestricted --
+#      Non-Album tour set <-> Album is the whole point).
+# See docs/photocard_secondary_source_origins_plan.md.
+
+def _attach_secondary_origins(db, cards):
+    """Attach `secondary_origins` (sorted by name) to card dicts in-place."""
+    if not cards:
+        return cards
+    placeholders = ",".join(str(int(c["item_id"])) for c in cards)
+    rows = db.execute(
+        text(f"""
+            SELECT x.item_id, so.source_origin_id, so.source_origin_name,
+                   so.top_level_category_id, c.category_name
+            FROM xref_photocard_secondary_origins x
+            JOIN lkup_photocard_source_origins so
+                ON so.source_origin_id = x.source_origin_id
+            LEFT JOIN lkup_top_level_categories c
+                ON c.top_level_category_id = so.top_level_category_id
+            WHERE x.item_id IN ({placeholders})
+            ORDER BY so.source_origin_name
+        """)
+    ).fetchall()
+    by_item = {}
+    for r in rows:
+        by_item.setdefault(r[0], []).append({
+            "source_origin_id": r[1],
+            "source_origin_name": r[2],
+            "top_level_category_id": r[3],
+            "category_name": r[4],
+        })
+    for card in cards:
+        card["secondary_origins"] = by_item.get(card["item_id"], [])
+    return cards
+
+
+def _origin_groups(db, origin_ids):
+    """{source_origin_id: group_id}; raises 400 on any unknown id."""
+    ids = sorted({int(o) for o in origin_ids})
+    if not ids:
+        return {}
+    placeholders = ",".join(str(i) for i in ids)
+    rows = db.execute(
+        text(f"""
+            SELECT source_origin_id, group_id
+            FROM lkup_photocard_source_origins
+            WHERE source_origin_id IN ({placeholders})
+        """)
+    ).fetchall()
+    found = {r[0]: r[1] for r in rows}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Unknown source origin id(s): {missing}")
+    return found
+
+
+def _card_group_and_primary(db, item_ids):
+    """{item_id: (group_id, primary source_origin_id)}"""
+    if not item_ids:
+        return {}
+    placeholders = ",".join(str(int(i)) for i in item_ids)
+    rows = db.execute(
+        text(f"""
+            SELECT item_id, group_id, source_origin_id
+            FROM tbl_photocard_details
+            WHERE item_id IN ({placeholders})
+        """)
+    ).fetchall()
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def _drop_promoted_secondaries(db, item_ids):
+    """Invariant 2: delete any secondary row that now equals the card's primary."""
+    if not item_ids:
+        return
+    placeholders = ",".join(str(int(i)) for i in item_ids)
+    db.execute(
+        text(f"""
+            DELETE FROM xref_photocard_secondary_origins
+            WHERE item_id IN ({placeholders})
+              AND source_origin_id = (
+                  SELECT d.source_origin_id FROM tbl_photocard_details d
+                  WHERE d.item_id = xref_photocard_secondary_origins.item_id
+              )
+        """)
+    )
+
+
+def _replace_secondary_origins(db, item_id: int, origin_ids):
+    """Single-card replace (detail modal). Cross-group ids are a 400 -- the UI
+    never offers them, so getting one means a bug worth surfacing. The card's
+    own primary is dropped silently (invariant 1)."""
+    groups = _origin_groups(db, origin_ids)
+    group_id, primary_id = _card_group_and_primary(db, [item_id]).get(item_id, (None, None))
+    wrong_group = sorted(o for o, g in groups.items() if g != group_id)
+    if wrong_group:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Source origin(s) {wrong_group} belong to a different group than this card.",
+        )
+    db.execute(
+        text("DELETE FROM xref_photocard_secondary_origins WHERE item_id = :item_id"),
+        {"item_id": item_id},
+    )
+    for origin_id in sorted(groups):
+        if origin_id == primary_id:
+            continue
+        db.execute(
+            text("""
+                INSERT OR IGNORE INTO xref_photocard_secondary_origins (item_id, source_origin_id)
+                VALUES (:item_id, :origin_id)
+            """),
+            {"item_id": item_id, "origin_id": origin_id},
+        )
+
+
+def _bulk_add_secondary_origins(db, item_ids, origin_ids):
+    """Returns (added, skipped) counted in card-origin pairs. A pair is skipped
+    when the origin is the card's primary or is in another group; a pair that
+    already exists is neither (INSERT OR IGNORE, counted in neither bucket)."""
+    groups = _origin_groups(db, origin_ids)
+    cards = _card_group_and_primary(db, item_ids)
+    added = skipped = 0
+    for item_id in item_ids:
+        group_id, primary_id = cards.get(item_id, (None, None))
+        for origin_id, origin_group in groups.items():
+            if origin_id == primary_id or origin_group != group_id:
+                skipped += 1
+                continue
+            result = db.execute(
+                text("""
+                    INSERT OR IGNORE INTO xref_photocard_secondary_origins (item_id, source_origin_id)
+                    VALUES (:item_id, :origin_id)
+                """),
+                {"item_id": item_id, "origin_id": origin_id},
+            )
+            added += result.rowcount or 0
+    return added, skipped
+
+
+def _bulk_remove_secondary_origins(db, item_ids, origin_ids):
+    """Returns the number of card-origin pairs removed."""
+    ids = sorted({int(o) for o in origin_ids})
+    if not item_ids or not ids:
+        return 0
+    item_ph = ",".join(str(int(i)) for i in item_ids)
+    origin_ph = ",".join(str(i) for i in ids)
+    result = db.execute(
+        text(f"""
+            DELETE FROM xref_photocard_secondary_origins
+            WHERE item_id IN ({item_ph}) AND source_origin_id IN ({origin_ph})
+        """)
+    )
+    return result.rowcount or 0
+
+
 _PHOTOCARD_SELECT = """
     SELECT
         i.item_id,
@@ -134,6 +295,7 @@ def _get_photocard(db, item_id: int):
         return None
     card = _photocard_row_to_dict(row)
     _attach_copies(db, [card])
+    _attach_secondary_origins(db, [card])
     return card
 
 
@@ -316,6 +478,7 @@ def list_photocards(db=Depends(get_db)):
     ).fetchall()
     cards = [_photocard_row_to_dict(row) for row in result]
     _attach_copies(db, cards)
+    _attach_secondary_origins(db, cards)
     return cards
 
 
@@ -335,6 +498,7 @@ def get_photocard(item_id: int, db=Depends(get_db)):
 
     card = _photocard_row_to_dict(row)
     _attach_copies(db, [card])
+    _attach_secondary_origins(db, [card])
     return card
 
 
@@ -457,6 +621,12 @@ def update_photocard(item_id: int, payload: PhotocardUpdate, db=Depends(get_db))
         },
     )
 
+    # Primary may have moved onto a current secondary (invariant 2) -- runs
+    # even when the caller didn't send secondary_origin_ids.
+    if payload.secondary_origin_ids is not None:
+        _replace_secondary_origins(db, item_id, payload.secondary_origin_ids)
+    _drop_promoted_secondaries(db, [item_id])
+
     db.execute(
         text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
         {"item_id": item_id},
@@ -497,6 +667,10 @@ def delete_photocard(item_id: int, db=Depends(get_db)):
     )
     db.execute(
         text("DELETE FROM xref_photocard_members WHERE item_id = :item_id"),
+        {"item_id": item_id},
+    )
+    db.execute(
+        text("DELETE FROM xref_photocard_secondary_origins WHERE item_id = :item_id"),
         {"item_id": item_id},
     )
     db.execute(
@@ -638,6 +812,21 @@ def bulk_update_photocards(payload: BulkUpdatePayload, db=Depends(get_db)):
                 {**details_params, "item_id": item_id},
             )
 
+    # Secondary origins. Primary changes land first (above), so the add below
+    # checks against the NEW primary, and a primary moved onto a current
+    # secondary drops that row (invariant 2).
+    if f.source_origin_id is not None:
+        _drop_promoted_secondaries(db, payload.item_ids)
+
+    secondary_result = None
+    if f.secondary_origins_add or f.secondary_origins_remove:
+        added = skipped = removed = 0
+        if f.secondary_origins_remove:
+            removed = _bulk_remove_secondary_origins(db, payload.item_ids, f.secondary_origins_remove)
+        if f.secondary_origins_add:
+            added, skipped = _bulk_add_secondary_origins(db, payload.item_ids, f.secondary_origins_add)
+        secondary_result = {"added": added, "removed": removed, "skipped": skipped}
+
     # Replace member associations
     if f.member_ids is not None:
         for item_id in payload.item_ids:
@@ -659,6 +848,8 @@ def bulk_update_photocards(payload: BulkUpdatePayload, db=Depends(get_db)):
     response = {"item_ids": payload.item_ids, "status": "updated", "count": len(payload.item_ids)}
     if ownership_result is not None:
         response["ownership"] = ownership_result
+    if secondary_result is not None:
+        response["secondary_origins"] = secondary_result
     return response
 
 
@@ -695,6 +886,7 @@ def bulk_delete_photocards(payload: BulkDeletePayload, db=Depends(get_db)):
         all_files.extend(delete_attachment_files(db, item_id))
         db.execute(text("DELETE FROM tbl_photocard_copies WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM xref_photocard_members WHERE item_id = :id"), {"id": item_id})
+        db.execute(text("DELETE FROM xref_photocard_secondary_origins WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_attachments WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_photocard_details WHERE item_id = :id"), {"id": item_id})
         db.execute(text("DELETE FROM tbl_items WHERE item_id = :id"), {"id": item_id})
