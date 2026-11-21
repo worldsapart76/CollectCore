@@ -113,6 +113,11 @@ class Card:
     origin_name: str
     front_path: Optional[str]
     codes: set = field(default_factory=set)
+    # (source_origin_id, name) for every origin the card is ALSO in. The card
+    # is repeated under each of them, the same way a unit card repeats under
+    # each member: the book is used while holding the card, and the back is
+    # what you're holding.
+    secondary_origins: list = field(default_factory=list)
 
     @property
     def held(self) -> bool:
@@ -172,6 +177,26 @@ def load_cards(conn, statuses: dict[int, set],
         )
         for r in rows
     ]
+
+    # Guarded: a DB that predates the table (schema.sql not yet applied) has
+    # no secondaries to show.
+    has_secondary = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='xref_photocard_secondary_origins' LIMIT 1"
+    ).fetchone()
+    if has_secondary:
+        by_id = {c.item_id: c for c in cards}
+        for item_id, oid, name in conn.execute(
+            """
+            SELECT x.item_id, so.source_origin_id, so.source_origin_name
+            FROM xref_photocard_secondary_origins x
+            JOIN lkup_photocard_source_origins so ON so.source_origin_id = x.source_origin_id
+            ORDER BY so.source_origin_name
+            """
+        ):
+            card = by_id.get(item_id)
+            if card is not None and oid != card.origin_id:
+                card.secondary_origins.append((oid, name))
 
     members = conn.execute(
         """
@@ -490,18 +515,27 @@ def build_book(conn, statuses: dict[int, set], options: Optional[BookOptions] = 
         book.new_page()
         pdf.start_section(_safe(member_name), level=0, strict=False)
 
+        # A card lands in its primary origin's group AND each secondary's.
+        # Band names come from this map, not rows[0]: in a secondary's group
+        # the first card's own origin_name is its primary, the wrong label.
         groups: dict[Optional[int], list[Card]] = {}
+        origin_names: dict[Optional[int], str] = {}
         for c in items:
             groups.setdefault(c.origin_id, []).append(c)
+            origin_names.setdefault(c.origin_id, c.origin_name)
+            for sid, sname in c.secondary_origins:
+                groups.setdefault(sid, []).append(c)
+                origin_names.setdefault(sid, sname)
 
         def gkey(oid):
             return okeys.get(oid, (2, "", 0, "")) if oid is not None else (2, "", 0, "")
 
         for oid in sorted(groups, key=gkey):
             rows = sorted(groups[oid], key=lambda c: ((c.version or "").lower(), c.item_id))
+            band_name = origin_names[oid]
             book.section = member_name
-            book.origin_band(rows[0].origin_name, len(rows))
-            pdf.start_section(_safe(rows[0].origin_name), level=1, strict=False)
+            book.origin_band(band_name, len(rows))
+            pdf.start_section(_safe(band_name), level=1, strict=False)
             for c in rows:
                 book.tile(c, is_unit=len(members_by_item.get(c.item_id, [])) > 1)
                 tiles += 1
@@ -510,7 +544,8 @@ def build_book(conn, statuses: dict[int, set], options: Optional[BookOptions] = 
     out = bytes(pdf.output())
     return out, {
         # Distinct cards in the book; `tiles` is higher because a unit card is
-        # repeated under each of its members.
+        # repeated under each of its members, and a card with secondary origins
+        # under each of those.
         "cards": len(rendered),
         "cards_in_library": total,
         "tiles": tiles,

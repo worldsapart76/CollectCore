@@ -6,6 +6,51 @@ _Keep last 3-5 sessions. Collapse older entries into "Completed to date" block._
 > Update this section at the end of each working session with a brief
 > summary of what was completed and what is next.
 
+### 2026-11-20 (US CDT) — Secondary source origins ("Also in")
+
+Tour sets officially filed under a Non-Album origin (Dominate) have backs that
+read an album (Hollow), so people holding the card looked under Hollow and
+didn't find it. The user wanted the card to be **truly in both**: no
+duplicate, no third combined origin, no note or badge standing in for real
+membership. Market was explicitly out of scope (unused, disliked flow).
+
+Built on branch **`feature/secondary-origins`**. Backup: tag
+**`backup/pre-secondary-origins`** (= `46920ad`) plus a dev DB copy at
+`data/collectcore_pre_secondary_origins_20261120.db`.
+Plan: `docs/photocard_secondary_source_origins_plan.md`.
+
+- **Model:** primary stays `tbl_photocard_details.source_origin_id`; secondaries
+  in new side table `xref_photocard_secondary_origins`. Keeping the scalar kept
+  ~150 single-origin reads untouched. A side table, not a column, so the catalog
+  delta and guest seed never see it.
+- **Invariants in `routers/photocards.py` helpers:** no self-reference, same
+  group (category free), a primary moved onto a secondary drops it. Lookup
+  **merge** got a `_POST_MERGE` cleanup, and the xref is a registered ref, so
+  an origin used only as a secondary never reads as unused.
+- **Shared filter** (`photocardFiltering.js`): origin, category, search,
+  version scoping and the origin list all count secondaries. This covers the
+  library, the Binder tray and `/pcs/` at once. Sort unchanged (user decision).
+- **UI:** the detail modal has one "Source Origins" chip row: ★ = primary (no
+  ×), ☆ on the others makes them primary, + Add opens a searchable picker with
+  "Create new origin…". **Category follows the primary** (read-only). This
+  replaced a first cut, a primary dropdown plus a separate "Also in" row, which
+  the user found clunky. Bulk edit gets "Also in" Add/Remove (single group,
+  mixed categories OK) and is otherwise unchanged; `originLabel` →
+  "Dominate · Hollow" in grid captions and binder; read-only row in `/pcs/` modal.
+- **Card book** repeats the card under each origin (user decision), with the band
+  label taken from the origin map rather than `rows[0]`.
+- Trade captions/CSV stay primary (user decision: the image does the work).
+- Verified: `tools/test_secondary_origins.py` (30 checks); existing
+  trade/market tests still pass; smoke run on a dev DB copy tagged all 289
+  Dominate cards with Hollow in one bulk call; book Hollow bands = own + Dominate.
+
+**Next:** user browser-checks on `npm run dev` (dev backend adds the table on
+restart). Then merge to `main` and push. In prod: filter Dominate → select all →
+Bulk edit → Also in → Add Hollow (ids differ from dev, so tag in prod, never
+copy). Revert: `main` is untouched at the backup tag, so once the work is
+committed on the branch, `git switch main` is the whole revert. The extra table
+is harmless to old code.
+
 ### 2026-09-29 (US CDT) — Offline card book (PDF), all four phases
 
 Two weeks in Korea + Japan from 10-02, shopping in person with unreliable signal

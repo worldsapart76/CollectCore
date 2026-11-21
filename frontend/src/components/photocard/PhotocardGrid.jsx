@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getImageUrl } from "../../utils/imageUrl";
 import { getCopyBadges } from "./cardBadges";
+import { originLabel } from "./photocardFiltering";
 
 /**
  * PhotocardGrid — displays cards in a compact grid.
@@ -236,8 +237,8 @@ function CardCell({
           <span style={styles.captionText}>
             {card.members?.join(", ") || "—"}
           </span>
-          {card.source_origin && (
-            <span style={styles.captionSub}>{card.source_origin}</span>
+          {originLabel(card) && (
+            <span style={styles.captionSub}>{originLabel(card)}</span>
           )}
           {card.version && (
             <span style={styles.captionSub}>{card.version}</span>

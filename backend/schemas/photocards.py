@@ -27,6 +27,9 @@ class PhotocardUpdate(BaseModel):
     version: Optional[str] = None
     member_ids: List[int]
     is_special: bool = False
+    # None = leave the card's secondary origins untouched (older callers don't
+    # send it); a list = replace the whole set.
+    secondary_origin_ids: Optional[List[int]] = None
 
 
 class BulkUpdateFields(BaseModel):
@@ -38,6 +41,10 @@ class BulkUpdateFields(BaseModel):
     member_ids: Optional[List[int]] = None
     top_level_category_id: Optional[int] = None
     is_special: Optional[bool] = None
+    # Add/remove rather than replace: a selection can hold different
+    # secondaries per card, and replace would wipe them.
+    secondary_origins_add: Optional[List[int]] = None
+    secondary_origins_remove: Optional[List[int]] = None
 
 
 class BulkUpdatePayload(BaseModel):

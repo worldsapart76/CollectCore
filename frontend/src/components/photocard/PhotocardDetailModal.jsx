@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   fetchPhotocardMembers,
-  fetchPhotocardSourceOrigins,
+  fetchPhotocardGroupOrigins,
   fetchOwnershipStatuses,
   createPhotocardSourceOrigin,
   updatePhotocard,
@@ -72,22 +72,23 @@ export default function PhotocardDetailModal({
 
   const [ownershipStatuses, setOwnershipStatuses] = useState([]);
   const [members, setMembers] = useState([]);
-  const [sourceOrigins, setSourceOrigins] = useState([]);
+  // Every active origin in the card's group across all categories, for the
+  // Source Origins picker (secondary origins cross categories on purpose).
+  const [groupOrigins, setGroupOrigins] = useState([]);
 
   // Form state — reset to currentCard values when card changes
   const [topLevelCategoryId, setTopLevelCategoryId] = useState(
     String(currentCard.top_level_category_id)
   );
-  const [sourceOriginId, setSourceOriginId] = useState(
-    currentCard.source_origin_id ? String(currentCard.source_origin_id) : ""
-  );
+  // Primary source origin (the ★ chip). Its category IS the card's category.
+  const [primary, setPrimary] = useState(() => primaryFromCard(currentCard));
   const [version, setVersion] = useState(currentCard.version || "");
   const [isSpecial, setIsSpecial] = useState(currentCard.is_special ?? true);
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
-
-  const [showAddSourceOrigin, setShowAddSourceOrigin] = useState(false);
-  const [newSourceOriginName, setNewSourceOriginName] = useState("");
-  const [sourceOriginError, setSourceOriginError] = useState("");
+  // Secondary origins ("Also in"). Only sent on save once touched, so a stale
+  // card object can never overwrite them by accident.
+  const [secondaryOrigins, setSecondaryOrigins] = useState(currentCard.secondary_origins || []);
+  const [secondaryTouched, setSecondaryTouched] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -120,10 +121,12 @@ export default function PhotocardDetailModal({
   // Reset form and reload per-card data whenever the current card changes
   useEffect(() => {
     setTopLevelCategoryId(String(currentCard.top_level_category_id));
-    setSourceOriginId(currentCard.source_origin_id ? String(currentCard.source_origin_id) : "");
+    setPrimary(primaryFromCard(currentCard));
     setVersion(currentCard.version || "");
     setIsSpecial(currentCard.is_special ?? true);
     setSelectedMemberIds([]);
+    setSecondaryOrigins(currentCard.secondary_origins || []);
+    setSecondaryTouched(false);
     setFrontImagePath(currentCard.front_image_path || null);
     setBackImagePath(currentCard.back_image_path || null);
     setIsDirty(false);
@@ -131,18 +134,15 @@ export default function PhotocardDetailModal({
     setError("");
     setImageError("");
     setConfirmDelete(false);
-    setShowAddSourceOrigin(false);
-    setNewSourceOriginName("");
-    setSourceOriginError("");
 
     async function loadCardData() {
       try {
-        const [memberData, soData] = await Promise.all([
+        const [memberData, groupOriginData] = await Promise.all([
           fetchPhotocardMembers(currentCard.group_id),
-          fetchPhotocardSourceOrigins(currentCard.group_id, currentCard.top_level_category_id),
+          fetchPhotocardGroupOrigins(currentCard.group_id),
         ]);
         setMembers(memberData);
-        setSourceOrigins(soData);
+        setGroupOrigins(groupOriginData);
 
         const memberNameSet = new Set(currentCard.members || []);
         const matched = memberData
@@ -164,47 +164,85 @@ export default function PhotocardDetailModal({
     setIsDirty(true);
   }
 
-  // Explicit handler for category change — reloads source origins without a useEffect
-  async function handleCategoryChange(newCatId) {
+  // The primary as a full origin row (name + category) once the group's
+  // origins have loaded; until then (or for a merged-away origin, which the
+  // picker endpoint omits) the card's own fields stand in.
+  const primaryInfo = primary
+    ? groupOrigins.find((o) => o.source_origin_id === primary.source_origin_id) || primary
+    : null;
+
+  // Category follows the primary origin: origins live in one category, so the
+  // card's category is whatever its primary's is. Only a card with no origin
+  // at all keeps a free category choice.
+  const effectiveCategoryId = primaryInfo?.top_level_category_id
+    ? String(primaryInfo.top_level_category_id)
+    : topLevelCategoryId;
+  const effectiveCategoryName =
+    categories.find((c) => String(c.top_level_category_id) === effectiveCategoryId)?.category_name ||
+    primaryInfo?.category_name ||
+    "—";
+
+  // Origins the picker may still offer: not already on this card.
+  const pickableOrigins = groupOrigins.filter(
+    (o) =>
+      o.source_origin_id !== primary?.source_origin_id &&
+      !secondaryOrigins.some((s) => s.source_origin_id === o.source_origin_id)
+  );
+
+  // Only reachable when the card has no origin yet.
+  function handleCategoryChange(newCatId) {
     setTopLevelCategoryId(newCatId);
     setIsDirty(true);
-    try {
-      const soData = await fetchPhotocardSourceOrigins(currentCard.group_id, newCatId);
-      setSourceOrigins(soData);
-      setSourceOriginId((prev) => {
-        const ids = soData.map((o) => String(o.source_origin_id));
-        return ids.includes(prev) ? prev : (soData.length ? String(soData[0].source_origin_id) : "");
-      });
-    } catch {
-      // silently ignore
-    }
   }
 
-  async function handleCreateSourceOrigin() {
-    setSourceOriginError("");
-    const trimmed = newSourceOriginName.trim();
-    if (!trimmed) {
-      setSourceOriginError("Enter a name.");
-      return;
+  // A picked origin becomes the primary if the card has none, otherwise it is
+  // added alongside ("also in").
+  function addOrigin(origin) {
+    if (!primary) {
+      setPrimary(origin);
+    } else {
+      setSecondaryOrigins((prev) => sortByName([...prev, origin]));
+      setSecondaryTouched(true);
     }
-    try {
-      const created = await createPhotocardSourceOrigin({
-        groupId: currentCard.group_id,
-        categoryId: Number(topLevelCategoryId),
-        sourceOriginName: trimmed,
-      });
-      const refreshed = await fetchPhotocardSourceOrigins(
-        currentCard.group_id,
-        topLevelCategoryId
-      );
-      setSourceOrigins(refreshed);
-      setSourceOriginId(String(created.source_origin_id));
-      setNewSourceOriginName("");
-      setShowAddSourceOrigin(false);
-      setIsDirty(true);
-    } catch (err) {
-      setSourceOriginError(err.message || "Failed to create source origin");
-    }
+    setIsDirty(true);
+  }
+
+  // Star a secondary: it becomes the primary (and sets the category), the old
+  // primary drops back to a normal chip. The PUT sends both, and the backend
+  // drops the new primary from the secondary list on its side too.
+  function makePrimary(origin) {
+    setSecondaryOrigins((prev) =>
+      sortByName([
+        ...prev.filter((o) => o.source_origin_id !== origin.source_origin_id),
+        ...(primaryInfo ? [primaryInfo] : []),
+      ])
+    );
+    setPrimary(origin);
+    setSecondaryTouched(true);
+    setIsDirty(true);
+  }
+
+  function removeSecondaryOrigin(originId) {
+    setSecondaryOrigins((prev) => prev.filter((o) => o.source_origin_id !== originId));
+    setSecondaryTouched(true);
+    setIsDirty(true);
+  }
+
+  // Create a brand-new origin from the picker, then add it like any pick.
+  async function createOrigin(name, categoryId) {
+    const created = await createPhotocardSourceOrigin({
+      groupId: currentCard.group_id,
+      categoryId,
+      sourceOriginName: name,
+    });
+    const refreshed = await fetchPhotocardGroupOrigins(currentCard.group_id);
+    setGroupOrigins(refreshed);
+    const row = refreshed.find((o) => o.source_origin_id === created.source_origin_id) || {
+      source_origin_id: created.source_origin_id,
+      source_origin_name: created.source_origin_name,
+      top_level_category_id: categoryId,
+    };
+    addOrigin(row);
   }
 
   async function handleReplaceImage(side, file) {
@@ -244,12 +282,16 @@ export default function PhotocardDetailModal({
     setSaving(true);
     try {
       await updatePhotocard(currentCard.item_id, {
-        topLevelCategoryId: Number(topLevelCategoryId),
-        sourceOriginId: sourceOriginId ? Number(sourceOriginId) : null,
+        topLevelCategoryId: Number(effectiveCategoryId),
+        sourceOriginId: primary ? primary.source_origin_id : null,
         version: version.trim() || null,
         memberIds: selectedMemberIds.map(Number),
         isSpecial,
+        secondaryOriginIds: secondaryTouched
+          ? secondaryOrigins.map((o) => o.source_origin_id)
+          : undefined,
       });
+      setSecondaryTouched(false);
       setIsDirty(false);
       onSaved(); // notify parent to reload cards
       return true;
@@ -430,61 +472,74 @@ export default function PhotocardDetailModal({
               </div>
             </FormRow>
 
-            {/* Category */}
+            {/* Category — follows the primary source origin */}
             <FormRow label="Category">
-              <select
-                value={topLevelCategoryId}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                style={styles.select}
-              >
-                {categories.map((c) => (
-                  <option key={c.top_level_category_id} value={c.top_level_category_id}>
-                    {c.category_name}
-                  </option>
-                ))}
-              </select>
-            </FormRow>
-
-            {/* Source Origin */}
-            <FormRow label="Source Origin">
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {primaryInfo ? (
+                <div style={styles.readonlyValue} title="Set by the primary source origin (★)">
+                  {effectiveCategoryName}
+                </div>
+              ) : (
                 <select
-                  value={sourceOriginId}
-                  onChange={(e) => { setSourceOriginId(e.target.value); setIsDirty(true); }}
-                  style={{ ...styles.select, flex: 1 }}
+                  value={topLevelCategoryId}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  style={styles.select}
                 >
-                  <option value="">— None —</option>
-                  {sourceOrigins.map((o) => (
-                    <option key={o.source_origin_id} value={o.source_origin_id}>
-                      {o.source_origin_name}
+                  {categories.map((c) => (
+                    <option key={c.top_level_category_id} value={c.top_level_category_id}>
+                      {c.category_name}
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  style={styles.addBtn}
-                  onClick={() => setShowAddSourceOrigin((p) => !p)}
-                >
-                  + Add
-                </button>
-              </div>
-              {showAddSourceOrigin && (
-                <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
-                  <input
-                    value={newSourceOriginName}
-                    onChange={(e) => setNewSourceOriginName(e.target.value)}
-                    placeholder="New source origin"
-                    style={{ ...styles.input, flex: 1 }}
-                  />
-                  <button type="button" style={styles.addBtn} onClick={handleCreateSourceOrigin}>
-                    Save
-                  </button>
-                  <button type="button" style={styles.cancelBtn} onClick={() => setShowAddSourceOrigin(false)}>
-                    Cancel
-                  </button>
-                </div>
               )}
-              {sourceOriginError && <div style={styles.fieldError}>{sourceOriginError}</div>}
+            </FormRow>
+
+            {/* Source Origins — ★ is the primary (sets the category, sort and
+                captions; can't be removed, only replaced by starring another).
+                The rest are "also in": the card shows up under each of them in
+                the library filter, search and the card book without being
+                duplicated. See docs/photocard_secondary_source_origins_plan.md */}
+            <FormRow label="Source Origins">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                {primaryInfo && (
+                  <span
+                    style={{ ...styles.chip, ...styles.chipPrimary }}
+                    title="Primary source origin — sets the category"
+                  >
+                    <span style={styles.starOn} aria-hidden="true">★</span>
+                    {primaryInfo.source_origin_name || `#${primaryInfo.source_origin_id}`}
+                  </span>
+                )}
+                {secondaryOrigins.map((o) => (
+                  <span key={o.source_origin_id} style={styles.chip} title={o.category_name || ""}>
+                    <button
+                      type="button"
+                      style={styles.starBtn}
+                      onClick={() => makePrimary(o)}
+                      title="Make primary"
+                      aria-label={`Make ${o.source_origin_name} the primary source origin`}
+                    >
+                      ☆
+                    </button>
+                    {o.source_origin_name}
+                    <button
+                      type="button"
+                      style={styles.chipX}
+                      onClick={() => removeSecondaryOrigin(o.source_origin_id)}
+                      aria-label={`Remove ${o.source_origin_name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <OriginPicker
+                  options={pickableOrigins}
+                  categories={categories}
+                  defaultCategoryId={effectiveCategoryId}
+                  awayFromCategoryId={primaryInfo ? effectiveCategoryId : null}
+                  onPick={addOrigin}
+                  onCreate={createOrigin}
+                />
+              </div>
             </FormRow>
 
             {/* Version */}
@@ -857,7 +912,300 @@ function FormRow({ label, children }) {
   );
 }
 
+function primaryFromCard(card) {
+  return card.source_origin_id
+    ? {
+        source_origin_id: card.source_origin_id,
+        source_origin_name: card.source_origin,
+        top_level_category_id: null, // resolved from groupOrigins once loaded
+      }
+    : null;
+}
+
+function sortByName(origins) {
+  return [...origins].sort((a, b) =>
+    (a.source_origin_name || "").localeCompare(b.source_origin_name || "")
+  );
+}
+
+/** Bucket category-ordered origin rows for display. When `awayFromCategoryId`
+ *  is set (the primary's category), the OTHER categories come first: the usual
+ *  second origin is the opposite kind (album <-> tour), and listing the
+ *  primary's own category first buried it below the fold. */
+function groupOriginsByCategory(origins, awayFromCategoryId) {
+  const groups = [];
+  for (const o of origins) {
+    const last = groups[groups.length - 1];
+    if (last && last.id === o.top_level_category_id) last.items.push(o);
+    else groups.push({ id: o.top_level_category_id, name: o.category_name, items: [o] });
+  }
+  if (awayFromCategoryId == null) return groups;
+  const away = String(awayFromCategoryId);
+  return [
+    ...groups.filter((g) => String(g.id) !== away),
+    ...groups.filter((g) => String(g.id) === away),
+  ];
+}
+
+/** "+ Add" button opening a searchable list of the group's origins, grouped
+ *  by category (rows arrive category-ordered from the endpoint), with
+ *  "Create new origin…" at the bottom. */
+function OriginPicker({ options, categories, defaultCategoryId, awayFromCategoryId, onPick, onCreate }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCategoryId, setNewCategoryId] = useState(defaultCategoryId);
+  const [createError, setCreateError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const wrapRef = useRef(null);
+
+  function close() {
+    setOpen(false);
+    setQuery("");
+    setCreating(false);
+    setNewName("");
+    setCreateError("");
+  }
+
+  // Close on a click anywhere outside the picker.
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setQuery("");
+        setCreating(false);
+        setNewName("");
+        setCreateError("");
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => o.source_origin_name.toLowerCase().includes(q))
+    : options;
+  const groups = groupOriginsByCategory(filtered, awayFromCategoryId);
+
+  function pick(o) {
+    onPick(o);
+    close();
+  }
+
+  function startCreate() {
+    setNewName(query.trim());
+    setNewCategoryId(defaultCategoryId);
+    setCreateError("");
+    setCreating(true);
+  }
+
+  async function submitCreate() {
+    const name = newName.trim();
+    if (!name) {
+      setCreateError("Enter a name.");
+      return;
+    }
+    setBusy(true);
+    setCreateError("");
+    try {
+      await onCreate(name, Number(newCategoryId));
+      close();
+    } catch (err) {
+      setCreateError(err.message || "Failed to create source origin");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span ref={wrapRef} style={styles.pickerWrap}>
+      <button type="button" style={styles.addBtn} onClick={() => (open ? close() : setOpen(true))}>
+        + Add
+      </button>
+      {open && (
+        <div style={styles.pickerPanel}>
+          {!creating ? (
+            <>
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.stopPropagation(); close(); }
+                  if (e.key === "Enter" && filtered.length === 1) { e.preventDefault(); pick(filtered[0]); }
+                }}
+                placeholder="Search origins…"
+                style={{ ...styles.input, marginBottom: 4 }}
+              />
+              <div style={styles.pickerList}>
+                {groups.length === 0 && (
+                  <div style={styles.pickerEmpty}>No matching origins</div>
+                )}
+                {groups.map((g) => (
+                  <div key={g.id ?? "none"}>
+                    <div style={styles.pickerGroup}>{g.name}</div>
+                    {g.items.map((o) => (
+                      <button
+                        key={o.source_origin_id}
+                        type="button"
+                        style={styles.pickerItem}
+                        onClick={() => pick(o)}
+                      >
+                        {o.source_origin_name}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <button type="button" style={styles.pickerCreate} onClick={startCreate}>
+                + Create new origin…
+              </button>
+            </>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.stopPropagation(); setCreating(false); }
+                  if (e.key === "Enter") { e.preventDefault(); submitCreate(); }
+                }}
+                placeholder="New source origin"
+                style={styles.input}
+              />
+              <select
+                value={newCategoryId}
+                onChange={(e) => setNewCategoryId(e.target.value)}
+                style={styles.select}
+              >
+                {categories.map((c) => (
+                  <option key={c.top_level_category_id} value={c.top_level_category_id}>
+                    {c.category_name}
+                  </option>
+                ))}
+              </select>
+              {createError && <div style={styles.fieldError}>{createError}</div>}
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <button type="button" style={styles.cancelBtn} onClick={() => setCreating(false)}>
+                  Back
+                </button>
+                <button type="button" style={styles.addBtn} onClick={submitCreate} disabled={busy}>
+                  {busy ? "Saving…" : "Create"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 const styles = {
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "2px 4px 2px 8px",
+    fontSize: "var(--text-sm)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-surface)",
+  },
+  chipX: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "var(--text-base)",
+    lineHeight: 1,
+    padding: "0 2px",
+    color: "var(--text-muted)",
+  },
+  chipPrimary: {
+    padding: "2px 8px",
+    border: "1px solid var(--btn-primary-bg)",
+    background: "var(--green-light)",
+    fontWeight: 600,
+  },
+  starOn: {
+    color: "var(--btn-primary-bg)",
+    marginRight: 2,
+  },
+  starBtn: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "var(--text-base)",
+    lineHeight: 1,
+    padding: "0 2px 0 0",
+    color: "var(--text-muted)",
+  },
+  readonlyValue: {
+    padding: "5px 0",
+    fontSize: "var(--text-base)",
+  },
+  pickerWrap: {
+    position: "relative",
+    display: "inline-block",
+  },
+  pickerPanel: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    marginTop: 4,
+    width: 260,
+    maxWidth: "80vw",
+    padding: 6,
+    background: "var(--bg-base)",
+    border: "1px solid var(--border-input)",
+    borderRadius: "var(--radius-sm)",
+    boxShadow: "var(--shadow-dropdown)",
+    zIndex: 30,
+  },
+  pickerList: {
+    maxHeight: 320,
+    overflowY: "auto",
+  },
+  pickerGroup: {
+    fontSize: "var(--text-xs)",
+    color: "var(--text-muted)",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    padding: "6px 6px 2px",
+  },
+  pickerItem: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "4px 8px",
+    fontSize: "var(--text-sm)",
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    color: "var(--text-primary)",
+  },
+  pickerEmpty: {
+    padding: "6px 8px",
+    fontSize: "var(--text-sm)",
+    color: "var(--text-muted)",
+  },
+  pickerCreate: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    marginTop: 4,
+    padding: "5px 8px",
+    fontSize: "var(--text-sm)",
+    border: "none",
+    borderTop: "1px solid var(--border)",
+    background: "transparent",
+    cursor: "pointer",
+    color: "var(--btn-primary-bg)",
+  },
   overlay: {
     position: "fixed",
     inset: 0,

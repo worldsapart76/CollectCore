@@ -1,5 +1,6 @@
 import { getImageUrl } from "../../utils/imageUrl";
 import { getCopyBadges } from "../photocard/cardBadges";
+import { originLabel } from "../photocard/photocardFiltering";
 
 /**
  * Available-cards tray.
@@ -56,7 +57,7 @@ export default function CardTray({
                 onDragStart={() => onDragStart(card.item_id)}
                 onDragEnd={onDragEnd}
                 onClick={() => onArm(armed ? null : card.item_id)}
-                title={[card.members?.join(", ") || `#${card.item_id}`, card.source_origin, card.version]
+                title={[card.members?.join(", ") || `#${card.item_id}`, originLabel(card), card.version]
                   .filter(Boolean)
                   .join(" · ")}
                 style={{

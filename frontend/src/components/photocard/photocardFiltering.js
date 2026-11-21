@@ -28,6 +28,39 @@ export function memberSortKey(card) {
   return idx === -1 ? MEMBER_ORDER.length - 0.5 : idx;
 }
 
+// ─── Source origins: primary + secondaries ───────────────────────────────────
+// A card is IN its primary origin (source_origin_id) and in every secondary
+// origin (`secondary_origins`, attached by the admin and /pcs/ card endpoints;
+// absent on the frozen guest tier, which is why every reader defaults to []).
+// Filtering, search and display treat them all the same; sort stays primary.
+// See docs/photocard_secondary_source_origins_plan.md.
+
+const secondaryOf = (card) => card.secondary_origins || [];
+
+/** Every origin id the card is in, as strings (applySection's token type). */
+export function cardOriginIds(card) {
+  const ids = card.source_origin_id ? [String(card.source_origin_id)] : [];
+  for (const o of secondaryOf(card)) ids.push(String(o.source_origin_id));
+  return ids;
+}
+
+/** The card's own category plus each secondary origin's category: a Non-Album
+ *  tour card that is also in Hollow must survive Category = Album. */
+export function cardCategoryIds(card) {
+  const ids = new Set([String(card.top_level_category_id)]);
+  for (const o of secondaryOf(card)) {
+    if (o.top_level_category_id) ids.add(String(o.top_level_category_id));
+  }
+  return [...ids];
+}
+
+/** "Dominate · Hollow" — primary first, then secondaries (already name-sorted). */
+export function originLabel(card) {
+  return [card.source_origin, ...secondaryOf(card).map((o) => o.source_origin_name)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export const DEFAULT_FILTERS = {
   notesSearch: "",
   group: emptySection(),
@@ -100,7 +133,7 @@ export function deriveFilterVersions(cards, sourceOriginSection) {
     if (!card.version || seen.has(card.version)) continue;
     if (
       originFilterActive &&
-      !applySection(sourceOriginSection, [String(card.source_origin_id)])
+      !applySection(sourceOriginSection, cardOriginIds(card))
     ) {
       continue;
     }
@@ -109,18 +142,18 @@ export function deriveFilterVersions(cards, sourceOriginSection) {
   return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
-/** Source origins for the filter sidebar — derived from the cards themselves. */
+/** Source origins for the filter sidebar — derived from the cards themselves,
+ *  secondaries included (an origin can be reached only through them). */
 export function deriveFilterSourceOrigins(cards) {
   const soMap = new Map();
-  for (const card of cards) {
-    if (card.source_origin_id && card.source_origin) {
-      if (!soMap.has(card.source_origin_id)) {
-        soMap.set(card.source_origin_id, {
-          source_origin_id: card.source_origin_id,
-          source_origin_name: card.source_origin,
-        });
-      }
+  const add = (id, name) => {
+    if (id && name && !soMap.has(id)) {
+      soMap.set(id, { source_origin_id: id, source_origin_name: name });
     }
+  };
+  for (const card of cards) {
+    add(card.source_origin_id, card.source_origin);
+    for (const o of secondaryOf(card)) add(o.source_origin_id, o.source_origin_name);
   }
   return [...soMap.values()].sort((a, b) =>
     a.source_origin_name.localeCompare(b.source_origin_name)
@@ -145,13 +178,13 @@ export function applyPhotocardFilters(cards, filters, triageStatusIds) {
 
   if (sectionActive(filters.category)) {
     result = result.filter((c) =>
-      applySection(filters.category, [String(c.top_level_category_id)])
+      applySection(filters.category, cardCategoryIds(c))
     );
   }
 
   if (sectionActive(filters.sourceOrigin)) {
     result = result.filter((c) =>
-      applySection(filters.sourceOrigin, [String(c.source_origin_id)])
+      applySection(filters.sourceOrigin, cardOriginIds(c))
     );
   }
 
@@ -211,6 +244,7 @@ export function applyPhotocardFilters(cards, filters, triageStatusIds) {
         c.copies?.some((cp) => cp.notes?.toLowerCase().includes(q)) ||
         c.members?.some((m) => m.toLowerCase().includes(q)) ||
         c.source_origin?.toLowerCase().includes(q) ||
+        secondaryOf(c).some((o) => o.source_origin_name?.toLowerCase().includes(q)) ||
         c.version?.toLowerCase().includes(q) ||
         c.category?.toLowerCase().includes(q) ||
         c.group_name?.toLowerCase().includes(q)

@@ -126,7 +126,34 @@ def get_photocard_members(group_id: int, db=Depends(get_db)):
 
 
 @router.get("/photocards/source-origins")
-def get_source_origins(group_id: int, category_id: int, db=Depends(get_db)):
+def get_source_origins(group_id: int, category_id: Optional[int] = None, db=Depends(get_db)):
+    if category_id is None:
+        # Every origin in the group, across categories -- feeds the "Also in"
+        # (secondary origin) picker, whose whole point is crossing categories
+        # (a Non-Album tour set whose backs read an album).
+        rows = db.execute(
+            text("""
+                SELECT so.source_origin_id, so.source_origin_name,
+                       so.top_level_category_id, c.category_name
+                FROM lkup_photocard_source_origins so
+                JOIN lkup_top_level_categories c
+                    ON c.top_level_category_id = so.top_level_category_id
+                WHERE so.group_id = :group_id
+                  AND so.is_active = 1   -- merged-away origins aren't offered
+                ORDER BY c.sort_order, c.category_name, so.sort_order, so.source_origin_name
+            """),
+            {"group_id": group_id},
+        ).fetchall()
+        return [
+            {
+                "source_origin_id": r[0],
+                "source_origin_name": r[1],
+                "top_level_category_id": r[2],
+                "category_name": r[3],
+            }
+            for r in rows
+        ]
+
     result = db.execute(
         text("""
             SELECT source_origin_id, source_origin_name

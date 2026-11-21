@@ -250,6 +250,27 @@ CREATE TABLE IF NOT EXISTS xref_photocard_members (
     UNIQUE (item_id, member_id)
 );
 
+-- Secondary source origins: a card that is officially in one origin (the
+-- primary, tbl_photocard_details.source_origin_id) but is ALSO found under
+-- another -- e.g. a Non-Album tour set whose backs read an album. The card
+-- shows up under every origin it is in for filtering/search/display; anything
+-- that needs ONE answer (sort, trade captions, market, ship dates) keeps using
+-- the primary. A side table on purpose: catalog.py and seed_builder.py reflect
+-- tbl_photocard_details, and the frozen WASM /guest/ tier must not get this.
+-- API invariants: never holds the card's own primary; same group as the card;
+-- delete paths clean it explicitly (FK cascades never fire).
+-- See docs/photocard_secondary_source_origins_plan.md.
+CREATE TABLE IF NOT EXISTS xref_photocard_secondary_origins (
+    item_id          INTEGER NOT NULL,
+    source_origin_id INTEGER NOT NULL,
+
+    FOREIGN KEY (item_id) REFERENCES tbl_items(item_id),
+    FOREIGN KEY (source_origin_id) REFERENCES lkup_photocard_source_origins(source_origin_id),
+    UNIQUE (item_id, source_origin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_xref_pc_secondary_origin
+    ON xref_photocard_secondary_origins(source_origin_id);
+
 -- Per-copy ownership for photocards (1:many with tbl_items).
 -- Added by migrate_photocard_copies.py; codified here so fresh installs match.
 CREATE TABLE IF NOT EXISTS tbl_photocard_copies (

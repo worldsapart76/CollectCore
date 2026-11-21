@@ -122,6 +122,10 @@ _LOOKUP_REGISTRY_LIST: List[Dict[str, Any]] = [
         ],
         "refs": [
             {"table": "tbl_photocard_details", "fk": "source_origin_id", "dedupe_cols": None},
+            # Listed so an origin used ONLY as a secondary never reads as unused
+            # (cleanup scan / hard-delete). Merge then needs a post-step -- see
+            # _POST_MERGE below.
+            {"table": "xref_photocard_secondary_origins", "fk": "source_origin_id", "dedupe_cols": ["item_id"]},
         ],
         "cleanable": True, "mergeable": True,
     },
@@ -780,6 +784,22 @@ class LookupMergeRequest(BaseModel):
     target_id: int
 
 
+# Cleanup run after a merge's FK rewrite, for lookups whose references carry an
+# invariant the generic rewrite can't see. Photocard source origins: merging A
+# into B can leave a card whose primary is B also holding B as a secondary
+# (it had A as secondary, or A as primary and B as secondary). A card's
+# secondary list must never hold its own primary, so those rows go.
+_POST_MERGE: Dict[str, str] = {
+    "lkup_photocard_source_origins": """
+        DELETE FROM xref_photocard_secondary_origins
+        WHERE source_origin_id = (
+            SELECT d.source_origin_id FROM tbl_photocard_details d
+            WHERE d.item_id = xref_photocard_secondary_origins.item_id
+        )
+    """,
+}
+
+
 @router.post("/admin/lookups/{table}/merge")
 def merge_lookup_rows(table: str, req: LookupMergeRequest, db=Depends(get_db)):
     """Rewrite every FK reference from source_id to target_id (deduping rows
@@ -844,6 +864,11 @@ def merge_lookup_rows(table: str, req: LookupMergeRequest, db=Depends(get_db)):
                 f"UPDATE {ref_table} SET {fk} = :tgt WHERE {fk} = :src"
             ), {"src": req.source_id, "tgt": req.target_id})
             affected += (res.rowcount or 0)
+
+        post_sql = _POST_MERGE.get(table)
+        if post_sql:
+            res = db.execute(text(post_sql))
+            deduped += (res.rowcount or 0)
 
         db.execute(text(
             f"UPDATE {table} SET is_active = 0 WHERE {pk} = :src"
